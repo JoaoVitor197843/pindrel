@@ -1,0 +1,48 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file: ./backend/.env
+    environment:
+      - PORT=${PORT:-8080}
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017}
+      - MONGO_DB_NAME=${MONGO_DB_NAME:-plany}
+      - JWT_SECRET=${JWT_SECRET:-change_me_to_a_long_random_string}
+      - JWT_ACCESS_EXPIRY=${JWT_ACCESS_EXPIRY:-15m}
+      - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY:-720h}
+      - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    env_file: ./frontend/.env
+    environment:
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8080}
+    depends_on:
+      - backend
+  
+  mongo: # Utilize somente caso não possua um banco mongo disponível
+    image: mongo:8  # Para alguns dispositivos trocar para o mongo:4.4.18
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    env_file:
+      - ./.env
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-change_me}
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  mongo-data:

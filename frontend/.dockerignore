@@ -1,0 +1,9 @@
+.git
+node_modules
+.env
+.env.example
+.yarn/cache
+.yarn/install-state.gz
+dist
+.next
+*.md
