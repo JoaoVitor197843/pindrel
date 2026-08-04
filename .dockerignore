@@ -1,0 +1,22 @@
+# node_modules e cache (frontend)
+frontend/node_modules
+frontend/.yarn/cache
+frontend/.yarn/install-state.gz
+frontend/dist
+frontend/.env
+frontend/.env.example
+
+# Go (backend)
+backend/tmp
+backend/bin
+backend/.env
+backend/.env.example
+
+# Geral
+.git
+.gitignore
+*.md
+.vscode
+.idea
+mobile/
+LICENSE
