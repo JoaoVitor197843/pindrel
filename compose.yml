@@ -1,6 +1,10 @@
 services:
-  backend:
-    build: ./backend
+  plany:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api
     ports:
       - "${PORT:-8080}:8080"
     env_file: ./backend/.env
@@ -12,28 +16,16 @@ services:
       - JWT_ACCESS_EXPIRY=${JWT_ACCESS_EXPIRY:-15m}
       - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY:-720h}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
     depends_on:
       mongo:
         condition: service_healthy
 
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:80"
-    env_file: ./frontend/.env
-    environment:
-      - VITE_API_URL=${VITE_API_URL:-http://localhost:8080}
-    depends_on:
-      - backend
-  
-  mongo: # Utilize somente caso não possua um banco mongo disponível
-    image: mongo:8  # Para alguns dispositivos trocar para o mongo:4.4.18
+  mongo: # utilize somente caso não tenha um banco mongo exterior que queira
+    image: mongo:8 # caso utilize dispositivos como o raspberry pi 4 ou inferiores coloque mongo:4.4.18
     restart: unless-stopped
     volumes:
       - mongo-data:/data/db
-    env_file:
-      - ./.env
+    env_file: ./.env
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-admin}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-change_me}
