@@ -3,10 +3,12 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"plany/internal/auth"
 	"plany/internal/database"
 	"testing"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -44,12 +46,15 @@ func TestService_Register_DuplicateEmail(t *testing.T) {
 	repo := auth.NewRepository(db)
 	service := auth.NewService(repo, true)
 
-	_, err = service.Register(context.Background(), "duplicado@teste.com", "user1", "senha_valida_123")
+	email := fmt.Sprintf("dup-%d@teste.com", time.Now().UnixNano())
+
+	user, err := service.Register(context.Background(), email, "user1", "senha_valida_123")
 	if err != nil {
 		t.Fatalf("first register should succeed, got: %v", err)
 	}
+	defer repo.Delete(context.Background(), user.ID)
 
-	_, err = service.Register(context.Background(), "duplicado@teste.com", "user2", "senha_valida_123")
+	_, err = service.Register(context.Background(), email, "user2", "senha_valida_123")
 	if !errors.Is(err, auth.ErrEmailAlreadyExists) {
 		t.Fatalf("expected ErrEmailAlreadyExists, got: %v", err)
 	}

@@ -38,7 +38,7 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 		return nil, err
 	}
 	user := User{Username: username, Email: email, PasswordHash: hashedPassword, CreatedAt: time.Now()}
-	err = s.repo.Create(ctx, user)
+	err = s.repo.Create(ctx, &user)
 	if err != nil {
 		return nil, err
 	}

@@ -41,6 +41,7 @@ func TestHandler_Register_Success(t *testing.T) {
 
 	id, _ := bson.ObjectIDFromHex(response.User.ID)
 	defer repo.Delete(context.Background(), id)
+
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d", rec.Code)
 	}
@@ -74,7 +75,6 @@ func TestHandler_Register_EmailAlreadyExists(t *testing.T) {
 
 	id, _ := bson.ObjectIDFromHex(response.User.ID)
 	defer repo.Delete(context.Background(), id)
-
 	if rec2.Code != http.StatusConflict {
 		t.Fatalf("expected status 409, got %d", rec2.Code)
 	}
