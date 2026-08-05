@@ -15,9 +15,13 @@ func NewRepository(db *mongo.Database) *Repository {
 	return &Repository{collection: db.Collection("users")}
 }
 
-func (r *Repository) Create(ctx context.Context, user User) error {
-	_, err := r.collection.InsertOne(ctx, user)
-	return err
+func (r *Repository) Create(ctx context.Context, user *User) error {
+	result, err := r.collection.InsertOne(ctx, user)
+	if err != nil {
+		return err
+	}
+	user.ID = result.InsertedID.(bson.ObjectID)
+	return nil
 }
 
 func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, error) {
