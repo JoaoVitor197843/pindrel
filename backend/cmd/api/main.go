@@ -8,6 +8,7 @@ import (
 	"plany/internal/auth"
 	"plany/internal/database"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -19,7 +20,20 @@ func main() {
 	mongoURI := os.Getenv("MONGO_URI")
 	dbName := os.Getenv("MONGO_DB_NAME")
 	jwtSecret := os.Getenv("JWT_SECRET")
-	port := os.Getenv("PORT")
+	var missing []string
+	if mongoURI == "" {
+		missing = append(missing, "MONGO_URI")
+	}
+	if dbName == "" {
+		missing = append(missing, "MONGO_DB_NAME")
+	}
+	if jwtSecret == "" {
+		missing = append(missing, "JWT_SECRET")
+	}
+
+	if len(missing) > 0 {
+		log.Fatalf("missing required environment variables: %s", strings.Join(missing, ", "))
+	}
 	rawRegistrationEnabled := os.Getenv("REGISTRATION_ENABLED")
 	if rawRegistrationEnabled == "" {
 		rawRegistrationEnabled = "true"
@@ -70,8 +84,8 @@ func main() {
 		handler.Me(w, r, jwtSecret)
 	})
 
-	log.Printf("server running on port %s", port)
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
+	log.Printf("server running on port 8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
