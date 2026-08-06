@@ -6,25 +6,33 @@ import (
 	"log"
 	"net/http"
 	"plany/internal/api"
+	"time"
+
+	"github.com/go-playground/validator/v10"
 )
 
 type Handler struct {
-	service *Service
+	service   *Service
+	validator *validator.Validate
 }
 
 func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+	return &Handler{service: service, validator: validator.New()}
 }
 
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		Email    string `json:"email"`
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Email    string `json:"email" validate:"required,email"`
+		Username string `json:"username" validate:"required"`
+		Password string `json:"password" validate:"required,min=8"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		api.WriteError(w, 400, "invalid_input", "malformed request body")
+		return
+	}
+	if err := h.validator.Struct(input); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_input", "validation failed")
 		return
 	}
 	user, err := h.service.Register(r.Context(), input.Email, input.Username, input.Password)
@@ -48,5 +56,47 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			Email:    user.Email,
 			Username: user.Username,
 		},
+	})
+}
+
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string, accessExpireAt, refreshExpireAt time.Duration) {
+	var input struct {
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required,min=8"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		api.WriteError(w, 400, "invalid_input", "malformed request body")
+		return
+	}
+	if err := h.validator.Struct(input); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_input", "validation failed")
+		return
+	}
+	tokens, err := h.service.Login(r.Context(), input.Email, input.Password, jwtSecret, accessExpireAt, refreshExpireAt)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrInvalidCredentials):
+			api.WriteError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		default:
+			log.Printf("register error: %v", err)
+			api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    tokens.RefreshToken,
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+		Path:     "/",
+		MaxAge:   int(refreshExpireAt.Seconds()),
+	})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(LoginResponse{
+		AccessToken: tokens.AccessToken,
+		ExpiresIn:   int(accessExpireAt.Seconds()),
 	})
 }
