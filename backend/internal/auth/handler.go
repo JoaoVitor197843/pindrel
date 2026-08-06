@@ -95,8 +95,70 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string
 		MaxAge:   int(refreshExpireAt.Seconds()),
 	})
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(LoginResponse{
+	json.NewEncoder(w).Encode(LoginRefreshResponse{
 		AccessToken: tokens.AccessToken,
 		ExpiresIn:   int(accessExpireAt.Seconds()),
+	})
+}
+
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret string) {
+	tokenString, err := ExtractToken(r)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
+		return
+	}
+	if err := h.service.Logout(r.Context(), tokenString, jwtSecret); err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "refresh_token",
+		Value:    "",
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteLaxMode,
+		Path:     "/",
+		MaxAge:   -1,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret string, accessExpireAt time.Duration) {
+	tokenString, err := ExtractToken(r)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "no valid token found")
+		return
+	}
+	accessToken, err := h.service.Refresh(r.Context(), tokenString, jwtSecret, accessExpireAt)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "no valid token found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(LoginRefreshResponse{
+		AccessToken: accessToken,
+		ExpiresIn:   int(accessExpireAt.Seconds()),
+	})
+}
+
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request, jwtSecret string) {
+	tokenString, err := extractBearerToken(r)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
+		return
+	}
+	user, err := h.service.Me(r.Context(), tokenString, jwtSecret)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(UserSummary{
+		ID:       user.ID.Hex(),
+		Email:    user.Email,
+		Username: user.Username,
 	})
 }

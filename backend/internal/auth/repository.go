@@ -33,6 +33,15 @@ func (r *Repository) FindByEmail(ctx context.Context, email string) (*User, erro
 	return &user, nil
 }
 
+func (r *Repository) FindByID(ctx context.Context, id bson.ObjectID) (*User, error) {
+	var user User
+	err := r.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&user)
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (r *Repository) Delete(ctx context.Context, id bson.ObjectID) error {
 	_, err := r.collection.DeleteOne(ctx, bson.M{"_id": id})
 	return err

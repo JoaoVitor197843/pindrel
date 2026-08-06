@@ -10,7 +10,7 @@ type RegisterResponse struct {
 	User UserSummary `json:"user"`
 }
 
-type LoginResponse struct {
+type LoginRefreshResponse struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
 }
