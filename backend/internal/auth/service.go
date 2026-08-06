@@ -5,27 +5,29 @@ import (
 	"errors"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 var (
 	ErrRegistrationDisabled = errors.New("registration is disabled")
 	ErrEmailAlreadyExists   = errors.New("email already exists")
-	ErrInvalidCredentials = errors.New("invalid credentials")
+	ErrInvalidCredentials   = errors.New("invalid credentials")
 )
 
 type Service struct {
 	repo                *Repository
+	blocklist           *BlocklistRepository
 	registrationEnabled bool
 }
 
 type LoginResult struct {
 	RefreshToken string
-	AccessToken string
+	AccessToken  string
 }
 
-func NewService(repo *Repository, registrationEnabled bool) *Service {
-	return &Service{repo: repo, registrationEnabled: registrationEnabled}
+func NewService(repo *Repository, blocklist *BlocklistRepository, registrationEnabled bool) *Service {
+	return &Service{repo: repo, blocklist: blocklist, registrationEnabled: registrationEnabled}
 }
 
 func (s *Service) Register(ctx context.Context, email, username, password string) (*User, error) {
@@ -52,7 +54,7 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 }
 
 func (s *Service) Login(ctx context.Context, email, password, secret string, accessExpireAt, refreshExpireAt time.Duration) (*LoginResult, error) {
-	
+
 	user, err := s.repo.FindByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, mongo.ErrNoDocuments) {
@@ -76,4 +78,40 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 		return nil, err
 	}
 	return &LoginResult{RefreshToken: refreshToken, AccessToken: accessToken}, nil
+}
+
+func (s *Service) Logout(ctx context.Context, tokenString, secret string) error {
+	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
+	if err != nil {
+		return err
+	}
+	return s.blocklist.Revoke(ctx, claims.ID, claims.ExpiresAt.Time)
+}
+
+func (s *Service) Refresh(ctx context.Context, tokenString, secret string, accessExpireAt time.Duration) (string, error) {
+	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
+	if err != nil {
+		return "", err
+	}
+	accessToken, err := GenerateToken(claims.UserID, secret, accessExpireAt)
+	if err != nil {
+		return "", err
+	}
+	return accessToken, nil
+}
+
+func (s *Service) Me(ctx context.Context, tokenString, secret string) (*User, error) {
+	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
+	if err != nil {
+		return nil, err
+	}
+	id, err := bson.ObjectIDFromHex(claims.UserID)
+	if err != nil {
+		return nil, err
+	}
+	user, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
 }
