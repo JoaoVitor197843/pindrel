@@ -58,15 +58,10 @@ func ValidateToken(ctx context.Context, tokenString, secret string, blocklist *B
 
 func ExtractToken(r *http.Request) (string, error) {
 	cookie, err := r.Cookie("refresh_token")
-	if err == nil {
-		return cookie.Value, nil
+	if err != nil {
+		return "", errors.New("no token found")
 	}
-
-	authHeader := r.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		return strings.TrimPrefix(authHeader, "Bearer "), nil
-	}
-	return "", errors.New("no token found")
+	return cookie.Value, nil
 }
 
 func extractBearerToken(r *http.Request) (string, error) {

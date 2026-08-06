@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,6 +14,10 @@ import (
 	_ "embed"
 )
 
+var (
+	ErrShortPassword = errors.New("your password is short, please try another password")
+	ErrCommonPassword = errors.New("your password is common, please try another password")
+)
 type hashParams struct {
 	memory      uint32
 	iterations  uint32
@@ -48,17 +53,17 @@ func IsCommonPassword(password string) bool {
 }
 func CheckPassword(password string) (bool, error) {
 	if len(password) < 8 {
-		return false, fmt.Errorf("your password is short, please try another password")
+		return false, ErrShortPassword
 	}
 	if IsCommonPassword(password) {
-		return false, fmt.Errorf("your password is common, please try another password")
+		return false, ErrCommonPassword
 	}
 	return true, nil
 }
 func HashPassword(password string) (string, error) {
 	passed, err := CheckPassword(password)
 	if !passed {
-		return "", fmt.Errorf("Error in password: %v", err)
+		return "", err
 	}
 	salt := make([]byte, 16)
 	_, err = rand.Read(salt)

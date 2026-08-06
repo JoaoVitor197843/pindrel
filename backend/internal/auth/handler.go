@@ -42,6 +42,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusForbidden, "registration_disabled", "Server registration is disabled")
 		case errors.Is(err, ErrEmailAlreadyExists):
 			api.WriteError(w, http.StatusConflict, "email_already_exists", "This email is already registered")
+		case errors.Is(err, ErrShortPassword), errors.Is(err, ErrCommonPassword):
+			api.WriteError(w, http.StatusBadRequest, "invalid_input", "password does not meet requirements")
 		default:
 			log.Printf("register error: %v", err)
 			api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
@@ -102,12 +104,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string
 }
 
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret string) {
-	tokenString, err := ExtractToken(r)
+	refreshToken, err := ExtractToken(r)
 	if err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
 	}
-	if err := h.service.Logout(r.Context(), tokenString, jwtSecret); err != nil {
+
+	accessToken, _ := extractBearerToken(r)
+	if err := h.service.Logout(r.Context(), refreshToken, accessToken, jwtSecret); err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
 	}
@@ -132,7 +136,12 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret stri
 	}
 	accessToken, err := h.service.Refresh(r.Context(), tokenString, jwtSecret, accessExpireAt)
 	if err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "no valid token found")
+		switch {
+		case errors.Is(err, ErrUserNotFound):
+			api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "user no longer exists")
+		default:
+			api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "no valid token found")
+		}
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -13,6 +13,7 @@ var (
 	ErrRegistrationDisabled = errors.New("registration is disabled")
 	ErrEmailAlreadyExists   = errors.New("email already exists")
 	ErrInvalidCredentials   = errors.New("invalid credentials")
+	ErrUserNotFound         = errors.New("user not found")
 )
 
 type Service struct {
@@ -80,17 +81,40 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 	return &LoginResult{RefreshToken: refreshToken, AccessToken: accessToken}, nil
 }
 
-func (s *Service) Logout(ctx context.Context, tokenString, secret string) error {
-	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
+func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret string) error {
+	RefreshClaims, err := ValidateToken(ctx, refreshToken, secret, s.blocklist)
 	if err != nil {
 		return err
 	}
-	return s.blocklist.Revoke(ctx, claims.ID, claims.ExpiresAt.Time)
+	if err := s.blocklist.Revoke(ctx, RefreshClaims.ID, RefreshClaims.ExpiresAt.Time); err != nil {
+		return err
+	}
+
+	if accessToken != "" {
+		accessClaims, err := ValidateToken(ctx, accessToken, secret, s.blocklist)
+		if err == nil {
+			s.blocklist.Revoke(ctx, accessClaims.ID, accessClaims.ExpiresAt.Time)
+		}
+	}
+
+	return nil
 }
 
 func (s *Service) Refresh(ctx context.Context, tokenString, secret string, accessExpireAt time.Duration) (string, error) {
 	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
 	if err != nil {
+		return "", err
+	}
+	id, err := bson.ObjectIDFromHex(claims.UserID)
+	if err != nil {
+		return "", err
+	}
+
+	_, err = s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return "", ErrUserNotFound
+		}
 		return "", err
 	}
 	accessToken, err := GenerateToken(claims.UserID, secret, accessExpireAt)

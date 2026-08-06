@@ -129,7 +129,7 @@ func TestService_Logout_RevokesToken(t *testing.T) {
 		t.Fatalf("login should succeed: %v", err)
 	}
 
-	if err := service.Logout(context.Background(), tokens.RefreshToken, "test-secret"); err != nil {
+	if err := service.Logout(context.Background(), tokens.RefreshToken, tokens.AccessToken, "test-secret"); err != nil {
 		t.Fatalf("logout should succeed: %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestService_Refresh_RevokedToken(t *testing.T) {
 		t.Fatalf("login should succeed: %v", err)
 	}
 
-	if err := service.Logout(context.Background(), tokens.RefreshToken, "test-secret"); err != nil {
+	if err := service.Logout(context.Background(), tokens.RefreshToken, tokens.AccessToken, "test-secret"); err != nil {
 		t.Fatalf("logout should succeed: %v", err)
 	}
 
@@ -243,7 +243,7 @@ func TestService_Me_RevokedToken(t *testing.T) {
 		t.Fatalf("login should succeed: %v", err)
 	}
 
-	if err := service.Logout(context.Background(), tokens.AccessToken, "test-secret"); err != nil {
+	if err := service.Logout(context.Background(), tokens.RefreshToken, tokens.AccessToken, "test-secret"); err != nil {
 		t.Fatalf("logout should succeed: %v", err)
 	}
 
