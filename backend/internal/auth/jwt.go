@@ -64,7 +64,7 @@ func ExtractToken(r *http.Request) (string, error) {
 	return cookie.Value, nil
 }
 
-func extractBearerToken(r *http.Request) (string, error) {
+func ExtractBearerToken(r *http.Request) (string, error) {
 	authHeader := r.Header.Get("Authorization")
 	if strings.HasPrefix(authHeader, "Bearer ") {
 		return strings.TrimPrefix(authHeader, "Bearer "), nil

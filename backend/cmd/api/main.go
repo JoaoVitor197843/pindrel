@@ -8,6 +8,7 @@ import (
 	"plany/internal/auth"
 	"plany/internal/database"
 	"plany/internal/middleware"
+	"plany/internal/pages"
 	"strconv"
 	"strings"
 	"time"
@@ -98,15 +99,25 @@ func main() {
 		handler.Me(w, r, jwtSecret)
 	})
 
-	debugMode, _ := strconv.ParseBool(os.Getenv("DEBUG_MODE"))
+	pagesRepo, err := pages.NewRepository(context.Background(), db)
+	if err != nil {
+		log.Fatalf("failed to setup pages repo: %v", err)
+	}
+	pagesService := pages.NewService(pagesRepo)
+	pagesHandler := pages.NewHandler(pagesService)
 
+	mux.Handle("GET /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pagesHandler.GetPages(w, r)
+	})))
+	
+	debugMode, _ := strconv.ParseBool(os.Getenv("DEBUG_MODE"))
 	if debugMode {
 		mux.HandleFunc("GET /swagger/", httpSwagger.WrapHandler)
 		log.Println("swagger UI enabled at /swagger/index.html")
 	}
 	go func() {
-		ticker := time.NewTicker(10*time.Minute)
-		cleanupAge := 30*time.Minute
+		ticker := time.NewTicker(10 * time.Minute)
+		cleanupAge := 30 * time.Minute
 		for range ticker.C {
 			log.Println("Cleaning Limiters...")
 			loginLimiter.Cleanup(cleanupAge)
@@ -119,4 +130,3 @@ func main() {
 		log.Fatalf("server failed: %v", err)
 	}
 }
-
