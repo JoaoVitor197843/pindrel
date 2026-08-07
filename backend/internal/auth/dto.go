@@ -7,9 +7,9 @@ type UserSummary struct {
 }
 
 type RegisterInput struct {
-    Email    string `json:"email" validate:"required,email"`
-    Username string `json:"username" validate:"required"`
-    Password string `json:"password" validate:"required,min=8"`
+	Email    string `json:"email" validate:"required,email"`
+	Username string `json:"username" validate:"required"`
+	Password string `json:"password" validate:"required,min=8"`
 }
 
 type RegisterResponse struct {
@@ -17,9 +17,15 @@ type RegisterResponse struct {
 }
 
 type LoginInput struct {
-		Email    string `json:"email" validate:"required,email"`
-		Password string `json:"password" validate:"required,min=8"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=8"`
 }
+
+type LoginResult struct {
+	RefreshToken string
+	AccessToken  string
+}
+
 type LoginRefreshResponse struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
