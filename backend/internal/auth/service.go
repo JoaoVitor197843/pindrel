@@ -22,11 +22,6 @@ type Service struct {
 	registrationEnabled bool
 }
 
-type LoginResult struct {
-	RefreshToken string
-	AccessToken  string
-}
-
 func NewService(repo *Repository, blocklist *BlocklistRepository, registrationEnabled bool) *Service {
 	return &Service{repo: repo, blocklist: blocklist, registrationEnabled: registrationEnabled}
 }
