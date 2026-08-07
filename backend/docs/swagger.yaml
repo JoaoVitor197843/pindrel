@@ -58,6 +58,40 @@ definitions:
       username:
         type: string
     type: object
+  pages.PageData:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/pages.PageMetadata'
+        type: array
+      next_cursor:
+        type: string
+      total:
+        type: integer
+    type: object
+  pages.PageMetadata:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      number_of_blocks:
+        type: integer
+      shared:
+        type: boolean
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      trashed_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -182,6 +216,40 @@ paths:
       summary: Create a new account
       tags:
       - auth
+  /pages:
+    get:
+      description: List proprietary and shared pages, paged by cursor. Don't return
+        bin items.
+      parameters:
+      - default: 20
+        description: Number of items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Opaque cursor for the next page of results
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/pages.PageData'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List user pages
+      tags:
+      - pages
 securityDefinitions:
   BearerAuth:
     in: header

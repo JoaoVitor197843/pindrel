@@ -133,7 +133,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret strin
 		return
 	}
 
-	accessToken, _ := extractBearerToken(r)
+	accessToken, _ := ExtractBearerToken(r)
 	if err := h.service.Logout(r.Context(), refreshToken, accessToken, jwtSecret); err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
@@ -193,7 +193,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret stri
 // @Failure 401 {object} api.ErrorResponse
 // @Router /auth/me [get]
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request, jwtSecret string) {
-	tokenString, err := extractBearerToken(r)
+	tokenString, err := ExtractBearerToken(r)
 	if err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
