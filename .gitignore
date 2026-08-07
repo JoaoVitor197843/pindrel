@@ -25,4 +25,4 @@ dist-ssr
 
 .env
 
-docs/
+docs/*.md

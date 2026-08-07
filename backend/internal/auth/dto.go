@@ -6,10 +6,20 @@ type UserSummary struct {
 	Username string `json:"username"`
 }
 
+type RegisterInput struct {
+    Email    string `json:"email" validate:"required,email"`
+    Username string `json:"username" validate:"required"`
+    Password string `json:"password" validate:"required,min=8"`
+}
+
 type RegisterResponse struct {
 	User UserSummary `json:"user"`
 }
 
+type LoginInput struct {
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required,min=8"`
+}
 type LoginRefreshResponse struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`

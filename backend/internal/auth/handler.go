@@ -20,13 +20,20 @@ func NewHandler(service *Service) *Handler {
 	return &Handler{service: service, validator: validator.New()}
 }
 
+// Register godoc
+// @Summary Create a new account
+// @Description Register a new user, if the registration is enabled
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body RegisterInput true "Register data"
+// @Success 201 {object} RegisterResponse
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 403 {object} api.ErrorResponse
+// @Failure 409 {object} api.ErrorResponse
+// @Router /auth/register [post]
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		Email    string `json:"email" validate:"required,email"`
-		Username string `json:"username" validate:"required"`
-		Password string `json:"password" validate:"required,min=8"`
-	}
-
+	var input RegisterInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		api.WriteError(w, 400, "invalid_input", "malformed request body")
 		return
@@ -61,11 +68,19 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Login godoc
+// @Summary Open Session
+// @Description Authenticate the user and return the access in body and refresh token in httpOnly cookie
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body LoginInput true "Login credentials"
+// @Success 200 {object} LoginRefreshResponse
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 401 {object} api.ErrorResponse
+// @Router /auth/login [post]
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string, accessExpireAt, refreshExpireAt time.Duration) {
-	var input struct {
-		Email    string `json:"email" validate:"required,email"`
-		Password string `json:"password" validate:"required,min=8"`
-	}
+	var input LoginInput
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		api.WriteError(w, 400, "invalid_input", "malformed request body")
@@ -103,6 +118,14 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string
 	})
 }
 
+// Logout godoc
+// @Summary Close the session
+// @Description Invalidates the refresh token (and the access token, if sended) and clear the cookie
+// @Tags auth
+// @Produce json
+// @Success 204 "No Content"
+// @Failure 401 {object} api.ErrorResponse
+// @Router /auth/logout [post]
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret string) {
 	refreshToken, err := ExtractToken(r)
 	if err != nil {
@@ -128,6 +151,14 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret strin
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Refresh godoc
+// @Summary Renews the access token
+// @Description Change one valid refresh token for a new access token
+// @Tags auth
+// @Produce json
+// @Success 200 {object} LoginRefreshResponse
+// @Failure 401 {object} api.ErrorResponse
+// @Router /auth/refresh [post]
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret string, accessExpireAt time.Duration) {
 	tokenString, err := ExtractToken(r)
 	if err != nil {
@@ -152,6 +183,15 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret stri
 	})
 }
 
+// Me godoc
+// @Summary Current user data
+// @Description Returns the user data associated with the session access token
+// @Tags auth
+// @Produce json
+// @Security BearerAuth
+// @Success 200 {object} UserSummary
+// @Failure 401 {object} api.ErrorResponse
+// @Router /auth/me [get]
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request, jwtSecret string) {
 	tokenString, err := extractBearerToken(r)
 	if err != nil {

@@ -7,13 +7,26 @@ import (
 	"os"
 	"plany/internal/auth"
 	"plany/internal/database"
+	"plany/internal/middleware"
 	"strconv"
 	"strings"
 	"time"
 
+	_ "plany/docs"
+
 	"github.com/joho/godotenv"
+	httpSwagger "github.com/swaggo/http-swagger"
+	"golang.org/x/time/rate"
 )
 
+// @title Plany API
+// @version 1.0
+// @description Plany API, self-hosted notes workspace
+// @host localhost:8080
+// @BasePath /
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
 func main() {
 	godotenv.Load()
 
@@ -65,15 +78,16 @@ func main() {
 	if err != nil {
 		refreshExpiry = 720 * time.Hour
 	}
-
+	loginLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
+	registerLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /auth/register", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("POST /auth/register", middleware.RateLimitMiddleware(registerLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler.Register(w, r)
-	})
-	mux.HandleFunc("POST /auth/login", func(w http.ResponseWriter, r *http.Request) {
+	})))
+	mux.Handle("POST /auth/login", middleware.RateLimitMiddleware(loginLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handler.Login(w, r, jwtSecret, accessExpiry, refreshExpiry)
-	})
+	})))
 	mux.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		handler.Logout(w, r, jwtSecret)
 	})
@@ -84,8 +98,25 @@ func main() {
 		handler.Me(w, r, jwtSecret)
 	})
 
+	debugMode, _ := strconv.ParseBool(os.Getenv("DEBUG_MODE"))
+
+	if debugMode {
+		mux.HandleFunc("GET /swagger/", httpSwagger.WrapHandler)
+		log.Println("swagger UI enabled at /swagger/index.html")
+	}
+	go func() {
+		ticker := time.NewTicker(10*time.Minute)
+		cleanupAge := 30*time.Minute
+		for range ticker.C {
+			log.Println("Cleaning Limiters...")
+			loginLimiter.Cleanup(cleanupAge)
+			registerLimiter.Cleanup(cleanupAge)
+			log.Println("Limiters Cleaned")
+		}
+	}()
 	log.Printf("server running on port 8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
+
