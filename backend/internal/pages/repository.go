@@ -44,7 +44,10 @@ func (r *Repository) FindPages(ctx context.Context, userID bson.ObjectID, cursor
 		},
 		"deleted_at": nil,
 	}
-
+	total, err := r.collection.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
 	if cursor != nil {
 		filter["_id"] = bson.M{"$gt": *cursor}
 	}
@@ -64,10 +67,6 @@ func (r *Repository) FindPages(ctx context.Context, userID bson.ObjectID, cursor
 		{{Key: "$project", Value: bson.M{
 			"blocks": 0,
 		}}},
-	}
-	total, err := r.collection.CountDocuments(ctx, filter)
-	if err != nil {
-		return nil, 0, err
 	}
 	cursorResult, err := r.collection.Aggregate(ctx, pipeline)
 	if err != nil {
