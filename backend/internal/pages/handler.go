@@ -72,3 +72,44 @@ func (h *Handler) GetPages(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(result)
 }
+
+func (h *Handler) CreatePage(w http.ResponseWriter, r *http.Request) {
+	userIDString, ok := r.Context().Value(contextkeys.UserIDKey).(string)
+	if !ok {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "user not found in context")
+		return
+	}
+
+	userID, err := bson.ObjectIDFromHex(userIDString)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid user id")
+        return
+	}
+	
+	var input PageCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_input", "malformed request body")
+        return
+	}
+	if err := h.validator.Struct(input); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_input", "validation failed")
+        return
+	}
+
+	result, err := h.service.CreatePage(r.Context(), userID, input)
+	if err != nil {
+        switch {
+        case errors.Is(err, ErrInvalidSharedUserID):
+            api.WriteError(w, http.StatusBadRequest, "invalid_input", "one or more shared user IDs are invalid")
+        default:
+            log.Printf("create page error: %v", err)
+            api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
+        }
+        return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(result)
+}
+

@@ -46,3 +46,7 @@ func (r *Repository) Delete(ctx context.Context, id bson.ObjectID) error {
 	_, err := r.collection.DeleteOne(ctx, bson.M{"_id": id})
 	return err
 }
+
+func (r *Repository) CountByIDs(ctx context.Context, ids []bson.ObjectID) (int64, error) {
+	return r.collection.CountDocuments(ctx, bson.M{"_id": bson.M{"$in": ids}})
+}

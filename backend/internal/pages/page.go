@@ -12,7 +12,7 @@ type Page struct {
 	Description     string        `bson:"description"`
 	OwnerID bson.ObjectID        `bson:"owner_id"`
 	SharedWith    []bson.ObjectID     `bson:"shared_with"`
-	TagIDs []bson.ObjectID `bson:"tag_ids"`
+	Tags []string `bson:"tags"`
 	DeletedAt *time.Time `bson:"deleted_at,omitempty"`
 	CreatedAt time.Time `bson:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at"`

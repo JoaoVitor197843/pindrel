@@ -62,13 +62,13 @@ func main() {
 	}
 	defer client.Disconnect(context.Background())
 	db := client.Database(dbName)
-	repo := auth.NewRepository(db)
+	authRepo := auth.NewRepository(db)
 	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
 	if err != nil {
 		log.Fatalf("failed to create blocklist repo: %v", err)
 	}
-	service := auth.NewService(repo, blocklist, registrationEnabled)
-	handler := auth.NewHandler(service)
+	authService := auth.NewService(authRepo, blocklist, registrationEnabled)
+	authHandler := auth.NewHandler(authService)
 
 	accessExpiry, err := time.ParseDuration(os.Getenv("JWT_ACCESS_EXPIRY"))
 	if err != nil {
@@ -84,30 +84,34 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.Handle("POST /auth/register", middleware.RateLimitMiddleware(registerLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handler.Register(w, r)
+		authHandler.Register(w, r)
 	})))
 	mux.Handle("POST /auth/login", middleware.RateLimitMiddleware(loginLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handler.Login(w, r, jwtSecret, accessExpiry, refreshExpiry)
+		authHandler.Login(w, r, jwtSecret, accessExpiry, refreshExpiry)
 	})))
 	mux.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		handler.Logout(w, r, jwtSecret)
+		authHandler.Logout(w, r, jwtSecret)
 	})
 	mux.HandleFunc("POST /auth/refresh", func(w http.ResponseWriter, r *http.Request) {
-		handler.Refresh(w, r, jwtSecret, accessExpiry)
+		authHandler.Refresh(w, r, jwtSecret, accessExpiry)
 	})
 	mux.HandleFunc("GET /auth/me", func(w http.ResponseWriter, r *http.Request) {
-		handler.Me(w, r, jwtSecret)
+		authHandler.Me(w, r, jwtSecret)
 	})
 
 	pagesRepo, err := pages.NewRepository(context.Background(), db)
 	if err != nil {
 		log.Fatalf("failed to setup pages repo: %v", err)
 	}
-	pagesService := pages.NewService(pagesRepo)
+	pagesService := pages.NewService(pagesRepo, authRepo)
 	pagesHandler := pages.NewHandler(pagesService)
-
+	
 	mux.Handle("GET /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pagesHandler.GetPages(w, r)
+	})))
+
+	mux.Handle("POST /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pagesHandler.CreatePage(w, r)
 	})))
 	
 	debugMode, _ := strconv.ParseBool(os.Getenv("DEBUG_MODE"))

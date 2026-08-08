@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func setupTest(t *testing.T) (*pages.Repository, func()) {
@@ -28,4 +29,17 @@ func setupTest(t *testing.T) (*pages.Repository, func()) {
 	}
 
 	return repo, cleanup
+}
+
+type fakeUserChecker struct {
+	count int64
+}
+
+func (f fakeUserChecker) CountByIDs(ctx context.Context, ids []bson.ObjectID) (int64, error) {
+	return f.count, nil
+}
+
+func mustObjectID(hex string) bson.ObjectID {
+    id, _ := bson.ObjectIDFromHex(hex)
+    return id
 }

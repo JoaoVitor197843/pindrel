@@ -89,3 +89,12 @@ func (r *Repository) Delete(ctx context.Context, id bson.ObjectID) error {
 	_, err := r.collection.DeleteOne(ctx, bson.M{"_id": id})
 	return err
 }
+
+func (r *Repository) FindByID(ctx context.Context, id bson.ObjectID) (*Page, error) {
+	var page Page
+	err := r.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&page)
+	if err != nil {
+		return nil, err
+	}
+	return &page, nil
+}

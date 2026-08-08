@@ -23,7 +23,8 @@ type PageMetadata struct {
 type PageCreateRequest struct {
 	Title       string   `json:"title" validate:"required"`
 	Description string   `json:"description"`
-	TagIDs      []string `json:"tag_ids"`
+	Tags      []string `json:"tags"`
+	SharedWith  []string `json:"shared_with"`
 }
 
 type PageCreateResponse struct {
@@ -31,6 +32,5 @@ type PageCreateResponse struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	Tags        []string  `json:"tags"`
-	Shared      bool      `json:"shared"`
 	CreatedAt   time.Time `json:"created_at"`
 }
