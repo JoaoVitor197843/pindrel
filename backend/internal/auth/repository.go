@@ -5,14 +5,30 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type Repository struct {
 	collection *mongo.Collection
 }
 
-func NewRepository(db *mongo.Database) *Repository {
-	return &Repository{collection: db.Collection("users")}
+func NewRepository(ctx context.Context, db *mongo.Database) (*Repository, error) {
+	collection := db.Collection("users")
+	indexModels := []mongo.IndexModel{
+		{
+			Keys:    bson.D{{Key: "email", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		},
+		{
+			Keys:    bson.D{{Key: "username", Value: 1}},
+			Options: options.Index().SetUnique(true),
+		},
+	}
+	_, err := collection.Indexes().CreateMany(ctx, indexModels)
+	if err != nil {
+		return nil, err
+	}
+	return &Repository{collection: collection}, nil
 }
 
 func (r *Repository) Create(ctx context.Context, user *User) error {

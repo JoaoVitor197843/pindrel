@@ -1,3 +1,4 @@
+// Package middleware have all middlewares
 package middleware
 
 import (
@@ -26,3 +27,4 @@ func AuthMiddleware(secret string, blocklist *auth.BlocklistRepository, next htt
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
+

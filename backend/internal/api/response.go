@@ -1,3 +1,4 @@
+// Package api have WriteError logic
 package api
 
 import (

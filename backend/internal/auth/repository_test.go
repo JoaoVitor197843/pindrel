@@ -25,7 +25,10 @@ func TestRepository_Create_SetsID(t *testing.T) {
 	defer client.Disconnect(context.Background())
 
 	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo := auth.NewRepository(db)
+	repo, err := auth.NewRepository(t.Context(), db)
+	if err != nil {
+		t.Fatalf("collection creation failed: %v", err)
+	}
 	user := auth.User{Email: "...", Username: "...", PasswordHash: "...", CreatedAt: time.Now()}
 	err = repo.Create(context.Background(), &user)
 	if err != nil {
@@ -46,7 +49,10 @@ func TestRepository_FindByEmail_Found(t *testing.T) {
 	defer client.Disconnect(context.Background())
 
 	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo := auth.NewRepository(db)
+	repo, err := auth.NewRepository(context.Background(), db)
+	if err != nil {
+		t.Fatalf("collection creation failed: %v", err)
+	}
 
 	email := fmt.Sprintf("find-%d@teste.com", time.Now().UnixNano())
 	user := auth.User{Email: email, Username: "user1", PasswordHash: "hash", CreatedAt: time.Now()}
@@ -73,7 +79,10 @@ func TestRepository_FindByEmail_NotFound(t *testing.T) {
 	defer client.Disconnect(context.Background())
 
 	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo := auth.NewRepository(db)
+	repo, err := auth.NewRepository(context.Background(), db)
+	if err != nil {
+		t.Fatalf("collection creation failed: %v", err)
+	}
 
 	email := fmt.Sprintf("naoexiste-%d@teste.com", time.Now().UnixNano())
 	_, err = repo.FindByEmail(context.Background(), email)
@@ -91,8 +100,10 @@ func TestRepository_Delete_RemovesUser(t *testing.T) {
 	defer client.Disconnect(context.Background())
 
 	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo := auth.NewRepository(db)
-
+	repo, err := auth.NewRepository(context.Background(), db)
+	if err != nil {
+		t.Fatalf("collection creation failed: %v", err)
+	}
 	email := fmt.Sprintf("delete-%d@teste.com", time.Now().UnixNano())
 	user := auth.User{Email: email, Username: "user1", PasswordHash: "hash", CreatedAt: time.Now()}
 	if err := repo.Create(context.Background(), &user); err != nil {

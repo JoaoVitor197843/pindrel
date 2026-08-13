@@ -1,3 +1,4 @@
+// Package auth defines all the auth logic
 package auth
 
 import (

@@ -23,7 +23,10 @@ func TestService_Register_RegistrationDisabled(t *testing.T) {
 	defer client.Disconnect(context.Background())
 
 	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo := auth.NewRepository(db)
+	repo, err := auth.NewRepository(context.Background(), db)
+	if err != nil {
+		t.Fatalf("collection creation failed: %v", err)
+	}
 	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
 	if err != nil {
 		t.Fatalf("Error on generating blocklist: %v", err)
@@ -47,7 +50,10 @@ func TestService_Register_DuplicateEmail(t *testing.T) {
 	defer client.Disconnect(context.Background())
 
 	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo := auth.NewRepository(db)
+	repo, err := auth.NewRepository(context.Background(), db)
+	if err != nil {
+		t.Fatalf("collection creation failed: %v", err)
+	}
 	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
 	if err != nil {
 		t.Fatalf("Error on generating blocklist: %v", err)

@@ -1,3 +1,4 @@
+// Package database have database connection logic
 package database
 
 import (
@@ -29,7 +30,7 @@ func Connect(uri string, maxRetries int, retryDelay, timeout time.Duration) (*mo
 		log.Printf("Attempt %d/%d failed: %v - trying again in %s", attempt, maxRetries, err, retryDelay)
 		time.Sleep(retryDelay)
 	}
-	return nil, fmt.Errorf("Cannot connect to MongoDB after %d tries: %w", maxRetries, err)
+	return nil, fmt.Errorf("cannot connect to MongoDB after %d tries: %w", maxRetries, err)
 }
 
 func DefaultConnect(uri string) (*mongo.Client, error) {
