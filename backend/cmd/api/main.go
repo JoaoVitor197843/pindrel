@@ -62,7 +62,10 @@ func main() {
 	}
 	defer client.Disconnect(context.Background())
 	db := client.Database(dbName)
-	authRepo := auth.NewRepository(db)
+	authRepo, err := auth.NewRepository(context.Background(), db)
+	if err != nil {
+		log.Fatalf("failed to create auth repo: %v", err)
+	}
 	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
 	if err != nil {
 		log.Fatalf("failed to create blocklist repo: %v", err)
@@ -105,7 +108,7 @@ func main() {
 	}
 	pagesService := pages.NewService(pagesRepo, authRepo)
 	pagesHandler := pages.NewHandler(pagesService)
-	
+
 	mux.Handle("GET /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pagesHandler.GetPages(w, r)
 	})))
@@ -113,7 +116,7 @@ func main() {
 	mux.Handle("POST /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pagesHandler.CreatePage(w, r)
 	})))
-	
+
 	debugMode, _ := strconv.ParseBool(os.Getenv("DEBUG_MODE"))
 	if debugMode {
 		mux.HandleFunc("GET /swagger/", httpSwagger.WrapHandler)

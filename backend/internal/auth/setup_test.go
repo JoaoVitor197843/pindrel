@@ -19,7 +19,10 @@ func setupTest(t *testing.T, registrationEnabled bool) (*auth.Handler, *auth.Rep
 	}
 
 	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo := auth.NewRepository(db)
+	repo, err := auth.NewRepository(context.Background(), db)
+	if err != nil {
+		t.Fatalf("collection creation failed: %v", err)
+	}
 	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
 	if err != nil {
 		t.Fatalf("failed to create blocklist repo: %v", err)
