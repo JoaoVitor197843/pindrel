@@ -11,8 +11,8 @@ import (
 )
 
 var (
-	ErrInvalidCursor = errors.New("malformed cursor")
-	ErrInvalidSharedUserID = errors.New("invslid user shared id")
+	ErrInvalidCursor       = errors.New("malformed cursor")
+	ErrInvalidSharedUserID = errors.New("invalid user shared id")
 )
 
 type UserExistenceChecker interface {
@@ -20,7 +20,7 @@ type UserExistenceChecker interface {
 }
 
 type Service struct {
-	repo *Repository
+	repo  *Repository
 	users UserExistenceChecker
 }
 
@@ -49,7 +49,7 @@ func (s *Service) GetPages(ctx context.Context, userID bson.ObjectID, cursorStri
 			ID:             p.ID.Hex(),
 			Title:          p.Title,
 			Description:    p.Description,
-			Tags: p.Tags,
+			Tags:           p.Tags,
 			Shared:         slices.Contains(p.SharedWith, userID),
 			NumberOfBlocks: p.NumberOfBlocks,
 			TrashedAt:      p.DeletedAt,
@@ -96,23 +96,24 @@ func (s *Service) CreatePage(ctx context.Context, ownerID bson.ObjectID, input P
 	}
 	now := time.Now()
 	page := Page{
-		Title: input.Title,
+		Title:       input.Title,
 		Description: input.Description,
-		OwnerID: ownerID,
-		SharedWith: sharedWith,
-		Tags: normalizedTags,
-		CreatedAt: now,
-		UpdatedAt: now,
+		OwnerID:     ownerID,
+		SharedWith:  sharedWith,
+		Tags:        normalizedTags,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := s.repo.Create(ctx, &page); err != nil {
 		return nil, err
 	}
 	return &PageCreateResponse{
-		ID: page.ID.Hex(),
-		Title: page.Title,
+		ID:          page.ID.Hex(),
+		Title:       page.Title,
 		Description: page.Description,
-		Tags: page.Tags,
-		CreatedAt: page.CreatedAt,
+		Tags:        page.Tags,
+		CreatedAt:   page.CreatedAt,
 	}, nil
 }
+
