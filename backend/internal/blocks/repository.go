@@ -13,7 +13,7 @@ type Repository struct {
 	collection *mongo.Collection
 }
 
-func NewRepository(ctx context.Context, db mongo.Database) (*Repository, error) {
+func NewRepository(ctx context.Context, db *mongo.Database) (*Repository, error) {
 	collection := db.Collection("block")
 	indexModel := []mongo.IndexModel{
 		{Keys: bson.D{{Key: "page_id", Value: 1}, {Key: "page_position", Value: 1}}},
@@ -56,6 +56,37 @@ func (r *Repository) FindBlocks(ctx context.Context, PageID bson.ObjectID) ([]Bl
 			return nil, err
 		}
 		blocks = append(blocks, block)
+	}
+	return blocks, nil
+}
+
+func (r *Repository) FindByID(ctx context.Context, id bson.ObjectID) (*Block, error) {
+	var block Block
+
+	err := r.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&block)
+	if err != nil {
+		return nil, err
+	}
+	return &block, nil
+}
+
+func (r *Repository) FindByIDs(ctx context.Context, blockIDs []bson.ObjectID) ([]Block, error) {
+	if len(blockIDs) == 0 {
+		return nil, nil
+	}
+	filter := bson.M{"_id": bson.M{"$in": blockIDs}}
+	cursor, err := r.collection.Find(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	defer cursor.Close(ctx)
+	var blocks []Block
+	for cursor.Next(ctx) {
+		var block Block
+		if err := cursor.Decode(&block); err == nil {
+			blocks = append(blocks, block)
+		}
 	}
 	return blocks, nil
 }

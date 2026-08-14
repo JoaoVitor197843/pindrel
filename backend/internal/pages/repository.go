@@ -2,6 +2,7 @@ package pages
 
 import (
 	"context"
+	"errors"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -14,17 +15,17 @@ type Repository struct {
 func NewRepository(ctx context.Context, db *mongo.Database) (*Repository, error) {
 	collection := db.Collection("pages")
 
-    indexModels := []mongo.IndexModel{
-        {Keys: bson.M{"owner_id": 1}},
-        {Keys: bson.M{"shared_with": 1}},
-    }
+	indexModels := []mongo.IndexModel{
+		{Keys: bson.M{"owner_id": 1}},
+		{Keys: bson.M{"shared_with": 1}},
+	}
 
-    _, err := collection.Indexes().CreateMany(ctx, indexModels)
-    if err != nil {
-        return nil, err
-    }
+	_, err := collection.Indexes().CreateMany(ctx, indexModels)
+	if err != nil {
+		return nil, err
+	}
 
-    return &Repository{collection: collection}, nil
+	return &Repository{collection: collection}, nil
 }
 
 func (r *Repository) Create(ctx context.Context, page *Page) error {
@@ -92,9 +93,25 @@ func (r *Repository) Delete(ctx context.Context, id bson.ObjectID) error {
 
 func (r *Repository) FindByID(ctx context.Context, id bson.ObjectID) (*Page, error) {
 	var page Page
+
 	err := r.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&page)
 	if err != nil {
 		return nil, err
 	}
 	return &page, nil
+}
+
+func (r *Repository) CheckPageOwner(ctx context.Context, pageID, ownerID bson.ObjectID) (bool, error) {
+	var page Page
+
+	err := r.collection.FindOne(ctx, bson.M{"_id": pageID, "owner_id": ownerID}).Decode(&page)
+	if err != nil {
+		switch {
+		case errors.Is(err, mongo.ErrNoDocuments):
+			return false, nil
+		default:
+			return false, err
+		}
+	}
+	return true, nil
 }

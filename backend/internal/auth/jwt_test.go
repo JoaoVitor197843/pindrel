@@ -10,12 +10,12 @@ import (
 func TestJwtToken_TokenValidationPass_ReturnUserID(t *testing.T) {
 	_, _, blocklist, cleanup := setupTest(t, true)
 	defer cleanup()
-	test_secret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
-	token, err := auth.GenerateToken("1", test_secret, 1*time.Second)
+	testSecret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
+	token, err := auth.GenerateToken("1", testSecret, 1*time.Second)
 	if err != nil {
 		t.Fatalf("Error on generating token: %v", err)
 	}
-	claim, err := auth.ValidateToken(context.Background(), token, test_secret, blocklist)
+	claim, err := auth.ValidateToken(context.Background(), token, testSecret, blocklist)
 	if err != nil {
 		t.Fatalf("Error on validating token: %v", err)
 	}
