@@ -32,6 +32,9 @@ func (s *Service) CreateBlock(
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateContent(input.BlockType, input.Content); err != nil {
+		return nil, err
+	}
 	ok, err := s.pageRepo.CheckPageOwner(ctx, pageID, ownerID)
 	if err != nil {
 		return nil, err
@@ -131,3 +134,5 @@ func (s *Service) CreateBlock(
 		Warnings:      warnings,
 	}, nil
 }
+
+// TODO: Criar o service GetBlocks()
