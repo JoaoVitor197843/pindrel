@@ -135,4 +135,17 @@ func (s *Service) CreateBlock(
 	}, nil
 }
 
-// TODO: Criar o service GetBlocks()
+func (s *Service) GetBlocks(ctx context.Context, ownerID, pageID bson.ObjectID) ([]Block, error) {
+	ok, err := s.pageRepo.CheckPageOwner(ctx, pageID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrPageNotFound
+	}
+	blocks, err := s.repo.FindBlocks(ctx, pageID)
+	if err != nil {
+		return nil, err
+	}
+	return blocks, nil
+}

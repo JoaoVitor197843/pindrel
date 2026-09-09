@@ -512,3 +512,103 @@ func TestService_CreateBlock_ContentNotAnObject(t *testing.T) {
 	}
 }
 
+func TestService_GetBlocks_Success(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+ 
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+ 
+	b1 := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "one"}}
+	b2 := &blocks.Block{PageID: pageID, PagePosition: 1, Type: "text", Content: bson.M{"text": "two"}}
+	if err := repo.Create(context.Background(), b1); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+	if err := repo.Create(context.Background(), b2); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+ 
+	result, err := service.GetBlocks(context.Background(), ownerID, pageID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 blocks, got %d", len(result))
+	}
+}
+ 
+func TestService_GetBlocks_EmptyPage(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+ 
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+ 
+	result, err := service.GetBlocks(context.Background(), ownerID, pageID)
+	if err != nil {
+		t.Fatalf("expected no error for a page with no blocks, got %v", err)
+	}
+	if len(result) != 0 {
+		t.Fatalf("expected 0 blocks, got %d", len(result))
+	}
+}
+ 
+func TestService_GetBlocks_PageNotOwnedByCaller(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+ 
+	realOwnerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, realOwnerID)
+ 
+	attackerID := bson.NewObjectID()
+ 
+	_, err := service.GetBlocks(context.Background(), attackerID, pageID)
+	if err != blocks.ErrPageNotFound {
+		t.Fatalf("expected ErrPageNotFound, got %v", err)
+	}
+}
+ 
+func TestService_GetBlocks_NonExistentPage(t *testing.T) {
+	_, service, _, cleanup := setupTest(t)
+	defer cleanup()
+ 
+	callerID := bson.NewObjectID()
+	ghostPageID := bson.NewObjectID()
+ 
+	_, err := service.GetBlocks(context.Background(), callerID, ghostPageID)
+	if err != blocks.ErrPageNotFound {
+		t.Fatalf("expected ErrPageNotFound, got %v", err)
+	}
+}
+ 
+func TestService_GetBlocks_OnlyReturnsBlocksForGivenPage(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+ 
+	ownerID := bson.NewObjectID()
+	pageA := createTestPage(t, pageRepo, ownerID)
+	pageB := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageA)
+	cleanupPageBlocks(t, repo, pageB)
+ 
+	inA := &blocks.Block{PageID: pageA, Type: "text", Content: bson.M{"text": "in a"}}
+	inB := &blocks.Block{PageID: pageB, Type: "text", Content: bson.M{"text": "in b"}}
+	if err := repo.Create(context.Background(), inA); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+	if err := repo.Create(context.Background(), inB); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+ 
+	result, err := service.GetBlocks(context.Background(), ownerID, pageA)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("expected 1 block scoped to pageA, got %d", len(result))
+	}
+	if result[0].ID != inA.ID {
+		t.Fatalf("expected block %s, got %s", inA.ID.Hex(), result[0].ID.Hex())
+	}
+}
