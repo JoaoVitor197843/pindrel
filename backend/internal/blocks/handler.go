@@ -65,4 +65,36 @@ func (h *Handler) CreateBlock(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(block)
 }
 
-// TODO: Criar o handler GetBlock()
+func (h *Handler) GetBlocks(w http.ResponseWriter, r *http.Request) {
+	userIDString, ok := r.Context().Value(contextkeys.UserIDKey).(string)
+	if !ok {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "user not found in context")
+		return
+	}
+	userID, err := bson.ObjectIDFromHex(userIDString)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid user id")
+		return
+	}
+	pageIDString := r.PathValue("page_id")
+
+	pageID, err := bson.ObjectIDFromHex(pageIDString)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid page id")
+		return
+	}
+	blocks, err := h.service.GetBlocks(r.Context(), userID, pageID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrPageNotFound):
+			api.WriteError(w, http.StatusNotFound, "page_not_found", "page not found")
+		default:
+			log.Printf("get blocks error: %v", err)
+			api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
+		}
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(blocks)
+}
