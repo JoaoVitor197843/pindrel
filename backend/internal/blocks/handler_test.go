@@ -508,3 +508,173 @@ func TestHandler_GetBlocks_ContentTypeHeader(t *testing.T) {
 		t.Fatalf("expected Content-Type application/json, got %q", ct)
 	}
 }
+
+func newDeleteBlockRequest(pageIDString, blockIDString, retention string, userID bson.ObjectID) (*http.Request, *httptest.ResponseRecorder) {
+	url := "/pages/" + pageIDString + "/blocks/" + blockIDString
+	if retention != "" {
+		url += "?retention=" + retention
+	}
+	req := httptest.NewRequest(http.MethodDelete, url, nil)
+	req.SetPathValue("page_id", pageIDString)
+	req.SetPathValue("block_id", blockIDString)
+	ctx := context.WithValue(req.Context(), contextkeys.UserIDKey, userID.Hex())
+	req = req.WithContext(ctx)
+	return req, httptest.NewRecorder()
+}
+
+func TestHandler_DeleteBlock_HardDelete_Success(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+
+	block := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "one"}}
+	if err := repo.Create(context.Background(), block); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+
+	req, rec := newDeleteBlockRequest(pageID.Hex(), block.ID.Hex(), "", ownerID)
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	_, err := repo.FindByID(context.Background(), block.ID, pageID)
+	if err == nil {
+		t.Fatalf("expected block to be gone after hard delete, but it was found")
+	}
+}
+
+func TestHandler_DeleteBlock_SoftDelete_Success(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+
+	block := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "one"}}
+	if err := repo.Create(context.Background(), block); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+
+	req, rec := newDeleteBlockRequest(pageID.Hex(), block.ID.Hex(), "24h", ownerID)
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	found, err := repo.FindByIDs(context.Background(), []bson.ObjectID{block.ID})
+	if err != nil {
+		t.Fatalf("failed to fetch soft-deleted block: %v", err)
+	}
+	if len(found) != 1 || found[0].DeletedAt == nil {
+		t.Fatalf("expected block to be soft-deleted with DeletedAt set")
+	}
+}
+
+func TestHandler_DeleteBlock_InvalidPageID(t *testing.T) {
+	_, service, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+	ownerID := bson.NewObjectID()
+
+	req, rec := newDeleteBlockRequest("not-a-valid-id", bson.NewObjectID().Hex(), "", ownerID)
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteBlock_InvalidBlockID(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+
+	req, rec := newDeleteBlockRequest(pageID.Hex(), "not-a-valid-id", "", ownerID)
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteBlock_InvalidRetentionFormat(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+
+	req, rec := newDeleteBlockRequest(pageID.Hex(), bson.NewObjectID().Hex(), "not-a-duration", ownerID)
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteBlock_PageNotFound(t *testing.T) {
+	_, service, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+	ownerID := bson.NewObjectID()
+
+	req, rec := newDeleteBlockRequest(bson.NewObjectID().Hex(), bson.NewObjectID().Hex(), "", ownerID)
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteBlock_BlockNotFound(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+
+	req, rec := newDeleteBlockRequest(pageID.Hex(), bson.NewObjectID().Hex(), "", ownerID)
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandler_DeleteBlock_MissingUserInContext(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	handler := blocks.NewHandler(service)
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+
+	req := httptest.NewRequest(http.MethodDelete, "/pages/"+pageID.Hex()+"/blocks/"+bson.NewObjectID().Hex(), nil)
+	req.SetPathValue("page_id", pageID.Hex())
+	req.SetPathValue("block_id", bson.NewObjectID().Hex())
+	rec := httptest.NewRecorder()
+
+	handler.DeleteBlock(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+}

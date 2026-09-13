@@ -9,6 +9,7 @@ import (
 
 type Block struct {
 	ID            bson.ObjectID   `bson:"_id,omitempty"`
+	OwnerID       bson.ObjectID   `bson:"owner_id"`
 	PageID        bson.ObjectID   `bson:"page_id"`
 	ParentBlockID *bson.ObjectID  `bson:"parent_block_id"`
 	PagePosition  int             `bson:"page_position"`
@@ -17,7 +18,6 @@ type Block struct {
 	Content       bson.M          `bson:"content"`
 	IsSecure      bool            `bson:"is_secure"`
 	IsSpoiler     bool            `bson:"is_spoiler"`
-	IsDeleted     bool            `bson:"is_deleted"`
-	DeletedAt     *time.Time      `bson:"deleted_at, omitempty"`
-	ExpireAt      *time.Time      `bson:"expire_at"`
+	DeletedAt     *time.Time      `bson:"deleted_at,omitempty"`
+	ExpireAt      *time.Time      `bson:"expire_at,omitempty"`
 }

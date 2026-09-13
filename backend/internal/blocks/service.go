@@ -6,18 +6,22 @@ import (
 	"errors"
 	"fmt"
 	"plany/internal/pages"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type Service struct {
 	repo     *Repository
 	pageRepo *pages.Repository
+	client   *mongo.Client
 }
 
 var (
-	ErrPageNotFound           = errors.New("invalid pageID")
-	ErrParentBlockInOtherPage = errors.New("parent block have other page id")
+	ErrPageNotFound             = errors.New("invalid pageID")
+	ErrParentBlockInOtherPage   = errors.New("parent block have other page id")
+	ErrCannotUpdatePagePosition = errors.New("can't update page position in this method")
 )
 
 func NewService(repo *Repository, pageRepo *pages.Repository) *Service {
@@ -48,7 +52,7 @@ func (s *Service) CreateBlock(
 		if err != nil {
 			return nil, err
 		}
-		parentBlock, err := s.repo.FindByID(ctx, id)
+		parentBlock, err := s.repo.FindByID(ctx, id, pageID)
 		if err != nil {
 			return nil, err
 		}
@@ -108,7 +112,6 @@ func (s *Service) CreateBlock(
 		Content:       content,
 		IsSpoiler:     input.IsSpoiler,
 		IsSecure:      input.IsSecure,
-		IsDeleted:     false,
 	}
 
 	if err := s.repo.Create(ctx, block); err != nil {
@@ -148,4 +151,44 @@ func (s *Service) GetBlocks(ctx context.Context, ownerID, pageID bson.ObjectID) 
 		return nil, err
 	}
 	return blocks, nil
+}
+
+func (s *Service) DeleteBlock(ctx context.Context, blockID, ownerID, pageID bson.ObjectID, deleteIn *time.Duration) error {
+	ok, err := s.pageRepo.CheckPageOwner(ctx, pageID, ownerID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrPageNotFound
+	}
+	session, err := s.client.StartSession()
+	if err != nil {
+		return err
+	}
+	defer session.EndSession(ctx)
+	_, err = session.WithTransaction(ctx, func(sessCtx context.Context) (interface{}, error) {
+		block, err := s.repo.FindByID(sessCtx, blockID, pageID)
+		if err != nil {
+			return nil, err
+		}
+
+		if deleteIn == nil {
+			err = s.repo.DeleteBlock(sessCtx, pageID, blockID)
+		} else {
+			err = s.repo.UpdateFields(sessCtx, blockID, pageID, bson.M{
+				"deleted_at": time.Now(),
+				"expire_at": time.Now().Add(*deleteIn),
+			})
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = s.repo.DecrementPositionsAfter(sessCtx, pageID, block.PagePosition)
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+	
+	return err
 }
