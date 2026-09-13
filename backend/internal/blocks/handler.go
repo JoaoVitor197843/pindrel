@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"plany/internal/api"
 	contextkeys "plany/pkg/context"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -97,4 +98,50 @@ func (h *Handler) GetBlocks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(blocks)
+}
+
+func (h *Handler) DeleteBlock(w http.ResponseWriter, r *http.Request) {
+	userIDString, ok := r.Context().Value(contextkeys.UserIDKey).(string)
+	if !ok {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "user not found in context")
+		return
+	}
+	userID, err := bson.ObjectIDFromHex(userIDString)
+	if err != nil {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid user id")
+		return
+	}
+	pageIDString := r.PathValue("page_id")
+	pageID, err := bson.ObjectIDFromHex(pageIDString)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid page id")
+		return
+	}
+	blockIDString := r.PathValue("block_id")
+	blockID, err := bson.ObjectIDFromHex(blockIDString)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid block id")
+		return
+	}
+	var deleteIn *time.Duration
+	if retentionString := r.URL.Query().Get("retention"); retentionString != "" {
+		d, err := time.ParseDuration(retentionString)
+		if err != nil {
+			api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid retantion format")
+			return
+		}
+		deleteIn = &d
+	}
+	err = h.service.DeleteBlock(r.Context(), blockID, userID, pageID, deleteIn)
+	if err != nil {
+		switch {
+			case errors.Is(err, ErrPageNotFound), errors.Is(err, ErrBlockNotFound):
+            	api.WriteError(w, http.StatusNotFound, "page_not_found", "page not found")
+			default:
+				log.Printf("get blocks error: %v", err)
+				api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
+			}
+			return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

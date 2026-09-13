@@ -3,6 +3,7 @@ package blocks
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -60,10 +61,16 @@ func (r *Repository) FindBlocks(ctx context.Context, PageID bson.ObjectID) ([]Bl
 	return blocks, nil
 }
 
-func (r *Repository) FindByID(ctx context.Context, id bson.ObjectID) (*Block, error) {
+func (r *Repository) FindByID(ctx context.Context, id, pageID bson.ObjectID) (*Block, error) {
 	var block Block
-
-	err := r.collection.FindOne(ctx, bson.M{"_id": id}).Decode(&block)
+	filter := bson.M{
+		"_id":     id,
+		"page_id": pageID,
+		"$or": []bson.M{
+			{"expire_at": nil},
+			{"expire_at": bson.M{"$gt": time.Now()}},
+		}}
+	err := r.collection.FindOne(ctx, filter).Decode(&block)
 	if err != nil {
 		return nil, err
 	}
@@ -104,5 +111,31 @@ func (r *Repository) DeleteBlock(ctx context.Context, pageID, blockID bson.Objec
 
 func (r *Repository) DeletePageBlocks(ctx context.Context, pageID bson.ObjectID) error {
 	_, err := r.collection.DeleteMany(ctx, bson.M{"page_id": pageID})
+	return err
+}
+
+func (r *Repository) UpdateFields(ctx context.Context, blockID, pageID bson.ObjectID, fields bson.M) error {
+	if _, ok := fields["page_position"]; ok {
+		return ErrCannotUpdatePagePosition
+	}
+	result, err := r.collection.UpdateOne(ctx, bson.M{"_id": blockID, "page_id": pageID}, bson.M{"$set": fields})
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return ErrBlockNotFound
+	}
+	return nil
+}
+
+func (r *Repository) DecrementPositionsAfter(ctx context.Context, pageID bson.ObjectID, position int) error {
+	_, err := r.collection.UpdateMany(ctx,
+		bson.M{
+			"page_id":       pageID,
+			"page_position": bson.M{"$gt": position},
+			"deleted_at":    nil,
+		},
+		bson.M{"$inc": bson.M{"page_position": -1}},
+	)
 	return err
 }

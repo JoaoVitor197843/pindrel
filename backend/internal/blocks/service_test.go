@@ -3,7 +3,9 @@ package blocks_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"plany/internal/blocks"
 
@@ -470,9 +472,6 @@ func TestService_CreateBlock_PersistsFlagsAndContent(t *testing.T) {
 	if all[0].PagePosition != 3 {
 		t.Fatalf("expected page_position 3, got %d", all[0].PagePosition)
 	}
-	if all[0].IsDeleted {
-		t.Fatal("expected IsDeleted false on a newly created block")
-	}
 }
 
 func TestService_CreateBlock_MissingContent(t *testing.T) {
@@ -515,11 +514,11 @@ func TestService_CreateBlock_ContentNotAnObject(t *testing.T) {
 func TestService_GetBlocks_Success(t *testing.T) {
 	repo, service, pageRepo, cleanup := setupTest(t)
 	defer cleanup()
- 
+
 	ownerID := bson.NewObjectID()
 	pageID := createTestPage(t, pageRepo, ownerID)
 	cleanupPageBlocks(t, repo, pageID)
- 
+
 	b1 := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "one"}}
 	b2 := &blocks.Block{PageID: pageID, PagePosition: 1, Type: "text", Content: bson.M{"text": "two"}}
 	if err := repo.Create(context.Background(), b1); err != nil {
@@ -528,7 +527,7 @@ func TestService_GetBlocks_Success(t *testing.T) {
 	if err := repo.Create(context.Background(), b2); err != nil {
 		t.Fatalf("failed to create block: %v", err)
 	}
- 
+
 	result, err := service.GetBlocks(context.Background(), ownerID, pageID)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -537,14 +536,14 @@ func TestService_GetBlocks_Success(t *testing.T) {
 		t.Fatalf("expected 2 blocks, got %d", len(result))
 	}
 }
- 
+
 func TestService_GetBlocks_EmptyPage(t *testing.T) {
 	_, service, pageRepo, cleanup := setupTest(t)
 	defer cleanup()
- 
+
 	ownerID := bson.NewObjectID()
 	pageID := createTestPage(t, pageRepo, ownerID)
- 
+
 	result, err := service.GetBlocks(context.Background(), ownerID, pageID)
 	if err != nil {
 		t.Fatalf("expected no error for a page with no blocks, got %v", err)
@@ -553,45 +552,45 @@ func TestService_GetBlocks_EmptyPage(t *testing.T) {
 		t.Fatalf("expected 0 blocks, got %d", len(result))
 	}
 }
- 
+
 func TestService_GetBlocks_PageNotOwnedByCaller(t *testing.T) {
 	_, service, pageRepo, cleanup := setupTest(t)
 	defer cleanup()
- 
+
 	realOwnerID := bson.NewObjectID()
 	pageID := createTestPage(t, pageRepo, realOwnerID)
- 
+
 	attackerID := bson.NewObjectID()
- 
+
 	_, err := service.GetBlocks(context.Background(), attackerID, pageID)
 	if err != blocks.ErrPageNotFound {
 		t.Fatalf("expected ErrPageNotFound, got %v", err)
 	}
 }
- 
+
 func TestService_GetBlocks_NonExistentPage(t *testing.T) {
 	_, service, _, cleanup := setupTest(t)
 	defer cleanup()
- 
+
 	callerID := bson.NewObjectID()
 	ghostPageID := bson.NewObjectID()
- 
+
 	_, err := service.GetBlocks(context.Background(), callerID, ghostPageID)
 	if err != blocks.ErrPageNotFound {
 		t.Fatalf("expected ErrPageNotFound, got %v", err)
 	}
 }
- 
+
 func TestService_GetBlocks_OnlyReturnsBlocksForGivenPage(t *testing.T) {
 	repo, service, pageRepo, cleanup := setupTest(t)
 	defer cleanup()
- 
+
 	ownerID := bson.NewObjectID()
 	pageA := createTestPage(t, pageRepo, ownerID)
 	pageB := createTestPage(t, pageRepo, ownerID)
 	cleanupPageBlocks(t, repo, pageA)
 	cleanupPageBlocks(t, repo, pageB)
- 
+
 	inA := &blocks.Block{PageID: pageA, Type: "text", Content: bson.M{"text": "in a"}}
 	inB := &blocks.Block{PageID: pageB, Type: "text", Content: bson.M{"text": "in b"}}
 	if err := repo.Create(context.Background(), inA); err != nil {
@@ -600,7 +599,7 @@ func TestService_GetBlocks_OnlyReturnsBlocksForGivenPage(t *testing.T) {
 	if err := repo.Create(context.Background(), inB); err != nil {
 		t.Fatalf("failed to create block: %v", err)
 	}
- 
+
 	result, err := service.GetBlocks(context.Background(), ownerID, pageA)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
@@ -610,5 +609,252 @@ func TestService_GetBlocks_OnlyReturnsBlocksForGivenPage(t *testing.T) {
 	}
 	if result[0].ID != inA.ID {
 		t.Fatalf("expected block %s, got %s", inA.ID.Hex(), result[0].ID.Hex())
+	}
+}
+
+func TestService_DeleteBlock_HardDelete_Success(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+
+	block := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "one"}}
+	if err := repo.Create(context.Background(), block); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+
+	err := service.DeleteBlock(context.Background(), block.ID, ownerID, pageID, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	_, err = repo.FindByID(context.Background(), block.ID, pageID)
+	if err == nil {
+		t.Fatalf("expected block to be gone after hard delete, but it was found")
+	}
+}
+
+func TestService_DeleteBlock_SoftDelete_Success(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+
+	block := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "one"}}
+	if err := repo.Create(context.Background(), block); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+
+	retention := 24 * time.Hour
+	before := time.Now()
+
+	err := service.DeleteBlock(context.Background(), block.ID, ownerID, pageID, &retention)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	found, err := repo.FindByIDs(context.Background(), []bson.ObjectID{block.ID})
+	if err != nil {
+		t.Fatalf("failed to fetch soft-deleted block: %v", err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(found))
+	}
+
+	got := found[0]
+	if got.DeletedAt == nil {
+		t.Fatalf("expected DeletedAt to be set, got nil")
+	}
+	if got.ExpireAt == nil {
+		t.Fatalf("expected ExpireAt to be set, got nil")
+	}
+	if got.DeletedAt.Before(before) {
+		t.Fatalf("expected DeletedAt to be at or after %v, got %v", before, got.DeletedAt)
+	}
+	expectedExpire := got.DeletedAt.Add(retention)
+	diff := got.ExpireAt.Sub(expectedExpire)
+	if diff < -time.Second || diff > time.Second {
+		t.Fatalf("expected ExpireAt ~= DeletedAt + retention, got DeletedAt=%v ExpireAt=%v", got.DeletedAt, got.ExpireAt)
+	}
+
+	_, err = repo.FindByID(context.Background(), block.ID, pageID)
+	if err == nil {
+		t.Fatalf("expected soft-deleted block to be invisible to FindByID, but it was found")
+	}
+}
+
+func TestService_DeleteBlock_PageNotFound(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+	otherOwnerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, otherOwnerID)
+
+	err := service.DeleteBlock(context.Background(), bson.NewObjectID(), ownerID, pageID, nil)
+	if !errors.Is(err, blocks.ErrPageNotFound) {
+		t.Fatalf("expected ErrPageNotFound, got: %v", err)
+	}
+}
+
+func TestService_DeleteBlock_PageDoesNotExist(t *testing.T) {
+	_, service, _, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+
+	err := service.DeleteBlock(context.Background(), bson.NewObjectID(), ownerID, bson.NewObjectID(), nil)
+	if !errors.Is(err, blocks.ErrPageNotFound) {
+		t.Fatalf("expected ErrPageNotFound, got: %v", err)
+	}
+}
+
+func TestService_DeleteBlock_BlockNotFound(t *testing.T) {
+	_, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+
+	err := service.DeleteBlock(context.Background(), bson.NewObjectID(), ownerID, pageID, nil)
+	if !errors.Is(err, blocks.ErrBlockNotFound) {
+		t.Fatalf("expected ErrBlockNotFound, got: %v", err)
+	}
+}
+
+func TestService_DeleteBlock_BlockFromOtherPage(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	otherPageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+	cleanupPageBlocks(t, repo, otherPageID)
+
+	block := &blocks.Block{PageID: otherPageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "one"}}
+	if err := repo.Create(context.Background(), block); err != nil {
+		t.Fatalf("failed to create block: %v", err)
+	}
+
+	err := service.DeleteBlock(context.Background(), block.ID, ownerID, pageID, nil)
+	if !errors.Is(err, blocks.ErrBlockNotFound) {
+		t.Fatalf("expected ErrBlockNotFound, got: %v", err)
+	}
+
+	stillThere, err := repo.FindByID(context.Background(), block.ID, otherPageID)
+	if err != nil {
+		t.Fatalf("expected block to still exist in its real page, got err: %v", err)
+	}
+	if stillThere == nil {
+		t.Fatalf("expected block to still exist")
+	}
+}
+
+func TestService_DeleteBlock_ReindexesFollowingBlocks(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+
+	b0 := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "zero"}}
+	b1 := &blocks.Block{PageID: pageID, PagePosition: 1, Type: "text", Content: bson.M{"text": "one"}}
+	b2 := &blocks.Block{PageID: pageID, PagePosition: 2, Type: "text", Content: bson.M{"text": "two"}}
+	b3 := &blocks.Block{PageID: pageID, PagePosition: 3, Type: "text", Content: bson.M{"text": "three"}}
+
+	for _, b := range []*blocks.Block{b0, b1, b2, b3} {
+		if err := repo.Create(context.Background(), b); err != nil {
+			t.Fatalf("failed to create block: %v", err)
+		}
+	}
+
+	err := service.DeleteBlock(context.Background(), b1.ID, ownerID, pageID, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	got0, err := repo.FindByID(context.Background(), b0.ID, pageID)
+	if err != nil {
+		t.Fatalf("failed to fetch b0: %v", err)
+	}
+	if got0.PagePosition != 0 {
+		t.Fatalf("expected b0.PagePosition to stay 0, got %d", got0.PagePosition)
+	}
+
+	got2, err := repo.FindByID(context.Background(), b2.ID, pageID)
+	if err != nil {
+		t.Fatalf("failed to fetch b2: %v", err)
+	}
+	if got2.PagePosition != 1 {
+		t.Fatalf("expected b2.PagePosition to become 1, got %d", got2.PagePosition)
+	}
+
+	got3, err := repo.FindByID(context.Background(), b3.ID, pageID)
+	if err != nil {
+		t.Fatalf("failed to fetch b3: %v", err)
+	}
+	if got3.PagePosition != 2 {
+		t.Fatalf("expected b3.PagePosition to become 2, got %d", got3.PagePosition)
+	}
+}
+
+func TestService_DeleteBlock_DoesNotReindexAlreadySoftDeletedBlocks(t *testing.T) {
+	repo, service, pageRepo, cleanup := setupTest(t)
+	defer cleanup()
+
+	ownerID := bson.NewObjectID()
+	pageID := createTestPage(t, pageRepo, ownerID)
+	cleanupPageBlocks(t, repo, pageID)
+
+	b0 := &blocks.Block{PageID: pageID, PagePosition: 0, Type: "text", Content: bson.M{"text": "zero"}}
+	b1 := &blocks.Block{PageID: pageID, PagePosition: 1, Type: "text", Content: bson.M{"text": "one"}}
+	b2 := &blocks.Block{PageID: pageID, PagePosition: 2, Type: "text", Content: bson.M{"text": "two"}}
+
+	for _, b := range []*blocks.Block{b0, b1, b2} {
+		if err := repo.Create(context.Background(), b); err != nil {
+			t.Fatalf("failed to create block: %v", err)
+		}
+	}
+
+	retention := time.Hour
+	if err := service.DeleteBlock(context.Background(), b1.ID, ownerID, pageID, &retention); err != nil {
+		t.Fatalf("failed to soft delete b1: %v", err)
+	}
+
+	got2, err := repo.FindByID(context.Background(), b2.ID, pageID)
+	if err != nil {
+		t.Fatalf("failed to fetch b2: %v", err)
+	}
+	if got2.PagePosition != 1 {
+		t.Fatalf("expected b2.PagePosition to become 1 after b1 soft delete, got %d", got2.PagePosition)
+	}
+
+	if err := service.DeleteBlock(context.Background(), b0.ID, ownerID, pageID, nil); err != nil {
+		t.Fatalf("failed to hard delete b0: %v", err)
+	}
+
+	got2Again, err := repo.FindByID(context.Background(), b2.ID, pageID)
+	if err != nil {
+		t.Fatalf("failed to fetch b2 again: %v", err)
+	}
+	if got2Again.PagePosition != 0 {
+		t.Fatalf("expected b2.PagePosition to become 0, got %d", got2Again.PagePosition)
+	}
+
+	foundB1, err := repo.FindByIDs(context.Background(), []bson.ObjectID{b1.ID})
+	if err != nil {
+		t.Fatalf("failed to fetch b1 raw: %v", err)
+	}
+	if len(foundB1) != 1 {
+		t.Fatalf("expected b1 to still exist (soft-deleted), got %d results", len(foundB1))
+	}
+	if foundB1[0].PagePosition != 1 {
+		t.Fatalf("expected already-soft-deleted b1.PagePosition to remain untouched at 1, got %d", foundB1[0].PagePosition)
 	}
 }
