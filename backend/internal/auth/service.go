@@ -3,10 +3,10 @@ package auth
 import (
 	"context"
 	"errors"
+	"plany/internal/database/db"
 	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
+	"github.com/google/uuid"
 )
 
 var (
@@ -17,32 +17,29 @@ var (
 )
 
 type Service struct {
-	repo                *Repository
+	repo                *db.Queries
 	blocklist           *BlocklistRepository
 	registrationEnabled bool
 }
 
-func NewService(repo *Repository, blocklist *BlocklistRepository, registrationEnabled bool) *Service {
+func NewService(repo *db.Queries, blocklist *BlocklistRepository, registrationEnabled bool) *Service {
 	return &Service{repo: repo, blocklist: blocklist, registrationEnabled: registrationEnabled}
 }
 
-func (s *Service) Register(ctx context.Context, email, username, password string) (*User, error) {
+func (s *Service) Register(ctx context.Context, email, username, password string, profile []byte) (*db.CreateUserRow, error) {
 	if !s.registrationEnabled {
 		return nil, ErrRegistrationDisabled
 	}
-	_, err := s.repo.FindByEmail(ctx, email)
+	_, err := s.repo.GetUserByEmail(ctx, email)
 	if err == nil {
 		return nil, ErrEmailAlreadyExists
-	}
-	if !errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, err
 	}
 	hashedPassword, err := HashPassword(password)
 	if err != nil {
 		return nil, err
 	}
-	user := User{Username: username, Email: email, PasswordHash: hashedPassword, CreatedAt: time.Now()}
-	err = s.repo.Create(ctx, &user)
+	user_params := db.CreateUserParams{Email: email, PasswordHash: hashedPassword, Profile: profile}
+	user, err := s.repo.CreateUser(ctx, user_params)
 	if err != nil {
 		return nil, err
 	}
@@ -51,11 +48,8 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 
 func (s *Service) Login(ctx context.Context, email, password, secret string, accessExpireAt, refreshExpireAt time.Duration) (*LoginResult, error) {
 
-	user, err := s.repo.FindByEmail(ctx, email)
+	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return nil, ErrInvalidCredentials
-		}
 		return nil, err
 	}
 	passed, err := VerifyPassword(user.PasswordHash, password)
@@ -65,11 +59,11 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 	if !passed {
 		return nil, ErrInvalidCredentials
 	}
-	accessToken, err := GenerateToken(user.ID.Hex(), secret, accessExpireAt)
+	accessToken, err := GenerateToken(user.ID.String(), secret, accessExpireAt)
 	if err != nil {
 		return nil, err
 	}
-	refreshToken, err := GenerateToken(user.ID.Hex(), secret, refreshExpireAt)
+	refreshToken, err := GenerateToken(user.ID.String(), secret, refreshExpireAt)
 	if err != nil {
 		return nil, err
 	}
@@ -81,6 +75,11 @@ func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret 
 	if err != nil {
 		return err
 	}
+	_, err = uuid.Parse(RefreshClaims.UserID)
+	if err != nil {
+		return err
+	}
+
 	if err := s.blocklist.Revoke(ctx, RefreshClaims.ID, RefreshClaims.ExpiresAt.Time); err != nil {
 		return err
 	}
@@ -100,16 +99,13 @@ func (s *Service) Refresh(ctx context.Context, tokenString, secret string, acces
 	if err != nil {
 		return "", err
 	}
-	id, err := bson.ObjectIDFromHex(claims.UserID)
+	id, err := uuid.Parse(claims.UserID)
 	if err != nil {
 		return "", err
 	}
 
-	_, err = s.repo.FindByID(ctx, id)
+	_, err = s.repo.GetUserByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return "", ErrUserNotFound
-		}
 		return "", err
 	}
 	accessToken, err := GenerateToken(claims.UserID, secret, accessExpireAt)
@@ -119,18 +115,18 @@ func (s *Service) Refresh(ctx context.Context, tokenString, secret string, acces
 	return accessToken, nil
 }
 
-func (s *Service) Me(ctx context.Context, tokenString, secret string) (*User, error) {
+func (s *Service) Me(ctx context.Context, tokenString, secret string) (*db.GetUserByIDRow, error) {
 	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
 	if err != nil {
 		return nil, err
 	}
-	id, err := bson.ObjectIDFromHex(claims.UserID)
+	id, err := uuid.Parse(claims.UserID)
 	if err != nil {
 		return nil, err
 	}
-	user, err := s.repo.FindByID(ctx, id)
+	user, err := s.repo.GetUserByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return user, nil
+	return &user, nil
 }

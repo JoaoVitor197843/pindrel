@@ -2,36 +2,32 @@ package auth_test
 
 import (
 	"context"
-	"os"
 	"plany/internal/auth"
+	"plany/internal/config"
 	"plany/internal/database"
+	"plany/internal/database/db"
 	"testing"
 
 	"github.com/joho/godotenv"
 )
 
-func setupTest(t *testing.T, registrationEnabled bool) (*auth.Handler, *auth.Repository, *auth.BlocklistRepository, func()) {
+func setupTest(t *testing.T, registrationEnabled bool) (*auth.Handler, *db.Queries, *auth.BlocklistRepository, func()) {
 	godotenv.Load("../../.env")
-
-	client, err := database.DefaultConnect(os.Getenv("MONGO_URI"))
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("error on creating configuration: %v", err)
+	}
+	dbPool, err := database.NewConnection(context.Background(), cfg.Database)
 	if err != nil {
 		t.Fatalf("failed to connect to mongo: %v", err)
 	}
-
-	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo, err := auth.NewRepository(context.Background(), db)
-	if err != nil {
-		t.Fatalf("collection creation failed: %v", err)
-	}
-	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
-	if err != nil {
-		t.Fatalf("failed to create blocklist repo: %v", err)
-	}
+	blocklist := auth.NewBlocklistRepository(dbPool)
+	repo := db.New(dbPool)
 	service := auth.NewService(repo, blocklist, registrationEnabled)
 	handler := auth.NewHandler(service)
 
 	cleanup := func() {
-		client.Disconnect(context.Background())
+		dbPool.Close()
 	}
 
 	return handler, repo, blocklist, cleanup

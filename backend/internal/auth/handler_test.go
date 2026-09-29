@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
+	"github.com/google/uuid"
 )
 
 func TestHandler_Register_Success(t *testing.T) {
@@ -26,8 +26,8 @@ func TestHandler_Register_Success(t *testing.T) {
 	var response auth.RegisterResponse
 	json.NewDecoder(rec.Body).Decode(&response)
 
-	id, _ := bson.ObjectIDFromHex(response.User.ID)
-	defer repo.Delete(context.Background(), id)
+	id, _ := uuid.Parse(response.User.ID)
+	defer repo.DeleteUser(context.Background(), id)
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d", rec.Code)
@@ -50,8 +50,8 @@ func TestHandler_Register_EmailAlreadyExists(t *testing.T) {
 	var response auth.RegisterResponse
 	json.NewDecoder(rec1.Body).Decode(&response)
 
-	id, _ := bson.ObjectIDFromHex(response.User.ID)
-	defer repo.Delete(context.Background(), id)
+	id, _ := uuid.Parse(response.User.ID)
+	defer repo.DeleteUser(context.Background(), id)
 	if rec2.Code != http.StatusConflict {
 		t.Fatalf("expected status 409, got %d", rec2.Code)
 	}
@@ -115,8 +115,8 @@ func TestHandler_Login_Success(t *testing.T) {
 
 	var registerResp auth.RegisterResponse
 	json.NewDecoder(registerRec.Body).Decode(&registerResp)
-	id, _ := bson.ObjectIDFromHex(registerResp.User.ID)
-	defer repo.Delete(context.Background(), id)
+	id, _ := uuid.Parse(registerResp.User.ID)
+	defer repo.DeleteUser(context.Background(), id)
 
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))
@@ -159,8 +159,8 @@ func TestHandler_Logout_Success(t *testing.T) {
 
 	var registerResp auth.RegisterResponse
 	json.NewDecoder(registerRec.Body).Decode(&registerResp)
-	id, _ := bson.ObjectIDFromHex(registerResp.User.ID)
-	defer repo.Delete(context.Background(), id)
+	id, _ := uuid.Parse(registerResp.User.ID)
+	defer repo.DeleteUser(context.Background(), id)
 
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))
@@ -210,8 +210,8 @@ func TestHandler_Refresh_Success(t *testing.T) {
 
 	var registerResp auth.RegisterResponse
 	json.NewDecoder(registerRec.Body).Decode(&registerResp)
-	id, _ := bson.ObjectIDFromHex(registerResp.User.ID)
-	defer repo.Delete(context.Background(), id)
+	id, _ := uuid.Parse(registerResp.User.ID)
+	defer repo.DeleteUser(context.Background(), id)
 
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))
@@ -258,8 +258,8 @@ func TestHandler_Me_Success(t *testing.T) {
 
 	var registerResp auth.RegisterResponse
 	json.NewDecoder(registerRec.Body).Decode(&registerResp)
-	id, _ := bson.ObjectIDFromHex(registerResp.User.ID)
-	defer repo.Delete(context.Background(), id)
+	id, _ := uuid.Parse(registerResp.User.ID)
+	defer repo.DeleteUser(context.Background(), id)
 
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))

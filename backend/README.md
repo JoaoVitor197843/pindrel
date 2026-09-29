@@ -43,8 +43,8 @@ go run ./cmd/api
 | Variável | Descrição | Padrão |
 | --- | --- | --- |
 | `PORT` | Porta em que a API escuta | `8080` |
-| `MONGO_URI` | URI de conexão com o MongoDB | `mongodb://mongo:27017` |
-| `MONGO_DB_NAME` | Nome do banco de dados | `plany` |
+| `POSTGRES_URI` | URI de conexão com o MongoDB | `mongodb://mongo:27017` |
+| `POSTGRES_DB_NAME` | Nome do banco de dados | `plany` |
 | `JWT_SECRET` | Segredo usado para assinar os tokens JWT | — |
 | `JWT_ACCESS_EXPIRY` | Validade do access token | `15m` |
 | `JWT_REFRESH_EXPIRY` | Validade do refresh token | `720h` |

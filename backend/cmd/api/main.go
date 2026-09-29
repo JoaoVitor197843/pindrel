@@ -2,15 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"plany/internal/auth"
+	"plany/internal/config"
 	"plany/internal/database"
+	"plany/internal/database/db"
 	"plany/internal/middleware"
-	"plany/internal/pages"
-	"strconv"
-	"strings"
 	"time"
 
 	_ "plany/docs"
@@ -30,58 +29,20 @@ import (
 // @name Authorization
 func main() {
 	godotenv.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("failed on configuration: %v", err)
+	}
+	dbPool, err := database.NewConnection(context.Background(), cfg.Database)
+	if err != nil {
+		log.Fatalf("failed to connect to postgres: %v", err)
+	}
+	defer dbPool.Close()
+	authRepo := db.New(dbPool)
+	blocklist := auth.NewBlocklistRepository(dbPool)
 
-	mongoURI := os.Getenv("MONGO_URI")
-	dbName := os.Getenv("MONGO_DB_NAME")
-	jwtSecret := os.Getenv("JWT_SECRET")
-	var missing []string
-	if mongoURI == "" {
-		missing = append(missing, "MONGO_URI")
-	}
-	if dbName == "" {
-		missing = append(missing, "MONGO_DB_NAME")
-	}
-	if jwtSecret == "" {
-		missing = append(missing, "JWT_SECRET")
-	}
-
-	if len(missing) > 0 {
-		log.Fatalf("missing required environment variables: %s", strings.Join(missing, ", "))
-	}
-	rawRegistrationEnabled := os.Getenv("REGISTRATION_ENABLED")
-	if rawRegistrationEnabled == "" {
-		rawRegistrationEnabled = "true"
-	}
-	registrationEnabled, err := strconv.ParseBool(rawRegistrationEnabled)
-	if err != nil {
-		log.Fatalf("invalid REGISTRATION_ENABLED value: %v", err)
-	}
-	client, err := database.DefaultConnect(mongoURI)
-	if err != nil {
-		log.Fatalf("failed to connect to mongo: %v", err)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(dbName)
-	authRepo, err := auth.NewRepository(context.Background(), db)
-	if err != nil {
-		log.Fatalf("failed to create auth repo: %v", err)
-	}
-	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
-	if err != nil {
-		log.Fatalf("failed to create blocklist repo: %v", err)
-	}
-	authService := auth.NewService(authRepo, blocklist, registrationEnabled)
+	authService := auth.NewService(authRepo, blocklist, cfg.RegistrationEnabled)
 	authHandler := auth.NewHandler(authService)
-
-	accessExpiry, err := time.ParseDuration(os.Getenv("JWT_ACCESS_EXPIRY"))
-	if err != nil {
-		accessExpiry = 15 * time.Minute
-	}
-
-	refreshExpiry, err := time.ParseDuration(os.Getenv("JWT_REFRESH_EXPIRY"))
-	if err != nil {
-		refreshExpiry = 720 * time.Hour
-	}
 	loginLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
 	registerLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
 	mux := http.NewServeMux()
@@ -90,35 +51,34 @@ func main() {
 		authHandler.Register(w, r)
 	})))
 	mux.Handle("POST /auth/login", middleware.RateLimitMiddleware(loginLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Login(w, r, jwtSecret, accessExpiry, refreshExpiry)
+		authHandler.Login(w, r, cfg.JWTSecret, cfg.JWTAccessExpiry, cfg.JWTRefreshExpiry)
 	})))
 	mux.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Logout(w, r, jwtSecret)
+		authHandler.Logout(w, r, cfg.JWTSecret)
 	})
 	mux.HandleFunc("POST /auth/refresh", func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Refresh(w, r, jwtSecret, accessExpiry)
+		authHandler.Refresh(w, r, cfg.JWTSecret, cfg.JWTAccessExpiry)
 	})
 	mux.HandleFunc("GET /auth/me", func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Me(w, r, jwtSecret)
+		authHandler.Me(w, r, cfg.JWTSecret)
 	})
 
-	pagesRepo, err := pages.NewRepository(context.Background(), db)
-	if err != nil {
-		log.Fatalf("failed to setup pages repo: %v", err)
-	}
-	pagesService := pages.NewService(pagesRepo, authRepo)
-	pagesHandler := pages.NewHandler(pagesService)
+	// pagesRepo, err := pages.NewRepository(context.Background(), db)
+	// if err != nil {
+	// 	log.Fatalf("failed to setup pages repo: %v", err)
+	// }
+	// pagesService := pages.NewService(pagesRepo, authRepo)
+	// pagesHandler := pages.NewHandler(pagesService)
 
-	mux.Handle("GET /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pagesHandler.GetPages(w, r)
-	})))
+	// mux.Handle("GET /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 	pagesHandler.GetPages(w, r)
+	// })))
 
-	mux.Handle("POST /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pagesHandler.CreatePage(w, r)
-	})))
+	// mux.Handle("POST /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 	pagesHandler.CreatePage(w, r)
+	// })))
 
-	debugMode, _ := strconv.ParseBool(os.Getenv("DEBUG_MODE"))
-	if debugMode {
+	if cfg.DebugMode {
 		mux.HandleFunc("GET /swagger/", httpSwagger.WrapHandler)
 		log.Println("swagger UI enabled at /swagger/index.html")
 	}
@@ -132,8 +92,8 @@ func main() {
 			log.Println("Limiters Cleaned")
 		}
 	}()
-	log.Printf("server running on port 8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	log.Println("server running on port ", cfg.Port)
+	if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), mux); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
