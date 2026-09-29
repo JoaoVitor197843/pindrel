@@ -2,50 +2,44 @@ package auth
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type RevokedToken struct {
-	JTI       string    `bson:"jti"`
-	ExpiresAt time.Time `bson:"expires_at"`
+	JTI       string    `db:"jti"`
+	ExpiresAt time.Time `db:"expires_at"`
 }
 
 type BlocklistRepository struct {
-	collection *mongo.Collection
+	pool *pgxpool.Pool
 }
 
-func NewBlocklistRepository(ctx context.Context, db *mongo.Database) (*BlocklistRepository, error) {
-	collection := db.Collection("revoked_tokens")
-
-	indexModel := mongo.IndexModel{
-		Keys: bson.M{"expires_at": 1},
-		Options: options.Index().SetExpireAfterSeconds(0),
-	}
-
-	_, err := collection.Indexes().CreateOne(ctx, indexModel)
-	if err != nil {
-		return nil, err
-	}
-	return &BlocklistRepository{collection: collection}, nil
+func NewBlocklistRepository(pool *pgxpool.Pool) *BlocklistRepository {
+	return &BlocklistRepository{pool: pool}
 }
 
 func (b *BlocklistRepository) Revoke(ctx context.Context, jti string, expiresAt time.Time) error {
-	_, err := b.collection.InsertOne(ctx, RevokedToken{JTI: jti, ExpiresAt: expiresAt})
+	query := `
+			INSERT INTO revoked_tokens (token_id, expires_at)
+			VALUES ($1, $2)
+			ON CONFLICT (token_id) DO NOTHING
+	`
+	_, err := b.pool.Exec(ctx, query, jti, expiresAt)
 	return err
 }
 func (b *BlocklistRepository) IsRevoked(ctx context.Context, jti string) (bool, error) {
-	var revoked RevokedToken
-	err := b.collection.FindOne(ctx, bson.M{"jti": jti}).Decode(&revoked)
+	query := `
+			SELECT EXISTS(
+				SELECT 1 FROM revoked_tokens
+				WHERE token_id = $1
+			)
+	`
+	var revoked bool
+	err := b.pool.QueryRow(ctx, query, jti).Scan(&revoked)
 	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return false, nil
-		}
 		return false, err
 	}
-	return true, nil
+	return revoked, nil
 }

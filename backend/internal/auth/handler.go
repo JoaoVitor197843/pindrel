@@ -42,7 +42,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "invalid_input", "validation failed")
 		return
 	}
-	user, err := h.service.Register(r.Context(), input.Email, input.Username, input.Password)
+	user, err := h.service.Register(r.Context(), input.Email, input.Username, input.Password, input.Profile)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRegistrationDisabled):
@@ -61,9 +61,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(RegisterResponse{
 		User: UserSummary{
-			ID:       user.ID.Hex(),
+			ID:       user.ID.String(),
 			Email:    user.Email,
-			Username: user.Username,
 		},
 	})
 }
@@ -206,8 +205,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request, jwtSecret string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(UserSummary{
-		ID:       user.ID.Hex(),
+		ID:       user.ID.String(),
 		Email:    user.Email,
-		Username: user.Username,
 	})
 }

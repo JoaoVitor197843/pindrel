@@ -46,6 +46,7 @@ func ValidateToken(ctx context.Context, tokenString, secret string, blocklist *B
 	if err != nil {
 		return nil, err
 	}
+
 	revoked, err := blocklist.IsRevoked(ctx, claims.ID)
 	if err != nil {
 		return nil, err

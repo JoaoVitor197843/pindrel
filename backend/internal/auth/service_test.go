@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"plany/internal/auth"
+	"plany/internal/config"
 	"plany/internal/database"
+	"plany/internal/database/db"
 	"testing"
 	"time"
 
@@ -15,25 +16,20 @@ import (
 
 func TestService_Register_RegistrationDisabled(t *testing.T) {
 	godotenv.Load("../../.env")
-
-	client, err := database.DefaultConnect(os.Getenv("MONGO_URI"))
+	cfg, err := config.Load()
 	if err != nil {
-		t.Fatalf("failed to connect to mongo: %v", err)
+		t.Fatalf("error on creating configuration: %v", err)
 	}
-	defer client.Disconnect(context.Background())
-
-	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo, err := auth.NewRepository(context.Background(), db)
+	dbPool, err := database.NewConnection(context.Background(), cfg.Database)
 	if err != nil {
-		t.Fatalf("collection creation failed: %v", err)
+		t.Fatalf("failed to connect to postgres: %v", err)
 	}
-	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
-	if err != nil {
-		t.Fatalf("Error on generating blocklist: %v", err)
-	}
+	defer dbPool.Close()
+	repo := db.New(dbPool)
+	blocklist := auth.NewBlocklistRepository(dbPool)
 	service := auth.NewService(repo, blocklist, false) // registro desabilitado
 
-	_, err = service.Register(context.Background(), "email@teste.com", "user", "senha_valida_123")
+	_, err = service.Register(context.Background(), "email@teste.com", "user", "senha_valida_123", []byte("{}"))
 
 	if !errors.Is(err, auth.ErrRegistrationDisabled) {
 		t.Fatalf("expected ErrRegistrationDisabled, got: %v", err)
@@ -42,32 +38,27 @@ func TestService_Register_RegistrationDisabled(t *testing.T) {
 
 func TestService_Register_DuplicateEmail(t *testing.T) {
 	godotenv.Load("../../.env")
-
-	client, err := database.DefaultConnect(os.Getenv("MONGO_URI"))
+	cfg, err := config.Load()
 	if err != nil {
-		t.Fatalf("failed to connect to mongo: %v", err)
+		t.Fatalf("error on creating configuration: %v", err)
 	}
-	defer client.Disconnect(context.Background())
-
-	db := client.Database(os.Getenv("MONGO_DB_NAME"))
-	repo, err := auth.NewRepository(context.Background(), db)
+	dbPool, err := database.NewConnection(context.Background(), cfg.Database)
 	if err != nil {
-		t.Fatalf("collection creation failed: %v", err)
+		t.Fatalf("failed to connect to postgres: %v", err)
 	}
-	blocklist, err := auth.NewBlocklistRepository(context.Background(), db)
-	if err != nil {
-		t.Fatalf("Error on generating blocklist: %v", err)
-	}
+	defer dbPool.Close()
+	repo := db.New(dbPool)
+	blocklist := auth.NewBlocklistRepository(dbPool)
 	service := auth.NewService(repo, blocklist, true)
 	email := fmt.Sprintf("dup-%d@teste.com", time.Now().UnixNano())
 
-	user, err := service.Register(context.Background(), email, "user1", "senha_valida_123")
+	user, err := service.Register(context.Background(), email, "user1", "senha_valida_123", []byte("{}"))
 	if err != nil {
 		t.Fatalf("first register should succeed, got: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
-	_, err = service.Register(context.Background(), email, "user2", "senha_valida_123")
+	_, err = service.Register(context.Background(), email, "user2", "senha_valida_123", []byte("{}"))
 	if !errors.Is(err, auth.ErrEmailAlreadyExists) {
 		t.Fatalf("expected ErrEmailAlreadyExists, got: %v", err)
 	}
@@ -81,11 +72,11 @@ func TestService_Login_Success(t *testing.T) {
 	email := fmt.Sprintf("svclogin-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password)
+	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
 	tokens, err := service.Login(context.Background(), email, password, "test-secret", 15*time.Minute, 720*time.Hour)
 	if err != nil {
@@ -104,11 +95,11 @@ func TestService_Login_WrongPassword(t *testing.T) {
 	email := fmt.Sprintf("svclogin-wrong-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password)
+	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
 	_, err = service.Login(context.Background(), email, "senha_errada", "test-secret", 15*time.Minute, 720*time.Hour)
 	if !errors.Is(err, auth.ErrInvalidCredentials) {
@@ -124,11 +115,11 @@ func TestService_Logout_RevokesToken(t *testing.T) {
 	email := fmt.Sprintf("svclogout-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password)
+	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
 	tokens, err := service.Login(context.Background(), email, password, "test-secret", 15*time.Minute, 720*time.Hour)
 	if err != nil {
@@ -153,11 +144,11 @@ func TestService_Refresh_Success(t *testing.T) {
 	email := fmt.Sprintf("svcrefresh-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password)
+	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
 	tokens, err := service.Login(context.Background(), email, password, "test-secret", 15*time.Minute, 720*time.Hour)
 	if err != nil {
@@ -181,11 +172,11 @@ func TestService_Refresh_RevokedToken(t *testing.T) {
 	email := fmt.Sprintf("svcrefresh-revoked-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password)
+	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
 	tokens, err := service.Login(context.Background(), email, password, "test-secret", 15*time.Minute, 720*time.Hour)
 	if err != nil {
@@ -210,11 +201,11 @@ func TestService_Me_Success(t *testing.T) {
 	email := fmt.Sprintf("svcme-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password)
+	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
 	tokens, err := service.Login(context.Background(), email, password, "test-secret", 15*time.Minute, 720*time.Hour)
 	if err != nil {
@@ -238,11 +229,11 @@ func TestService_Me_RevokedToken(t *testing.T) {
 	email := fmt.Sprintf("svcme-revoked-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password)
+	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
-	defer repo.Delete(context.Background(), user.ID)
+	defer repo.DeleteUser(context.Background(), user.ID)
 
 	tokens, err := service.Login(context.Background(), email, password, "test-secret", 15*time.Minute, 720*time.Hour)
 	if err != nil {
@@ -252,7 +243,6 @@ func TestService_Me_RevokedToken(t *testing.T) {
 	if err := service.Logout(context.Background(), tokens.RefreshToken, tokens.AccessToken, "test-secret"); err != nil {
 		t.Fatalf("logout should succeed: %v", err)
 	}
-
 	_, err = service.Me(context.Background(), tokens.AccessToken, "test-secret")
 	if err == nil {
 		t.Fatal("expected me to fail with revoked token, got nil error")

@@ -10,31 +10,43 @@ services:
     env_file: ./backend/.env
     environment:
       - PORT=${PORT:-8080}
-      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017}
-      - MONGO_DB_NAME=${MONGO_DB_NAME:-plany}
+      - DB_USER=${DB_USER:-dev}
+      - DB_PASSWORD=${DB_PASSWORD:-change_me}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_NAME=${DB_NAME:-plany}
+      - SSL_MODE=${SSL_MODE:-disable}
       - JWT_SECRET=${JWT_SECRET:-change_me_to_a_long_random_string}
       - JWT_ACCESS_EXPIRY=${JWT_ACCESS_EXPIRY:-15m}
       - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY:-720h}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
+      - DEBUG_MODE=${DEBUG_MODE:-false}
     depends_on:
-      mongo:
+      postgres:
         condition: service_healthy
 
-  mongo: # utilize somente caso não tenha um banco mongo exterior que queira
-    image: mongo:8 # caso utilize dispositivos como o raspberry pi 4 ou inferiores coloque mongo:4.4.18
+  postgres:
+    image: postgres:18-alpine
+
     restart: unless-stopped
-    volumes:
-      - mongo-data:/data/db
-    env_file: ./.env
+    command: >
+      postgres
+        -c shared_buffers=32MB
+        -c work_mem=4MB
+        -c max_connections=20 
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_INITDB_ROOT_USERNAME:-admin}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_INITDB_ROOT_PASSWORD:-change_me}
+      POSTGRES_DB: ${DB_NAME:-plany} 
+      POSTGRES_USER: ${DB_USER:-dev} # if you want other username in your database change this 
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-
 volumes:
-  mongo-data:
+  pg_data:
