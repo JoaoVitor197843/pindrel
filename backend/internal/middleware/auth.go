@@ -6,10 +6,11 @@ import (
 	"net/http"
 	"plany/internal/api"
 	"plany/internal/auth"
+	"plany/internal/database/db"
 	contextkeys "plany/pkg/context"
 )
 
-func AuthMiddleware(secret string, blocklist *auth.BlocklistRepository, next http.Handler) http.Handler {
+func AuthMiddleware(secret string, repo *db.Queries, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenString, err := auth.ExtractBearerToken(r)
 		if err != nil {
@@ -17,7 +18,7 @@ func AuthMiddleware(secret string, blocklist *auth.BlocklistRepository, next htt
 			return
 		}
 
-		claims, err := auth.ValidateToken(r.Context(), tokenString, secret, blocklist)
+		claims, err := auth.ValidateToken(r.Context(), tokenString, secret, repo)
 		if err != nil {
 			api.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or expired token")
 			return

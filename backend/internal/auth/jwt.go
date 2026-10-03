@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"plany/internal/database/db"
 	"strings"
 	"time"
 
@@ -16,11 +17,11 @@ var (
 )
 
 type CustomClaim struct {
-	UserID string `json:"user_id"`
+	UserID uuid.UUID `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(UserID, secret string, expiry time.Duration) (string, error) {
+func GenerateToken(UserID uuid.UUID, secret string, expiry time.Duration) (string, error) {
 
 	claims := CustomClaim{
 		UserID: UserID,
@@ -37,7 +38,7 @@ func GenerateToken(UserID, secret string, expiry time.Duration) (string, error) 
 	return signedToken, nil
 }
 
-func ValidateToken(ctx context.Context, tokenString, secret string, blocklist *BlocklistRepository) (*CustomClaim, error) {
+func ValidateToken(ctx context.Context, tokenString, secret string, repo *db.Queries) (*CustomClaim, error) {
 	claims := &CustomClaim{}
 	keyFunc := func(token *jwt.Token) (interface{}, error) {
 		return []byte(secret), nil
@@ -47,7 +48,7 @@ func ValidateToken(ctx context.Context, tokenString, secret string, blocklist *B
 		return nil, err
 	}
 
-	revoked, err := blocklist.IsRevoked(ctx, claims.ID)
+	revoked, err := repo.IsTokenRevoked(ctx, claims.ID)
 	if err != nil {
 		return nil, err
 	}
