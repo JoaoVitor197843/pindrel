@@ -14,8 +14,9 @@ import (
 	"github.com/google/uuid"
 )
 
+
 func TestHandler_Register_Success(t *testing.T) {
-	handler, repo, _, cleanup := setupTest(t, true)
+	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	email := fmt.Sprintf("teste-%d@example.com", time.Now().UnixNano())
 	body := fmt.Sprintf(`{"email":"%s","username":"teste","password":"senha_segura_123"}`, email)
@@ -35,7 +36,7 @@ func TestHandler_Register_Success(t *testing.T) {
 }
 
 func TestHandler_Register_EmailAlreadyExists(t *testing.T) {
-	handler, repo, _, cleanup := setupTest(t, true)
+	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	email := fmt.Sprintf("dup-%d@example.com", time.Now().UnixNano())
 	body := fmt.Sprintf(`{"email":"%s","username":"user1","password":"senha_segura_123"}`, email)
@@ -58,7 +59,7 @@ func TestHandler_Register_EmailAlreadyExists(t *testing.T) {
 }
 
 func TestHandler_Register_RegistrationDisabled(t *testing.T) {
-	handler, _, _, cleanup := setupTest(t, false)
+	handler, _, cleanup := setupTest(t, false)
 	defer cleanup()
 	body := `{"email":"teste@example.com","username":"teste","password":"senha_segura_123"}`
 	req := httptest.NewRequest(http.MethodPost, "/auth/register", strings.NewReader(body))
@@ -72,7 +73,7 @@ func TestHandler_Register_RegistrationDisabled(t *testing.T) {
 }
 
 func TestHandler_Register_InvalidEmail(t *testing.T) {
-	handler, _, _, cleanup := setupTest(t, true)
+	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
 	body := `{"email":"emailinvalido","username":"teste","password":"senha_segura_123"}`
@@ -87,7 +88,7 @@ func TestHandler_Register_InvalidEmail(t *testing.T) {
 }
 
 func TestHandler_Register_EmptyUsername(t *testing.T) {
-	handler, _, _, cleanup := setupTest(t, true)
+	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
 	body := `{"email":"teste@example.com","username":"","password":"senha_segura_123"}`
@@ -102,7 +103,7 @@ func TestHandler_Register_EmptyUsername(t *testing.T) {
 }
 
 func TestHandler_Login_Success(t *testing.T) {
-	handler, repo, _, cleanup := setupTest(t, true)
+	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
 	email := fmt.Sprintf("login-%d@example.com", time.Now().UnixNano())
@@ -146,7 +147,7 @@ func TestHandler_Login_Success(t *testing.T) {
 }
 
 func TestHandler_Logout_Success(t *testing.T) {
-	handler, repo, _, cleanup := setupTest(t, true)
+	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
 	email := fmt.Sprintf("logout-%d@example.com", time.Now().UnixNano())
@@ -197,7 +198,7 @@ func TestHandler_Logout_Success(t *testing.T) {
 }
 
 func TestHandler_Refresh_Success(t *testing.T) {
-	handler, repo, _, cleanup := setupTest(t, true)
+	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
 	email := fmt.Sprintf("refresh-%d@example.com", time.Now().UnixNano())
@@ -245,7 +246,7 @@ func TestHandler_Refresh_Success(t *testing.T) {
 }
 
 func TestHandler_Me_Success(t *testing.T) {
-	handler, repo, _, cleanup := setupTest(t, true)
+	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
 	email := fmt.Sprintf("me-%d@example.com", time.Now().UnixNano())

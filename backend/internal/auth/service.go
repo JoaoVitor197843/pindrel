@@ -6,7 +6,7 @@ import (
 	"plany/internal/database/db"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 var (
@@ -18,12 +18,11 @@ var (
 
 type Service struct {
 	repo                *db.Queries
-	blocklist           *BlocklistRepository
 	registrationEnabled bool
 }
 
-func NewService(repo *db.Queries, blocklist *BlocklistRepository, registrationEnabled bool) *Service {
-	return &Service{repo: repo, blocklist: blocklist, registrationEnabled: registrationEnabled}
+func NewService(repo *db.Queries, registrationEnabled bool) *Service {
+	return &Service{repo: repo, registrationEnabled: registrationEnabled}
 }
 
 func (s *Service) Register(ctx context.Context, email, username, password string, profile []byte) (*db.CreateUserRow, error) {
@@ -59,11 +58,11 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 	if !passed {
 		return nil, ErrInvalidCredentials
 	}
-	accessToken, err := GenerateToken(user.ID.String(), secret, accessExpireAt)
+	accessToken, err := GenerateToken(user.ID, secret, accessExpireAt)
 	if err != nil {
 		return nil, err
 	}
-	refreshToken, err := GenerateToken(user.ID.String(), secret, refreshExpireAt)
+	refreshToken, err := GenerateToken(user.ID, secret, refreshExpireAt)
 	if err != nil {
 		return nil, err
 	}
@@ -71,23 +70,35 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 }
 
 func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret string) error {
-	RefreshClaims, err := ValidateToken(ctx, refreshToken, secret, s.blocklist)
-	if err != nil {
-		return err
-	}
-	_, err = uuid.Parse(RefreshClaims.UserID)
+	RefreshClaims, err := ValidateToken(ctx, refreshToken, secret, s.repo)
 	if err != nil {
 		return err
 	}
 
-	if err := s.blocklist.Revoke(ctx, RefreshClaims.ID, RefreshClaims.ExpiresAt.Time); err != nil {
+	revoke_refresh_params := db.RevokeTokenParams{
+		TokenID: RefreshClaims.ID,
+		UserID: RefreshClaims.UserID,
+		ExpiresAt: pgtype.Timestamptz{
+			Time: RefreshClaims.ExpiresAt.Time,
+			Valid: true,
+		},
+	}
+	if err := s.repo.RevokeToken(ctx, revoke_refresh_params); err != nil {
 		return err
 	}
 
 	if accessToken != "" {
-		accessClaims, err := ValidateToken(ctx, accessToken, secret, s.blocklist)
+		accessClaims, err := ValidateToken(ctx, accessToken, secret, s.repo)
 		if err == nil {
-			s.blocklist.Revoke(ctx, accessClaims.ID, accessClaims.ExpiresAt.Time)
+			revoke_access_params := db.RevokeTokenParams{
+		TokenID: accessClaims.ID,
+		UserID: accessClaims.UserID,
+		ExpiresAt: pgtype.Timestamptz{
+			Time: accessClaims.ExpiresAt.Time,
+			Valid: true,
+		},
+	}
+			s.repo.RevokeToken(ctx, revoke_access_params)
 		}
 	}
 
@@ -95,16 +106,12 @@ func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret 
 }
 
 func (s *Service) Refresh(ctx context.Context, tokenString, secret string, accessExpireAt time.Duration) (string, error) {
-	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
-	if err != nil {
-		return "", err
-	}
-	id, err := uuid.Parse(claims.UserID)
+	claims, err := ValidateToken(ctx, tokenString, secret, s.repo)
 	if err != nil {
 		return "", err
 	}
 
-	_, err = s.repo.GetUserByID(ctx, id)
+	_, err = s.repo.GetUserByID(ctx, claims.UserID)
 	if err != nil {
 		return "", err
 	}
@@ -116,15 +123,11 @@ func (s *Service) Refresh(ctx context.Context, tokenString, secret string, acces
 }
 
 func (s *Service) Me(ctx context.Context, tokenString, secret string) (*db.GetUserByIDRow, error) {
-	claims, err := ValidateToken(ctx, tokenString, secret, s.blocklist)
+	claims, err := ValidateToken(ctx, tokenString, secret, s.repo)
 	if err != nil {
 		return nil, err
 	}
-	id, err := uuid.Parse(claims.UserID)
-	if err != nil {
-		return nil, err
-	}
-	user, err := s.repo.GetUserByID(ctx, id)
+	user, err := s.repo.GetUserByID(ctx, claims.UserID)
 	if err != nil {
 		return nil, err
 	}

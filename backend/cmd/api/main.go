@@ -39,9 +39,8 @@ func main() {
 	}
 	defer dbPool.Close()
 	authRepo := db.New(dbPool)
-	blocklist := auth.NewBlocklistRepository(dbPool)
 
-	authService := auth.NewService(authRepo, blocklist, cfg.RegistrationEnabled)
+	authService := auth.NewService(authRepo, cfg.RegistrationEnabled)
 	authHandler := auth.NewHandler(authService)
 	loginLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
 	registerLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)

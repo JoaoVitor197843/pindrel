@@ -26,8 +26,8 @@ func TestService_Register_RegistrationDisabled(t *testing.T) {
 	}
 	defer dbPool.Close()
 	repo := db.New(dbPool)
-	blocklist := auth.NewBlocklistRepository(dbPool)
-	service := auth.NewService(repo, blocklist, false) // registro desabilitado
+
+	service := auth.NewService(repo, false)
 
 	_, err = service.Register(context.Background(), "email@teste.com", "user", "senha_valida_123", []byte("{}"))
 
@@ -48,8 +48,8 @@ func TestService_Register_DuplicateEmail(t *testing.T) {
 	}
 	defer dbPool.Close()
 	repo := db.New(dbPool)
-	blocklist := auth.NewBlocklistRepository(dbPool)
-	service := auth.NewService(repo, blocklist, true)
+
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("dup-%d@teste.com", time.Now().UnixNano())
 
 	user, err := service.Register(context.Background(), email, "user1", "senha_valida_123", []byte("{}"))
@@ -65,10 +65,10 @@ func TestService_Register_DuplicateEmail(t *testing.T) {
 }
 
 func TestService_Login_Success(t *testing.T) {
-	_, repo, blocklist, cleanup := setupTest(t, true)
+	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
-	service := auth.NewService(repo, blocklist, true)
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("svclogin-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
@@ -88,10 +88,10 @@ func TestService_Login_Success(t *testing.T) {
 }
 
 func TestService_Login_WrongPassword(t *testing.T) {
-	_, repo, blocklist, cleanup := setupTest(t, true)
+	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
-	service := auth.NewService(repo, blocklist, true)
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("svclogin-wrong-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
@@ -108,10 +108,10 @@ func TestService_Login_WrongPassword(t *testing.T) {
 }
 
 func TestService_Logout_RevokesToken(t *testing.T) {
-	_, repo, blocklist, cleanup := setupTest(t, true)
+	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
-	service := auth.NewService(repo, blocklist, true)
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("svclogout-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
@@ -130,17 +130,17 @@ func TestService_Logout_RevokesToken(t *testing.T) {
 		t.Fatalf("logout should succeed: %v", err)
 	}
 
-	_, err = auth.ValidateToken(context.Background(), tokens.RefreshToken, "test-secret", blocklist)
+	_, err = auth.ValidateToken(context.Background(), tokens.RefreshToken, "test-secret", repo)
 	if err == nil {
 		t.Fatal("expected validation to fail for revoked token, got nil error")
 	}
 }
 
 func TestService_Refresh_Success(t *testing.T) {
-	_, repo, blocklist, cleanup := setupTest(t, true)
+	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
-	service := auth.NewService(repo, blocklist, true)
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("svcrefresh-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
@@ -165,12 +165,12 @@ func TestService_Refresh_Success(t *testing.T) {
 }
 
 func TestService_Refresh_RevokedToken(t *testing.T) {
-	_, repo, blocklist, cleanup := setupTest(t, true)
+	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
-	service := auth.NewService(repo, blocklist, true)
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("svcrefresh-revoked-%d@example.com", time.Now().UnixNano())
-	password := "senha_segura_123"
+	password := "secure_password_123"
 
 	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
 	if err != nil {
@@ -194,10 +194,10 @@ func TestService_Refresh_RevokedToken(t *testing.T) {
 }
 
 func TestService_Me_Success(t *testing.T) {
-	_, repo, blocklist, cleanup := setupTest(t, true)
+	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
-	service := auth.NewService(repo, blocklist, true)
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("svcme-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
@@ -222,10 +222,10 @@ func TestService_Me_Success(t *testing.T) {
 }
 
 func TestService_Me_RevokedToken(t *testing.T) {
-	_, repo, blocklist, cleanup := setupTest(t, true)
+	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
-	service := auth.NewService(repo, blocklist, true)
+	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("svcme-revoked-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
