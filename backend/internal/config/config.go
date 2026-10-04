@@ -30,7 +30,7 @@ type DatabaseConfig struct {
 }
 
 type Config struct {
-	Port                int
+	Port                string
 	Database            DatabaseConfig
 	JWTSecret           string
 	JWTAccessExpiry     time.Duration
@@ -124,7 +124,7 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("erros de configuração no ambiente:\n - %w", errors.Join(c.errs...))
 	}
 	return &Config{
-		Port: port,
+		Port: fmt.Sprintf(":%d", port),
 		Database: DatabaseConfig{
 			Host:     dbHost,
 			Port:     dbPort,
