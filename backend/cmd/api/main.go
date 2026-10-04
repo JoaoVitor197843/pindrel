@@ -2,20 +2,22 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"plany/internal/api/route"
 	"plany/internal/auth"
 	"plany/internal/config"
 	"plany/internal/database"
 	"plany/internal/database/db"
 	"plany/internal/middleware"
+	"syscall"
 	"time"
 
 	_ "plany/docs"
 
 	"github.com/joho/godotenv"
-	httpSwagger "github.com/swaggo/http-swagger"
 	"golang.org/x/time/rate"
 )
 
@@ -39,48 +41,10 @@ func main() {
 	}
 	defer dbPool.Close()
 	authRepo := db.New(dbPool)
-
 	authService := auth.NewService(authRepo, cfg.RegistrationEnabled)
-	authHandler := auth.NewHandler(authService)
+	authHandler := auth.NewHandler(authService, cfg.JWTSecret, cfg.JWTAccessExpiry, cfg.JWTRefreshExpiry)
 	loginLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
 	registerLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
-	mux := http.NewServeMux()
-
-	mux.Handle("POST /auth/register", middleware.RateLimitMiddleware(registerLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Register(w, r)
-	})))
-	mux.Handle("POST /auth/login", middleware.RateLimitMiddleware(loginLimiter, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Login(w, r, cfg.JWTSecret, cfg.JWTAccessExpiry, cfg.JWTRefreshExpiry)
-	})))
-	mux.HandleFunc("POST /auth/logout", func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Logout(w, r, cfg.JWTSecret)
-	})
-	mux.HandleFunc("POST /auth/refresh", func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Refresh(w, r, cfg.JWTSecret, cfg.JWTAccessExpiry)
-	})
-	mux.HandleFunc("GET /auth/me", func(w http.ResponseWriter, r *http.Request) {
-		authHandler.Me(w, r, cfg.JWTSecret)
-	})
-
-	// pagesRepo, err := pages.NewRepository(context.Background(), db)
-	// if err != nil {
-	// 	log.Fatalf("failed to setup pages repo: %v", err)
-	// }
-	// pagesService := pages.NewService(pagesRepo, authRepo)
-	// pagesHandler := pages.NewHandler(pagesService)
-
-	// mux.Handle("GET /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 	pagesHandler.GetPages(w, r)
-	// })))
-
-	// mux.Handle("POST /pages", middleware.AuthMiddleware(jwtSecret, blocklist, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 	pagesHandler.CreatePage(w, r)
-	// })))
-
-	if cfg.DebugMode {
-		mux.HandleFunc("GET /swagger/", httpSwagger.WrapHandler)
-		log.Println("swagger UI enabled at /swagger/index.html")
-	}
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
 		cleanupAge := 30 * time.Minute
@@ -91,8 +55,34 @@ func main() {
 			log.Println("Limiters Cleaned")
 		}
 	}()
-	log.Println("server running on port ", cfg.Port)
-	if err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), mux); err != nil {
-		log.Fatalf("server failed: %v", err)
+	r := route.SetupRouter(cfg, authRepo, authHandler, loginLimiter, registerLimiter)
+
+	srv := &http.Server{
+		Addr:         cfg.Port,
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
+
+	go func() {
+		log.Printf("Server running in port %s 🚀", cfg.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Critical error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutdown server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("forcing the server shutdown: %v", err)
+	}
+
+	log.Println("Server shut down successfully.")
 }

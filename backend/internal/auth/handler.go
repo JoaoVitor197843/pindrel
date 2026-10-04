@@ -12,12 +12,21 @@ import (
 )
 
 type Handler struct {
-	service   *Service
-	validator *validator.Validate
+	service         *Service
+	validator       *validator.Validate
+	jwtSecret       string
+	accessExpireAt  time.Duration
+	refreshExpireAt time.Duration
 }
 
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service, validator: validator.New()}
+func NewHandler(service *Service, secret string, accessExp time.Duration, refreshExp time.Duration) *Handler {
+	return &Handler{
+		service: service, 
+		validator: validator.New(), 
+		jwtSecret: secret,
+		accessExpireAt:  accessExp,
+		refreshExpireAt: refreshExp,
+	}
 }
 
 // Register godoc
@@ -61,8 +70,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(RegisterResponse{
 		User: UserSummary{
-			ID:       user.ID.String(),
-			Email:    user.Email,
+			ID:    user.ID.String(),
+			Email: user.Email,
 		},
 	})
 }
@@ -78,7 +87,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 // @Failure 400 {object} api.ErrorResponse
 // @Failure 401 {object} api.ErrorResponse
 // @Router /auth/login [post]
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string, accessExpireAt, refreshExpireAt time.Duration) {
+func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	var input LoginInput
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -89,7 +98,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string
 		api.WriteError(w, http.StatusBadRequest, "invalid_input", "validation failed")
 		return
 	}
-	tokens, err := h.service.Login(r.Context(), input.Email, input.Password, jwtSecret, accessExpireAt, refreshExpireAt)
+	tokens, err := h.service.Login(r.Context(), input.Email, input.Password, h.jwtSecret, h.accessExpireAt, h.refreshExpireAt)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidCredentials):
@@ -108,12 +117,12 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request, jwtSecret string
 		Secure:   false,
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",
-		MaxAge:   int(refreshExpireAt.Seconds()),
+		MaxAge:   int(h.refreshExpireAt.Seconds()),
 	})
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(LoginRefreshResponse{
 		AccessToken: tokens.AccessToken,
-		ExpiresIn:   int(accessExpireAt.Seconds()),
+		ExpiresIn:   int(h.accessExpireAt.Seconds()),
 	})
 }
 
@@ -205,7 +214,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request, jwtSecret string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(UserSummary{
-		ID:       user.ID.String(),
-		Email:    user.Email,
+		ID:    user.ID.String(),
+		Email: user.Email,
 	})
 }

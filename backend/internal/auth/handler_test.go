@@ -122,7 +122,7 @@ func TestHandler_Login_Success(t *testing.T) {
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))
 	loginRec := httptest.NewRecorder()
-	handler.Login(loginRec, loginReq, "test-secret", 15*time.Minute, 720*time.Hour)
+	handler.Login(loginRec, loginReq)
 
 	if loginRec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d", loginRec.Code)
@@ -166,7 +166,7 @@ func TestHandler_Logout_Success(t *testing.T) {
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))
 	loginRec := httptest.NewRecorder()
-	handler.Login(loginRec, loginReq, "test-secret", 15*time.Minute, 720*time.Hour)
+	handler.Login(loginRec, loginReq)
 
 	var refreshToken string
 	for _, c := range loginRec.Result().Cookies() {
@@ -217,7 +217,7 @@ func TestHandler_Refresh_Success(t *testing.T) {
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))
 	loginRec := httptest.NewRecorder()
-	handler.Login(loginRec, loginReq, "test-secret", 15*time.Minute, 720*time.Hour)
+	handler.Login(loginRec, loginReq)
 
 	var refreshToken string
 	for _, c := range loginRec.Result().Cookies() {
@@ -265,7 +265,7 @@ func TestHandler_Me_Success(t *testing.T) {
 	loginBody := fmt.Sprintf(`{"email":"%s","password":"%s"}`, email, password)
 	loginReq := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(loginBody))
 	loginRec := httptest.NewRecorder()
-	handler.Login(loginRec, loginReq, "test-secret", 15*time.Minute, 720*time.Hour)
+	handler.Login(loginRec, loginReq)
 
 	var loginResp auth.LoginRefreshResponse
 	json.NewDecoder(loginRec.Body).Decode(&loginResp)

@@ -7,6 +7,7 @@ import (
 	"plany/internal/database"
 	"plany/internal/database/db"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -24,7 +25,7 @@ func setupTest(t *testing.T, registrationEnabled bool) (*auth.Handler, *db.Queri
 	}
 	repo := db.New(dbPool)
 	service := auth.NewService(repo, registrationEnabled)
-	handler := auth.NewHandler(service)
+	handler := auth.NewHandler(service, "test-secret", 15*time.Minute, 720*time.Hour)
 
 	cleanup := func() {
 		dbPool.Close()
@@ -42,9 +43,9 @@ func setupDummyUser(t *testing.T, queries *db.Queries) uuid.UUID {
 		t.Fatalf("error on create dummy password: %v", err)
 	}
 	create_user_params := db.CreateUserParams{
-		Email: "test-"+dummyEmail.String()+"@test.com",
+		Email:        "test-" + dummyEmail.String() + "@test.com",
 		PasswordHash: hashPassword,
-		Profile: []byte("{}"),
+		Profile:      []byte("{}"),
 	}
 	user, err := queries.CreateUser(ctx, create_user_params)
 	if err != nil {
