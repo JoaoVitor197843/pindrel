@@ -1,12 +1,13 @@
 package auth
 
 import (
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
 	"plany/internal/api"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	"github.com/go-playground/validator/v10"
 )
@@ -21,9 +22,9 @@ type Handler struct {
 
 func NewHandler(service *Service, secret string, accessExp time.Duration, refreshExp time.Duration) *Handler {
 	return &Handler{
-		service: service, 
-		validator: validator.New(), 
-		jwtSecret: secret,
+		service:         service,
+		validator:       validator.New(),
+		jwtSecret:       secret,
 		accessExpireAt:  accessExp,
 		refreshExpireAt: refreshExp,
 	}
@@ -66,9 +67,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(RegisterResponse{
+	api.WriteResponse(w, http.StatusCreated, RegisterResponse{
 		User: UserSummary{
 			ID:    user.ID.String(),
 			Email: user.Email,
@@ -109,7 +108,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    tokens.RefreshToken,
@@ -119,8 +117,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int(h.refreshExpireAt.Seconds()),
 	})
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(LoginRefreshResponse{
+	api.WriteResponse(w, http.StatusOK, LoginRefreshResponse{
 		AccessToken: tokens.AccessToken,
 		ExpiresIn:   int(h.accessExpireAt.Seconds()),
 	})
@@ -183,9 +180,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret stri
 		}
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(LoginRefreshResponse{
+	api.WriteResponse(w, http.StatusOK, LoginRefreshResponse{
 		AccessToken: accessToken,
 		ExpiresIn:   int(accessExpireAt.Seconds()),
 	})
@@ -211,9 +206,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request, jwtSecret string) {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(UserSummary{
+	api.WriteResponse(w, http.StatusOK, UserSummary{
 		ID:    user.ID.String(),
 		Email: user.Email,
 	})

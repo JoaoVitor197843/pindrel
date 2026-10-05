@@ -2,7 +2,6 @@ package auth_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/goccy/go-json"
+
 	"github.com/google/uuid"
 )
 
-
+// TODO: fix handler tests 
 func TestHandler_Register_Success(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
