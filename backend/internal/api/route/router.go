@@ -23,6 +23,7 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.RedirectSlashes)
 
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:*", "https://seu-app.com"},
@@ -51,12 +52,18 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 			}
 			return ip, err
 		}))
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("Plany API is running! 🚀"))
+    })
+
 	r.With(AuthMiddleware.RateLimitMiddleware(loginLimiter)).
 		Post("/api/auth/login", h.Login)
 	r.With(AuthMiddleware.RateLimitMiddleware(registerLimiter)).
 		Post("/api/register", h.Register)
 	if cfg.DebugMode {
-		r.Get("/api/swagger", httpSwagger.WrapHandler)
+		r.Get("/api/swagger/*", httpSwagger.WrapHandler)
 	}
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo))
