@@ -9,14 +9,14 @@ services:
       - "${PORT:-8080}:8080"
     env_file: ./backend/.env
     environment:
-      - PORT=${PORT:-8080}
+      - PORT=8080
       - DB_USER=${DB_USER:-dev}
-      - DB_PASSWORD=${DB_PASSWORD:-change_me}
+      - DB_PASSWORD=${DB_PASSWORD:efine your DB_PASSWORD in .env}
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}
       - DB_NAME=${DB_NAME:-plany}
       - SSL_MODE=${SSL_MODE:-disable}
-      - JWT_SECRET=${JWT_SECRET:-change_me_to_a_long_random_string}
+      - JWT_SECRET=${JWT_SECRET:-efine your JWT_SECRET in .env}
       - JWT_ACCESS_EXPIRY=${JWT_ACCESS_EXPIRY:-15m}
       - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY:-720h}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
@@ -37,9 +37,7 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-plany} 
       POSTGRES_USER: ${DB_USER:-dev} # if you want other username in your database change this 
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?define your DB_PASSWORD in .env}
     volumes:
       - pg_data:/var/lib/postgresql
     healthcheck:
