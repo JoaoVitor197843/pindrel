@@ -45,7 +45,6 @@ func setupDummyUser(t *testing.T, queries *db.Queries) uuid.UUID {
 	create_user_params := db.CreateUserParams{
 		Email:        "test-" + dummyEmail.String() + "@test.com",
 		PasswordHash: hashPassword,
-		Profile:      []byte("{}"),
 	}
 	user, err := queries.CreateUser(ctx, create_user_params)
 	if err != nil {

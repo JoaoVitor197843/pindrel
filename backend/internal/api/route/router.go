@@ -23,8 +23,7 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.RedirectSlashes)
-
+	
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:*", "https://seu-app.com"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -59,14 +58,17 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
     })
 
 	r.With(AuthMiddleware.RateLimitMiddleware(loginLimiter)).
-		Post("/api/auth/login", h.Login)
+		Post("/auth/login/", h.Login)
 	r.With(AuthMiddleware.RateLimitMiddleware(registerLimiter)).
-		Post("/api/register", h.Register)
+		Post("/auth/register/", h.Register)
+	r.Post("/auth/logout/", h.Logout)
+	r.Post("/auth/refresh/", h.Refresh)
+	r.Get("/auth/me/", h.Me)
 	if cfg.DebugMode {
-		r.Get("/api/swagger/*", httpSwagger.WrapHandler)
+		r.Get("/swagger/*", httpSwagger.WrapHandler)
 	}
 	r.Group(func(r chi.Router) {
-		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo))
+		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo, cfg.DebugMode))
 
 		// r.Get("/api/notes", GetNotesHandler)
 		// r.Get("/api/ws/sync", WebSocketSyncHandler)

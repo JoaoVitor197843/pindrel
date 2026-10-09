@@ -15,35 +15,35 @@ import (
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
     email,
-    password_hash,
-    profile
+    username,
+    password_hash
 ) VALUES (
     $1, $2, $3
 )
-RETURNING id, email, profile, created_at, updated_at
+RETURNING id, email, username, created_at, updated_at
 `
 
 type CreateUserParams struct {
 	Email        string `json:"email"`
+	Username     string `json:"username"`
 	PasswordHash string `json:"password_hash"`
-	Profile      []byte `json:"profile"`
 }
 
 type CreateUserRow struct {
 	ID        uuid.UUID          `json:"id"`
 	Email     string             `json:"email"`
-	Profile   []byte             `json:"profile"`
+	Username  string             `json:"username"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error) {
-	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.PasswordHash, arg.Profile)
+	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.Username, arg.PasswordHash)
 	var i CreateUserRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.Profile,
+		&i.Username,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -71,7 +71,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, profile, created_at, updated_at
+SELECT id, email, username, password_hash, created_at, updated_at
 FROM users
 WHERE email = $1 LIMIT 1
 `
@@ -82,8 +82,8 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
+		&i.Username,
 		&i.PasswordHash,
-		&i.Profile,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -91,7 +91,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, profile, created_at, updated_at
+SELECT id, email, username, created_at, updated_at
 FROM users
 WHERE id = $1 LIMIT 1
 `
@@ -99,7 +99,7 @@ WHERE id = $1 LIMIT 1
 type GetUserByIDRow struct {
 	ID        uuid.UUID          `json:"id"`
 	Email     string             `json:"email"`
-	Profile   []byte             `json:"profile"`
+	Username  string             `json:"username"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
@@ -110,7 +110,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.Email,
-		&i.Profile,
+		&i.Username,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

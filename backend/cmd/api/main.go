@@ -24,7 +24,6 @@ import (
 // @title Plany API
 // @version 1.0
 // @description Plany API, self-hosted notes workspace
-// @host localhost:8080
 // @BasePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header
