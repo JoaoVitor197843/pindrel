@@ -9,6 +9,17 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Note struct {
+	ID        uuid.UUID          `json:"id"`
+	UserID    uuid.UUID          `json:"user_id"`
+	Title     string             `json:"title"`
+	Subtitle  string             `json:"subtitle"`
+	Content   []byte             `json:"content"`
+	IsPinned  bool               `json:"is_pinned"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RevokedToken struct {
 	TokenID   string             `json:"token_id"`
 	UserID    uuid.UUID          `json:"user_id"`
@@ -19,8 +30,8 @@ type RevokedToken struct {
 type User struct {
 	ID           uuid.UUID          `json:"id"`
 	Email        string             `json:"email"`
+	Username     string             `json:"username"`
 	PasswordHash string             `json:"password_hash"`
-	Profile      []byte             `json:"profile"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }

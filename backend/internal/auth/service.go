@@ -6,6 +6,7 @@ import (
 	"plany/internal/database/db"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -25,7 +26,7 @@ func NewService(repo *db.Queries, registrationEnabled bool) *Service {
 	return &Service{repo: repo, registrationEnabled: registrationEnabled}
 }
 
-func (s *Service) Register(ctx context.Context, email, username, password string, profile []byte) (*db.CreateUserRow, error) {
+func (s *Service) Register(ctx context.Context, email, username, password string) (*db.CreateUserRow, error) {
 	if !s.registrationEnabled {
 		return nil, ErrRegistrationDisabled
 	}
@@ -37,7 +38,7 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 	if err != nil {
 		return nil, err
 	}
-	user_params := db.CreateUserParams{Email: email, PasswordHash: hashedPassword, Profile: profile}
+	user_params := db.CreateUserParams{Email: email, Username: username, PasswordHash: hashedPassword}
 	user, err := s.repo.CreateUser(ctx, user_params)
 	if err != nil {
 		return nil, err
@@ -45,10 +46,13 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 	return &user, nil
 }
 
-func (s *Service) Login(ctx context.Context, email, password, secret string, accessExpireAt, refreshExpireAt time.Duration) (*LoginResult, error) {
+func (s *Service) Login(ctx context.Context, email, password, secret string, accessExpireIn, refreshExpireIn time.Duration) (*LoginResult, error) {
 
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvalidCredentials
+		}
 		return nil, err
 	}
 	passed, err := VerifyPassword(user.PasswordHash, password)
@@ -58,11 +62,11 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 	if !passed {
 		return nil, ErrInvalidCredentials
 	}
-	accessToken, err := GenerateToken(user.ID, secret, accessExpireAt)
+	accessToken, err := GenerateToken(user.ID, secret, accessExpireIn)
 	if err != nil {
 		return nil, err
 	}
-	refreshToken, err := GenerateToken(user.ID, secret, refreshExpireAt)
+	refreshToken, err := GenerateToken(user.ID, secret, refreshExpireIn)
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +81,9 @@ func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret 
 
 	revoke_refresh_params := db.RevokeTokenParams{
 		TokenID: RefreshClaims.ID,
-		UserID: RefreshClaims.UserID,
+		UserID:  RefreshClaims.UserID,
 		ExpiresAt: pgtype.Timestamptz{
-			Time: RefreshClaims.ExpiresAt.Time,
+			Time:  RefreshClaims.ExpiresAt.Time,
 			Valid: true,
 		},
 	}
@@ -91,13 +95,13 @@ func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret 
 		accessClaims, err := ValidateToken(ctx, accessToken, secret, s.repo)
 		if err == nil {
 			revoke_access_params := db.RevokeTokenParams{
-		TokenID: accessClaims.ID,
-		UserID: accessClaims.UserID,
-		ExpiresAt: pgtype.Timestamptz{
-			Time: accessClaims.ExpiresAt.Time,
-			Valid: true,
-		},
-	}
+				TokenID: accessClaims.ID,
+				UserID:  accessClaims.UserID,
+				ExpiresAt: pgtype.Timestamptz{
+					Time:  accessClaims.ExpiresAt.Time,
+					Valid: true,
+				},
+			}
 			s.repo.RevokeToken(ctx, revoke_access_params)
 		}
 	}
@@ -105,7 +109,7 @@ func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret 
 	return nil
 }
 
-func (s *Service) Refresh(ctx context.Context, tokenString, secret string, accessExpireAt time.Duration) (string, error) {
+func (s *Service) Refresh(ctx context.Context, tokenString, secret string, accessExpireIn time.Duration) (string, error) {
 	claims, err := ValidateToken(ctx, tokenString, secret, s.repo)
 	if err != nil {
 		return "", err
@@ -115,7 +119,7 @@ func (s *Service) Refresh(ctx context.Context, tokenString, secret string, acces
 	if err != nil {
 		return "", err
 	}
-	accessToken, err := GenerateToken(claims.UserID, secret, accessExpireAt)
+	accessToken, err := GenerateToken(claims.UserID, secret, accessExpireIn)
 	if err != nil {
 		return "", err
 	}

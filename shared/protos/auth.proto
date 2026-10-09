@@ -1,0 +1,62 @@
+syntax = "proto3";
+
+package sync;
+
+option go_package = "backend/internal/api/dto";
+
+message ErrorHttp {
+    string code = 1;
+    string message = 2;
+}
+
+message ErrorWebSocket {
+  int32 status_code = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message UserSummary {
+  string id = 1;
+  string email = 2;
+  string username = 3;
+}
+
+message RegisterInput {
+  string email = 1;
+  string username = 2;
+  string password = 3;
+}
+
+message RegisterResponse {
+    UserSummary user = 1;
+}
+
+message LoginInput {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginRefreshResponse {
+  string access_token = 1;
+  int32 expires_in = 2;
+}
+
+message DocumentSyncRequest {
+    string document_id = 1;
+    int64 base_revision = 2;
+    int64 client_timestamp = 3;
+    bytes content = 4;
+}
+
+enum SyncStatus {
+    SYNC_STATUS_UNSPECIFIED = 0;
+    SYNC_STATUS_OK = 1;
+    SYNC_STATUS_CONFLICT = 2;
+}
+
+message DocumentSyncResponse {
+    string document_id = 1;
+    int64 new_revision = 2;
+    SyncStatus status = 3;
+    string conflict_doc_id = 4;
+}

@@ -3,8 +3,8 @@ CREATE EXTENSION IF NOT EXISTS citext;
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email CITEXT NOT NULL UNIQUE,
+    username TEXT NOT NULL,
     password_hash TEXT NOT NULL,
-    profile JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

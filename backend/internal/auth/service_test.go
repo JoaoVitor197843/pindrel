@@ -29,7 +29,7 @@ func TestService_Register_RegistrationDisabled(t *testing.T) {
 
 	service := auth.NewService(repo, false)
 
-	_, err = service.Register(context.Background(), "email@teste.com", "user", "senha_valida_123", []byte("{}"))
+	_, err = service.Register(context.Background(), "email@teste.com", "user", "senha_valida_123")
 
 	if !errors.Is(err, auth.ErrRegistrationDisabled) {
 		t.Fatalf("expected ErrRegistrationDisabled, got: %v", err)
@@ -52,13 +52,13 @@ func TestService_Register_DuplicateEmail(t *testing.T) {
 	service := auth.NewService(repo, true)
 	email := fmt.Sprintf("dup-%d@teste.com", time.Now().UnixNano())
 
-	user, err := service.Register(context.Background(), email, "user1", "senha_valida_123", []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", "senha_valida_123")
 	if err != nil {
 		t.Fatalf("first register should succeed, got: %v", err)
 	}
 	defer repo.DeleteUser(context.Background(), user.ID)
 
-	_, err = service.Register(context.Background(), email, "user2", "senha_valida_123", []byte("{}"))
+	_, err = service.Register(context.Background(), email, "user2", "senha_valida_123")
 	if !errors.Is(err, auth.ErrEmailAlreadyExists) {
 		t.Fatalf("expected ErrEmailAlreadyExists, got: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestService_Login_Success(t *testing.T) {
 	email := fmt.Sprintf("svclogin-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", password)
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestService_Login_WrongPassword(t *testing.T) {
 	email := fmt.Sprintf("svclogin-wrong-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", password)
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestService_Logout_RevokesToken(t *testing.T) {
 	email := fmt.Sprintf("svclogout-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", password)
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestService_Refresh_Success(t *testing.T) {
 	email := fmt.Sprintf("svcrefresh-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", password)
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestService_Refresh_RevokedToken(t *testing.T) {
 	email := fmt.Sprintf("svcrefresh-revoked-%d@example.com", time.Now().UnixNano())
 	password := "secure_password_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", password)
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestService_Me_Success(t *testing.T) {
 	email := fmt.Sprintf("svcme-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", password)
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}
@@ -229,7 +229,7 @@ func TestService_Me_RevokedToken(t *testing.T) {
 	email := fmt.Sprintf("svcme-revoked-%d@example.com", time.Now().UnixNano())
 	password := "senha_segura_123"
 
-	user, err := service.Register(context.Background(), email, "user1", password, []byte("{}"))
+	user, err := service.Register(context.Background(), email, "user1", password)
 	if err != nil {
 		t.Fatalf("register should succeed: %v", err)
 	}

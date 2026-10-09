@@ -1,49 +1,5 @@
 basePath: /
 definitions:
-  api.ErrorDetail:
-    properties:
-      code:
-        type: string
-      message:
-        type: string
-    type: object
-  api.ErrorResponse:
-    properties:
-      error:
-        $ref: '#/definitions/api.ErrorDetail'
-    type: object
-  auth.LoginInput:
-    properties:
-      email:
-        type: string
-      password:
-        minLength: 8
-        type: string
-    required:
-    - email
-    - password
-    type: object
-  auth.LoginRefreshResponse:
-    properties:
-      access_token:
-        type: string
-      expires_in:
-        type: integer
-    type: object
-  auth.RegisterInput:
-    properties:
-      email:
-        type: string
-      password:
-        minLength: 8
-        type: string
-      username:
-        type: string
-    required:
-    - email
-    - password
-    - username
-    type: object
   auth.RegisterResponse:
     properties:
       user:
@@ -58,51 +14,59 @@ definitions:
       username:
         type: string
     type: object
-  pages.PageData:
+  dto.ErrorHttp:
     properties:
-      data:
-        items:
-          $ref: '#/definitions/pages.PageMetadata'
-        type: array
-      next_cursor:
+      code:
         type: string
-      total:
+      message:
+        type: string
+    type: object
+  dto.LoginInput:
+    properties:
+      email:
+        type: string
+      password:
+        type: string
+    type: object
+  dto.LoginRefreshResponse:
+    properties:
+      access_token:
+        type: string
+      expires_at:
         type: integer
     type: object
-  pages.PageMetadata:
+  dto.RegisterInput:
     properties:
-      created_at:
+      email:
         type: string
-      description:
+      password:
+        type: string
+      profile:
+        items:
+          type: integer
+        type: array
+      username:
+        type: string
+    type: object
+  dto.UserSummary:
+    properties:
+      email:
         type: string
       id:
         type: string
-      number_of_blocks:
-        type: integer
-      shared:
-        type: boolean
-      tags:
-        items:
-          type: string
-        type: array
-      title:
-        type: string
-      trashed_at:
-        type: string
-      updated_at:
+      username:
         type: string
     type: object
-host: localhost:8080
 info:
   contact: {}
   description: Plany API, self-hosted notes workspace
   title: Plany API
   version: "1.0"
 paths:
-  /auth/login:
+  /api/auth/login/:
     post:
       consumes:
-      - application/json
+      - application/x-protobuf
       description: Authenticate the user and return the access in body and refresh
         token in httpOnly cookie
       parameters:
@@ -111,23 +75,57 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/auth.LoginInput'
+          $ref: '#/definitions/dto.LoginInput'
       produces:
-      - application/json
+      - application/x-protobuf
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/auth.LoginRefreshResponse'
+            $ref: '#/definitions/dto.LoginRefreshResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/dto.ErrorHttp'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/dto.ErrorHttp'
       summary: Open Session
+      tags:
+      - auth
+  /api/auth/register/:
+    post:
+      consumes:
+      - application/x-protobuf
+      description: Register a new user, if the registration is enabled
+      parameters:
+      - description: Register data
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterInput'
+      produces:
+      - application/x-protobuf
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/auth.RegisterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+      summary: Create a new account
       tags:
       - auth
   /auth/logout:
@@ -135,14 +133,14 @@ paths:
       description: Invalidates the refresh token (and the access token, if sended)
         and clear the cookie
       produces:
-      - application/json
+      - application/x-protobuf
       responses:
         "204":
           description: No Content
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/dto.ErrorHttp'
       summary: Close the session
       tags:
       - auth
@@ -150,16 +148,16 @@ paths:
     get:
       description: Returns the user data associated with the session access token
       produces:
-      - application/json
+      - application/x-protobuf
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/auth.UserSummary'
+            $ref: '#/definitions/dto.UserSummary'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/dto.ErrorHttp'
       security:
       - BearerAuth: []
       summary: Current user data
@@ -169,87 +167,19 @@ paths:
     post:
       description: Change one valid refresh token for a new access token
       produces:
-      - application/json
+      - application/x-protobuf
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/auth.LoginRefreshResponse'
+            $ref: '#/definitions/dto.LoginRefreshResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/api.ErrorResponse'
+            $ref: '#/definitions/dto.ErrorHttp'
       summary: Renews the access token
       tags:
       - auth
-  /auth/register:
-    post:
-      consumes:
-      - application/json
-      description: Register a new user, if the registration is enabled
-      parameters:
-      - description: Register data
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/auth.RegisterInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/auth.RegisterResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      summary: Create a new account
-      tags:
-      - auth
-  /pages:
-    get:
-      description: List proprietary and shared pages, paged by cursor. Don't return
-        bin items.
-      parameters:
-      - default: 20
-        description: Number of items per page
-        in: query
-        name: limit
-        type: integer
-      - description: Opaque cursor for the next page of results
-        in: query
-        name: cursor
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/pages.PageData'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/api.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: List user pages
-      tags:
-      - pages
 securityDefinitions:
   BearerAuth:
     in: header

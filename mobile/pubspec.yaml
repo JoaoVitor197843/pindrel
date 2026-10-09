@@ -41,6 +41,7 @@ dependencies:
   google_fonts: ^8.2.1
   lucide_icons: ^0.257.0
   sodium: ^4.0.3
+  protobuf: ^6.1.0
 
 dev_dependencies:
   flutter_test:

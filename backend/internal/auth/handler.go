@@ -2,31 +2,31 @@ package auth
 
 import (
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"plany/internal/api"
+	"plany/internal/validator"
 	"time"
 
-	"github.com/goccy/go-json"
+	"plany/internal/api/dto"
 
-	"github.com/go-playground/validator/v10"
+	"google.golang.org/protobuf/proto"
 )
 
 type Handler struct {
 	service         *Service
-	validator       *validator.Validate
 	jwtSecret       string
-	accessExpireAt  time.Duration
-	refreshExpireAt time.Duration
+	accessExpireIn  time.Duration
+	refreshExpireIn time.Duration
 }
 
-func NewHandler(service *Service, secret string, accessExp time.Duration, refreshExp time.Duration) *Handler {
+func NewHandler(service *Service, secret string, accessExp, refreshExp time.Duration) *Handler {
 	return &Handler{
 		service:         service,
-		validator:       validator.New(),
 		jwtSecret:       secret,
-		accessExpireAt:  accessExp,
-		refreshExpireAt: refreshExp,
+		accessExpireIn:  accessExp,
+		refreshExpireIn: refreshExp,
 	}
 }
 
@@ -34,25 +34,32 @@ func NewHandler(service *Service, secret string, accessExp time.Duration, refres
 // @Summary Create a new account
 // @Description Register a new user, if the registration is enabled
 // @Tags auth
-// @Accept json
-// @Produce json
-// @Param input body RegisterInput true "Register data"
-// @Success 201 {object} RegisterResponse
-// @Failure 400 {object} api.ErrorResponse
-// @Failure 403 {object} api.ErrorResponse
-// @Failure 409 {object} api.ErrorResponse
-// @Router /auth/register [post]
+// @Accept application/x-protobuf
+// @Produce application/x-protobuf
+// @Param input body dto.RegisterInput true "Register data"
+// @Success 201 {object} dto.RegisterResponse
+// @Failure 400 {object} dto.ErrorHttp
+// @Failure 403 {object} dto.ErrorHttp
+// @Failure 409 {object} dto.ErrorHttp
+// @Router /api/auth/register/ [post]
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	var input RegisterInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		api.WriteError(w, 400, "invalid_input", "malformed request body")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("read bytes error: %v", err)
+		api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
 		return
 	}
-	if err := h.validator.Struct(input); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "invalid_input", "validation failed")
+	defer r.Body.Close()
+	var input dto.RegisterInput
+	if err := proto.Unmarshal(body, &input); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_input", "malformed request body")
 		return
 	}
-	user, err := h.service.Register(r.Context(), input.Email, input.Username, input.Password, input.Profile)
+	if err := validator.ValidateRegister(&input); err != nil {
+		api.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	user, err := h.service.Register(r.Context(), input.Email, input.Username, input.Password)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRegistrationDisabled):
@@ -67,10 +74,11 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	api.WriteResponse(w, http.StatusCreated, RegisterResponse{
-		User: UserSummary{
-			ID:    user.ID.String(),
-			Email: user.Email,
+	api.WriteResponse(w, http.StatusCreated, &dto.RegisterResponse{
+		User: &dto.UserSummary{
+			Id:       user.ID.String(),
+			Email:    user.Email,
+			Username: user.Username,
 		},
 	})
 }
@@ -79,31 +87,37 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 // @Summary Open Session
 // @Description Authenticate the user and return the access in body and refresh token in httpOnly cookie
 // @Tags auth
-// @Accept json
-// @Produce json
-// @Param input body LoginInput true "Login credentials"
-// @Success 200 {object} LoginRefreshResponse
-// @Failure 400 {object} api.ErrorResponse
-// @Failure 401 {object} api.ErrorResponse
-// @Router /auth/login [post]
+// @Accept application/x-protobuf
+// @Produce application/x-protobuf
+// @Param input body dto.LoginInput true "Login credentials"
+// @Success 200 {object} dto.LoginRefreshResponse
+// @Failure 400 {object} dto.ErrorHttp
+// @Failure 401 {object} dto.ErrorHttp
+// @Router /api/auth/login/ [post]
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	var input LoginInput
-
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		api.WriteError(w, 400, "invalid_input", "malformed request body")
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("read bytes error: %v", err)
+		api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
 		return
 	}
-	if err := h.validator.Struct(input); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "invalid_input", "validation failed")
+	defer r.Body.Close()
+	var input dto.LoginInput
+	if err := proto.Unmarshal(body, &input); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "invalid_input", "malformed request body")
 		return
 	}
-	tokens, err := h.service.Login(r.Context(), input.Email, input.Password, h.jwtSecret, h.accessExpireAt, h.refreshExpireAt)
+	if err := validator.ValidateLogin(&input); err != nil {
+		api.WriteError(w, http.StatusUnprocessableEntity, "validation_failed", err.Error())
+		return
+	}
+	tokens, err := h.service.Login(r.Context(), input.Email, input.Password, h.jwtSecret, h.accessExpireIn, h.refreshExpireIn)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidCredentials):
 			api.WriteError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
 		default:
-			log.Printf("register error: %v", err)
+			log.Printf("login error: %v", err)
 			api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
 		}
 		return
@@ -115,11 +129,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Secure:   false,
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",
-		MaxAge:   int(h.refreshExpireAt.Seconds()),
+		MaxAge:   int(h.refreshExpireIn.Seconds()),
 	})
-	api.WriteResponse(w, http.StatusOK, LoginRefreshResponse{
+	api.WriteResponse(w, http.StatusOK, &dto.LoginRefreshResponse{
 		AccessToken: tokens.AccessToken,
-		ExpiresIn:   int(h.accessExpireAt.Seconds()),
+		ExpiresIn:   int32(h.accessExpireIn.Seconds()),
 	})
 }
 
@@ -127,11 +141,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 // @Summary Close the session
 // @Description Invalidates the refresh token (and the access token, if sended) and clear the cookie
 // @Tags auth
-// @Produce json
+// @Produce application/x-protobuf
 // @Success 204 "No Content"
-// @Failure 401 {object} api.ErrorResponse
+// @Failure 401 {object} dto.ErrorHttp
 // @Router /auth/logout [post]
-func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret string) {
+func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := ExtractToken(r)
 	if err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
@@ -139,7 +153,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret strin
 	}
 
 	accessToken, _ := ExtractBearerToken(r)
-	if err := h.service.Logout(r.Context(), refreshToken, accessToken, jwtSecret); err != nil {
+	if err := h.service.Logout(r.Context(), refreshToken, accessToken, h.jwtSecret); err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
 	}
@@ -160,17 +174,17 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request, jwtSecret strin
 // @Summary Renews the access token
 // @Description Change one valid refresh token for a new access token
 // @Tags auth
-// @Produce json
-// @Success 200 {object} LoginRefreshResponse
-// @Failure 401 {object} api.ErrorResponse
+// @Produce application/x-protobuf
+// @Success 200 {object} dto.LoginRefreshResponse
+// @Failure 401 {object} dto.ErrorHttp
 // @Router /auth/refresh [post]
-func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret string, accessExpireAt time.Duration) {
+func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := ExtractToken(r)
 	if err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "no valid token found")
 		return
 	}
-	accessToken, err := h.service.Refresh(r.Context(), tokenString, jwtSecret, accessExpireAt)
+	accessToken, err := h.service.Refresh(r.Context(), tokenString, h.jwtSecret, h.accessExpireIn)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrUserNotFound):
@@ -180,9 +194,9 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret stri
 		}
 		return
 	}
-	api.WriteResponse(w, http.StatusOK, LoginRefreshResponse{
+	api.WriteResponse(w, http.StatusOK, &dto.LoginRefreshResponse{
 		AccessToken: accessToken,
-		ExpiresIn:   int(accessExpireAt.Seconds()),
+		ExpiresIn:   int32(h.accessExpireIn.Seconds()),
 	})
 }
 
@@ -190,24 +204,25 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request, jwtSecret stri
 // @Summary Current user data
 // @Description Returns the user data associated with the session access token
 // @Tags auth
-// @Produce json
+// @Produce application/x-protobuf
 // @Security BearerAuth
-// @Success 200 {object} UserSummary
-// @Failure 401 {object} api.ErrorResponse
+// @Success 200 {object} dto.UserSummary
+// @Failure 401 {object} dto.ErrorHttp
 // @Router /auth/me [get]
-func (h *Handler) Me(w http.ResponseWriter, r *http.Request, jwtSecret string) {
+func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := ExtractBearerToken(r)
 	if err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
 	}
-	user, err := h.service.Me(r.Context(), tokenString, jwtSecret)
+	user, err := h.service.Me(r.Context(), tokenString, h.jwtSecret)
 	if err != nil {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
 		return
 	}
-	api.WriteResponse(w, http.StatusOK, UserSummary{
-		ID:    user.ID.String(),
-		Email: user.Email,
+	api.WriteResponse(w, http.StatusOK, &dto.UserSummary{
+		Id:       user.ID.String(),
+		Email:    user.Email,
+		Username: user.Username,
 	})
 }

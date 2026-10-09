@@ -15,14 +15,14 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/auth/login": {
+        "/api/auth/login/": {
             "post": {
                 "description": "Authenticate the user and return the access in body and refresh token in httpOnly cookie",
                 "consumes": [
-                    "application/json"
+                    "application/x-protobuf"
                 ],
                 "produces": [
-                    "application/json"
+                    "application/x-protobuf"
                 ],
                 "tags": [
                     "auth"
@@ -35,7 +35,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/auth.LoginInput"
+                            "$ref": "#/definitions/dto.LoginInput"
                         }
                     }
                 ],
@@ -43,19 +43,71 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/auth.LoginRefreshResponse"
+                            "$ref": "#/definitions/dto.LoginRefreshResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorHttp"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorHttp"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/auth/register/": {
+            "post": {
+                "description": "Register a new user, if the registration is enabled",
+                "consumes": [
+                    "application/x-protobuf"
+                ],
+                "produces": [
+                    "application/x-protobuf"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Create a new account",
+                "parameters": [
+                    {
+                        "description": "Register data",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.RegisterInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/auth.RegisterResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorHttp"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorHttp"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorHttp"
                         }
                     }
                 }
@@ -65,7 +117,7 @@ const docTemplate = `{
             "post": {
                 "description": "Invalidates the refresh token (and the access token, if sended) and clear the cookie",
                 "produces": [
-                    "application/json"
+                    "application/x-protobuf"
                 ],
                 "tags": [
                     "auth"
@@ -78,7 +130,7 @@ const docTemplate = `{
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorHttp"
                         }
                     }
                 }
@@ -93,7 +145,7 @@ const docTemplate = `{
                 ],
                 "description": "Returns the user data associated with the session access token",
                 "produces": [
-                    "application/json"
+                    "application/x-protobuf"
                 ],
                 "tags": [
                     "auth"
@@ -103,13 +155,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/auth.UserSummary"
+                            "$ref": "#/definitions/dto.UserSummary"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorHttp"
                         }
                     }
                 }
@@ -119,7 +171,7 @@ const docTemplate = `{
             "post": {
                 "description": "Change one valid refresh token for a new access token",
                 "produces": [
-                    "application/json"
+                    "application/x-protobuf"
                 ],
                 "tags": [
                     "auth"
@@ -129,117 +181,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/auth.LoginRefreshResponse"
+                            "$ref": "#/definitions/dto.LoginRefreshResponse"
                         }
                     },
                     "401": {
                         "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/register": {
-            "post": {
-                "description": "Register a new user, if the registration is enabled",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "Create a new account",
-                "parameters": [
-                    {
-                        "description": "Register data",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/auth.RegisterInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/auth.RegisterResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/pages": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "List proprietary and shared pages, paged by cursor. Don't return bin items.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "pages"
-                ],
-                "summary": "List user pages",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "default": 20,
-                        "description": "Number of items per page",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Opaque cursor for the next page of results",
-                        "name": "cursor",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/pages.PageData"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
+                            "$ref": "#/definitions/dto.ErrorHttp"
                         }
                     }
                 }
@@ -247,72 +195,6 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "api.ErrorDetail": {
-            "type": "object",
-            "properties": {
-                "code": {
-                    "type": "string"
-                },
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
-        "api.ErrorResponse": {
-            "type": "object",
-            "properties": {
-                "error": {
-                    "$ref": "#/definitions/api.ErrorDetail"
-                }
-            }
-        },
-        "auth.LoginInput": {
-            "type": "object",
-            "required": [
-                "email",
-                "password"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string",
-                    "minLength": 8
-                }
-            }
-        },
-        "auth.LoginRefreshResponse": {
-            "type": "object",
-            "properties": {
-                "access_token": {
-                    "type": "string"
-                },
-                "expires_in": {
-                    "type": "integer"
-                }
-            }
-        },
-        "auth.RegisterInput": {
-            "type": "object",
-            "required": [
-                "email",
-                "password",
-                "username"
-            ],
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string",
-                    "minLength": 8
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
         "auth.RegisterResponse": {
             "type": "object",
             "properties": {
@@ -335,54 +217,69 @@ const docTemplate = `{
                 }
             }
         },
-        "pages.PageData": {
+        "dto.ErrorHttp": {
             "type": "object",
             "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/pages.PageMetadata"
-                    }
-                },
-                "next_cursor": {
+                "code": {
                     "type": "string"
                 },
-                "total": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.LoginInput": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.LoginRefreshResponse": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "expires_at": {
                     "type": "integer"
                 }
             }
         },
-        "pages.PageMetadata": {
+        "dto.RegisterInput": {
             "type": "object",
             "properties": {
-                "created_at": {
+                "email": {
                     "type": "string"
                 },
-                "description": {
+                "password": {
+                    "type": "string"
+                },
+                "profile": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.UserSummary": {
+            "type": "object",
+            "properties": {
+                "email": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
                 },
-                "number_of_blocks": {
-                    "type": "integer"
-                },
-                "shared": {
-                    "type": "boolean"
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "title": {
-                    "type": "string"
-                },
-                "trashed_at": {
-                    "type": "string"
-                },
-                "updated_at": {
+                "username": {
                     "type": "string"
                 }
             }
@@ -400,7 +297,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "localhost:8080",
+	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Plany API",
