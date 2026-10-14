@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
       args:
         VITE_API_URL: /api
+
+    restart: unless-stopped
     ports:
       - "${PORT:-8080}:8080"
     env_file: ./backend/.env
