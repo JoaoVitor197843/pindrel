@@ -72,9 +72,9 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 		// r.Get("/api/ws/sync", WebSocketSyncHandler)
 	})
 
-	web := spaHandler(publicDir)
-	r.Get("/*", web)
-	r.Head("/*", web)
+	// NotFound (and not a GET /* wildcard) so that an unknown path answers 404 for every method;
+	// a wildcard would make chi answer 405 for e.g. POST /auth/lo/.
+	r.NotFound(spaHandler(publicDir))
 
 	return r
 }
@@ -96,7 +96,8 @@ func isWebRoute(p string) bool {
 	return false
 }
 
-// spaHandler answers GET/HEAD requests that did not match an API route, in three steps:
+// spaHandler is the router's NotFound handler. Only GET/HEAD can reach the web; any other method is a 404.
+// For GET/HEAD requests that did not match an API route it works in three steps:
 //  1. the path is a real file inside dir (JS/CSS/images): serve it;
 //  2. the path is a web page route (isWebRoute): serve index.html so the SPA can render it;
 //  3. anything else: 404.
@@ -104,6 +105,10 @@ func spaHandler(dir string) http.HandlerFunc {
 	files := http.FileServer(http.Dir(dir))
 	index := filepath.Join(dir, "index.html")
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
 		// path.Clean on a rooted path drops any ".." segments, so it cannot escape dir
 		clean := path.Clean("/" + r.URL.Path)
 		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(clean))); err == nil && !info.IsDir() {
