@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"plany/internal/auth"
+	"plany/internal/config"
+	AuthMiddleware "plany/internal/middleware"
 )
 
 func newPublicDir(t *testing.T) string {
@@ -111,5 +115,67 @@ func TestSPAHandler_WithoutBuild(t *testing.T) {
 	}
 	if rec := get(h, "/notes"); rec.Code != http.StatusNotFound {
 		t.Errorf("/notes: got %d, want 404", rec.Code)
+	}
+}
+
+func TestSPAHandler_NonGetMethodsAreNotFound(t *testing.T) {
+	h := spaHandler(newPublicDir(t))
+	for _, method := range allMethods {
+		for _, target := range []string{"/", "/login", "/notes/1", "/assets/app.js"} {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+			want := http.StatusNotFound
+			if method == http.MethodGet || method == http.MethodHead {
+				want = http.StatusOK
+			}
+			if rec.Code != want {
+				t.Errorf("%s %s: got %d, want %d", method, target, rec.Code, want)
+			}
+		}
+	}
+}
+
+var allMethods = []string{
+	http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch,
+	http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace,
+}
+
+// TestRouter_UnknownPathStatusByMethod: unknown paths are 404 for every method, while a known
+// path used with the wrong method stays 405.
+func TestRouter_UnknownPathStatusByMethod(t *testing.T) {
+	r := SetupRouter(&config.Config{}, nil, &auth.Handler{},
+		AuthMiddleware.NewIPRateLimiter(1, 1), AuthMiddleware.NewIPRateLimiter(1, 1))
+
+	do := func(method, target string) int {
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+		return rec.Code
+	}
+
+	for _, method := range allMethods {
+		for _, target := range []string{"/auth/lo/", "/random", "/api/auth/login/"} {
+			if got := do(method, target); got != http.StatusNotFound {
+				t.Errorf("%s %s: got %d, want 404", method, target, got)
+			}
+		}
+	}
+
+	// /auth/me/ only accepts GET (HEAD and OPTIONS are not registered for it either)
+	for _, method := range allMethods {
+		if method == http.MethodGet {
+			continue
+		}
+		if got := do(method, "/auth/me/"); got != http.StatusMethodNotAllowed {
+			t.Errorf("%s /auth/me/: got %d, want 405", method, got)
+		}
+	}
+	// /auth/login/ only accepts POST
+	for _, method := range allMethods {
+		if method == http.MethodPost {
+			continue
+		}
+		if got := do(method, "/auth/login/"); got != http.StatusMethodNotAllowed {
+			t.Errorf("%s /auth/login/: got %d, want 405", method, got)
+		}
 	}
 }
