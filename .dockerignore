@@ -1,22 +1,44 @@
-# node_modules e cache (frontend)
-web/node_modules
+# node_modules e cache (web)
+**/node_modules
 web/.yarn/cache
 web/.yarn/install-state.gz
 web/dist
+web/.vscode
+
+# Segredos e variáveis locais (nunca entram na imagem)
+.env
+.envrc
 web/.env
-web/.env.example
+backend/.env
+backend/.envrc
+backend/.env.example
 
 # Go (backend)
 backend/tmp
 backend/bin
-backend/.env
-backend/.env.example
+backend/server
+**/*_test.go
+
+# Testes do web (não entram no build)
+web/src/**/*.test.ts
+web/coverage
+
+# Fora do build da imagem
+mobile/
+shared/
+docs/
+Makefile
+compose.yml
+Dockerfile
+.dockerignore
+.github
 
 # Geral
 .git
 .gitignore
 *.md
+*.log
 .vscode
 .idea
-mobile/
+.DS_Store
 LICENSE

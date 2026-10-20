@@ -14,9 +14,9 @@ import (
 func CreateConnString(cfg config.DatabaseConfig) string {
 	u := &url.URL{
 		Scheme: "postgres",
-		User: url.UserPassword(cfg.User, cfg.Password),
-		Host: fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
-		Path: cfg.DBName,
+		User:   url.UserPassword(cfg.User, cfg.Password),
+		Host:   fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
+		Path:   cfg.DBName,
 	}
 
 	q := u.Query()

@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	ErrShortPassword = errors.New("your password is short, please try another password")
+	ErrShortPassword  = errors.New("your password is short, please try another password")
 	ErrCommonPassword = errors.New("your password is common, please try another password")
 )
+
 type hashParams struct {
 	memory      uint32
 	iterations  uint32

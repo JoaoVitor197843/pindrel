@@ -1,17 +1,24 @@
+# RAM budget (see CLAUDE.md "Project priorities"): hard ceiling 512 MB, recommended 256 MB
+# per instance, database included. The two limits below add up to the recommended 256 MB.
+# The API is stateless: scale `plany` behind a load balancer; each replica keeps its own
+# ceiling (the Postgres service is shared).
 services:
   plany:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        VITE_API_URL: /api
 
     restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
     ports:
       - "${PORT:-8080}:8080"
-    env_file: ./backend/.env
+    env_file:
+      - path: ./backend/.env
+        required: false
     environment:
-      - PORT=${PORT:-8080}
+      # port inside the container is fixed; ${PORT} above only picks the host port
+      - PORT=8080
       - DB_USER=${DB_USER:-dev}
       - DB_PASSWORD=${DB_PASSWORD:-change_me}
       - DB_HOST=${DB_HOST:-postgres}
@@ -23,25 +30,39 @@ services:
       - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY:-720h}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
       - DEBUG_MODE=${DEBUG_MODE:-false}
+      # Go soft memory limit, kept below mem_limit so the GC works before the container is killed
+      - GOMEMLIMIT=${GOMEMLIMIT:-100MiB}
     depends_on:
       postgres:
         condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   postgres:
     image: postgres:18-alpine
 
     restart: unless-stopped
+    mem_limit: 128m
+    memswap_limit: 128m
     command: >
       postgres
         -c shared_buffers=32MB
         -c work_mem=4MB
-        -c max_connections=20 
+        -c maintenance_work_mem=16MB
+        -c max_connections=20
+        -c max_worker_processes=4
+        -c max_parallel_workers_per_gather=0
+        -c autovacuum_max_workers=2
     environment:
-      POSTGRES_DB: ${DB_NAME:-plany} 
-      POSTGRES_USER: ${DB_USER:-dev} # if you want other username in your database change this 
+      POSTGRES_DB: ${DB_NAME:-plany}
+      POSTGRES_USER: ${DB_USER:-dev} # if you want other username in your database change this
       POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
     ports:
-      - "5432:5432"
+      # loopback only: needed to run the backend tests from the host, never exposed to the network
+      - "127.0.0.1:5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql
     healthcheck:
@@ -50,5 +71,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 volumes:
   pg_data:
