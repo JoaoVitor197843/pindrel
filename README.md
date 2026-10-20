@@ -52,6 +52,8 @@ Pré-requisitos: Docker e Docker Compose instalados.
 ```bash
 git clone <url-do-repositorio>
 cd plany
+cp .env.example .env
+# edite o .env: DB_PASSWORD e JWT_SECRET são obrigatórios
 docker compose up --build
 ```
 
@@ -60,10 +62,11 @@ Isso sobe dois serviços:
 - `plany` — API, que também serve o build da web (copiado para `./public` na imagem) em `http://localhost:8080`
 - `postgres` — banco de dados (PostgreSQL 18)
 
-Por padrão, o projeto sobe com valores de configuração básicos (senhas e segredos de exemplo) — **suficiente para testar, mas não para uso real**. Para produção, copie os arquivos `.env.example` e ajuste os valores:
+Por segurança, a senha do banco (`DB_PASSWORD`) e o segredo dos tokens (`JWT_SECRET`) **são obrigatórios e não têm valor padrão**: o compose não sobe enquanto não estiverem definidos no `.env`. Use valores longos e aleatórios (por exemplo, `openssl rand -base64 48`). As demais variáveis têm padrões seguros para uso inicial e podem ser ajustadas no mesmo arquivo.
+
+Para rodar o backend fora do Docker, copie também o exemplo dele:
 
 ```bash
-cp .env.example .env
 cp backend/.env.example backend/.env
 ```
 
