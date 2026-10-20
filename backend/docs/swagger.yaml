@@ -1,19 +1,5 @@
 basePath: /
 definitions:
-  auth.RegisterResponse:
-    properties:
-      user:
-        $ref: '#/definitions/auth.UserSummary'
-    type: object
-  auth.UserSummary:
-    properties:
-      email:
-        type: string
-      id:
-        type: string
-      username:
-        type: string
-    type: object
   dto.ErrorHttp:
     properties:
       code:
@@ -32,7 +18,7 @@ definitions:
     properties:
       access_token:
         type: string
-      expires_at:
+      expires_in:
         type: integer
     type: object
   dto.RegisterInput:
@@ -41,12 +27,13 @@ definitions:
         type: string
       password:
         type: string
-      profile:
-        items:
-          type: integer
-        type: array
       username:
         type: string
+    type: object
+  dto.RegisterResponse:
+    properties:
+      user:
+        $ref: '#/definitions/dto.UserSummary'
     type: object
   dto.UserSummary:
     properties:
@@ -63,7 +50,7 @@ info:
   title: Plany API
   version: "1.0"
 paths:
-  /api/auth/login/:
+  /auth/login/:
     post:
       consumes:
       - application/x-protobuf
@@ -94,41 +81,7 @@ paths:
       summary: Open Session
       tags:
       - auth
-  /api/auth/register/:
-    post:
-      consumes:
-      - application/x-protobuf
-      description: Register a new user, if the registration is enabled
-      parameters:
-      - description: Register data
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/dto.RegisterInput'
-      produces:
-      - application/x-protobuf
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/auth.RegisterResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/dto.ErrorHttp'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/dto.ErrorHttp'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/dto.ErrorHttp'
-      summary: Create a new account
-      tags:
-      - auth
-  /auth/logout:
+  /auth/logout/:
     post:
       description: Invalidates the refresh token (and the access token, if sended)
         and clear the cookie
@@ -144,7 +97,7 @@ paths:
       summary: Close the session
       tags:
       - auth
-  /auth/me:
+  /auth/me/:
     get:
       description: Returns the user data associated with the session access token
       produces:
@@ -163,7 +116,7 @@ paths:
       summary: Current user data
       tags:
       - auth
-  /auth/refresh:
+  /auth/refresh/:
     post:
       description: Change one valid refresh token for a new access token
       produces:
@@ -178,6 +131,40 @@ paths:
           schema:
             $ref: '#/definitions/dto.ErrorHttp'
       summary: Renews the access token
+      tags:
+      - auth
+  /auth/register/:
+    post:
+      consumes:
+      - application/x-protobuf
+      description: Register a new user, if the registration is enabled
+      parameters:
+      - description: Register data
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dto.RegisterInput'
+      produces:
+      - application/x-protobuf
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dto.RegisterResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+      summary: Create a new account
       tags:
       - auth
 securityDefinitions:

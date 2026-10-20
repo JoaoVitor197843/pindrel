@@ -15,7 +15,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/auth/login/": {
+        "/auth/login/": {
             "post": {
                 "description": "Authenticate the user and return the access in body and refresh token in httpOnly cookie",
                 "consumes": [
@@ -61,59 +61,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/register/": {
-            "post": {
-                "description": "Register a new user, if the registration is enabled",
-                "consumes": [
-                    "application/x-protobuf"
-                ],
-                "produces": [
-                    "application/x-protobuf"
-                ],
-                "tags": [
-                    "auth"
-                ],
-                "summary": "Create a new account",
-                "parameters": [
-                    {
-                        "description": "Register data",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/dto.RegisterInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/auth.RegisterResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/dto.ErrorHttp"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/dto.ErrorHttp"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/dto.ErrorHttp"
-                        }
-                    }
-                }
-            }
-        },
-        "/auth/logout": {
+        "/auth/logout/": {
             "post": {
                 "description": "Invalidates the refresh token (and the access token, if sended) and clear the cookie",
                 "produces": [
@@ -136,7 +84,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/auth/me": {
+        "/auth/me/": {
             "get": {
                 "security": [
                     {
@@ -167,7 +115,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/auth/refresh": {
+        "/auth/refresh/": {
             "post": {
                 "description": "Change one valid refresh token for a new access token",
                 "produces": [
@@ -192,31 +140,61 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/auth/register/": {
+            "post": {
+                "description": "Register a new user, if the registration is enabled",
+                "consumes": [
+                    "application/x-protobuf"
+                ],
+                "produces": [
+                    "application/x-protobuf"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Create a new account",
+                "parameters": [
+                    {
+                        "description": "Register data",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.RegisterInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dto.RegisterResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorHttp"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorHttp"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/dto.ErrorHttp"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
-        "auth.RegisterResponse": {
-            "type": "object",
-            "properties": {
-                "user": {
-                    "$ref": "#/definitions/auth.UserSummary"
-                }
-            }
-        },
-        "auth.UserSummary": {
-            "type": "object",
-            "properties": {
-                "email": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
         "dto.ErrorHttp": {
             "type": "object",
             "properties": {
@@ -245,7 +223,7 @@ const docTemplate = `{
                 "access_token": {
                     "type": "string"
                 },
-                "expires_at": {
+                "expires_in": {
                     "type": "integer"
                 }
             }
@@ -259,14 +237,16 @@ const docTemplate = `{
                 "password": {
                     "type": "string"
                 },
-                "profile": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
                 "username": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.RegisterResponse": {
+            "type": "object",
+            "properties": {
+                "user": {
+                    "$ref": "#/definitions/dto.UserSummary"
                 }
             }
         },

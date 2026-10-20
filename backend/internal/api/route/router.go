@@ -3,6 +3,9 @@ package route
 import (
 	"net"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"plany/internal/auth"
 	"plany/internal/config"
 	"plany/internal/database/db"
@@ -23,7 +26,7 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	
+
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:*", "https://seu-app.com"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
@@ -52,11 +55,6 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 			return ip, err
 		}))
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte("Plany API is running! 🚀"))
-    })
-
 	r.With(AuthMiddleware.RateLimitMiddleware(loginLimiter)).
 		Post("/auth/login/", h.Login)
 	r.With(AuthMiddleware.RateLimitMiddleware(registerLimiter)).
@@ -74,5 +72,58 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 		// r.Get("/api/ws/sync", WebSocketSyncHandler)
 	})
 
+	web := spaHandler(publicDir)
+	r.Get("/*", web)
+	r.Head("/*", web)
+
 	return r
+}
+
+// publicDir is where the Docker image places the web build.
+const publicDir = "./public"
+
+// isWebRoute is the allowlist of page routes of the web SPA (web/src/routes). Keep it in sync
+// with the web router: a path that is not a static file and not listed here is a 404.
+func isWebRoute(p string) bool {
+	switch p {
+	case "/", "/login":
+		return true
+	}
+	// /notes/:id, exactly one non-empty segment
+	if id, ok := strings.CutPrefix(p, "/notes/"); ok {
+		return id != "" && !strings.Contains(id, "/")
+	}
+	return false
+}
+
+// spaHandler answers GET/HEAD requests that did not match an API route, in three steps:
+//  1. the path is a real file inside dir (JS/CSS/images): serve it;
+//  2. the path is a web page route (isWebRoute): serve index.html so the SPA can render it;
+//  3. anything else: 404.
+func spaHandler(dir string) http.HandlerFunc {
+	files := http.FileServer(http.Dir(dir))
+	index := filepath.Join(dir, "index.html")
+	return func(w http.ResponseWriter, r *http.Request) {
+		// path.Clean on a rooted path drops any ".." segments, so it cannot escape dir
+		clean := path.Clean("/" + r.URL.Path)
+		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(clean))); err == nil && !info.IsDir() {
+			files.ServeHTTP(w, r)
+			return
+		}
+		if !isWebRoute(clean) {
+			http.NotFound(w, r)
+			return
+		}
+		if _, err := os.Stat(index); err != nil {
+			// no web build next to the binary (e.g. running the API alone in development)
+			if clean == "/" {
+				w.Write([]byte("Plany API is running! 🚀"))
+				return
+			}
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, index)
+	}
 }
