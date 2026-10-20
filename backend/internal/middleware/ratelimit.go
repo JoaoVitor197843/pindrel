@@ -11,7 +11,7 @@ import (
 )
 
 type limiterEntry struct {
-	limiter *rate.Limiter
+	limiter  *rate.Limiter
 	lastSeen time.Time
 }
 type IPRateLimiter struct {
