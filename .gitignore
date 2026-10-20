@@ -24,6 +24,29 @@ dist-ssr
 *.sw?
 
 .env
+.env.*
+!.env.example
 .envrc
+
+# Go (backend)
+backend/tmp
+backend/bin
+backend/server
+*.test
+*.out
+coverage.out
+
+# Web (Yarn Berry, Vite, Vitest)
+.vite
+*.tsbuildinfo
+coverage
+web/.yarn/install-state.gz
+
+# Local databases
+*.sqlite
+*.sqlite3
+
+# Claude Code local settings
+.claude/settings.local.json
 
 docs/*.md

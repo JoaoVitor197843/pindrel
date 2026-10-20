@@ -1,10 +1,10 @@
 
-# FVM Version Cache
-.fvm/flutter_sdk
-
 .dart_tool/
 .idea/
 *.iml
 build/
 .flutter-plugins
 .flutter-plugins-dependencies
+
+# FVM Version Cache
+.fvm/

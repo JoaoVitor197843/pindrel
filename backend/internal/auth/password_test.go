@@ -26,7 +26,7 @@ func TestHashPassword_CommonPassword_ReturnsFalse(t *testing.T) {
 }
 
 func TestHashPassword_ShortPassword_ReturnsFalse(t *testing.T) {
-		_, err := auth.HashPassword("1234")
+	_, err := auth.HashPassword("1234")
 	if err == nil {
 		t.Fatal("expected password failed to hash, got hashed")
 	}

@@ -13,7 +13,7 @@ func ValidateLogin(input *dto.LoginInput) error {
 	}
 
 	return validation.Errors{
-		"email":    validation.Validate(input.GetEmail(), validation.Required, is.Email),
+		"email":    validation.Validate(input.GetEmail(), validation.Required, is.EmailFormat),
 		"password": validation.Validate(input.GetPassword(), validation.Required, validation.Length(8, 72)),
 	}.Filter()
 }
@@ -24,7 +24,7 @@ func ValidateRegister(input *dto.RegisterInput) error {
 	}
 
 	return validation.Errors{
-		"email":    validation.Validate(input.GetEmail(), validation.Required, is.Email),
+		"email":    validation.Validate(input.GetEmail(), validation.Required, is.EmailFormat),
 		"username": validation.Validate(input.GetUsername(), validation.Required, validation.Length(3, 32)),
 		"password": validation.Validate(input.GetPassword(), validation.Required, validation.Length(8, 72)),
 	}.Filter()

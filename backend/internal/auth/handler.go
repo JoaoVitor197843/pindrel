@@ -41,7 +41,7 @@ func NewHandler(service *Service, secret string, accessExp, refreshExp time.Dura
 // @Failure 400 {object} dto.ErrorHttp
 // @Failure 403 {object} dto.ErrorHttp
 // @Failure 409 {object} dto.ErrorHttp
-// @Router /api/auth/register/ [post]
+// @Router /auth/register/ [post]
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -93,7 +93,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} dto.LoginRefreshResponse
 // @Failure 400 {object} dto.ErrorHttp
 // @Failure 401 {object} dto.ErrorHttp
-// @Router /api/auth/login/ [post]
+// @Router /auth/login/ [post]
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -144,7 +144,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 // @Produce application/x-protobuf
 // @Success 204 "No Content"
 // @Failure 401 {object} dto.ErrorHttp
-// @Router /auth/logout [post]
+// @Router /auth/logout/ [post]
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := ExtractToken(r)
 	if err != nil {
@@ -177,7 +177,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 // @Produce application/x-protobuf
 // @Success 200 {object} dto.LoginRefreshResponse
 // @Failure 401 {object} dto.ErrorHttp
-// @Router /auth/refresh [post]
+// @Router /auth/refresh/ [post]
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := ExtractToken(r)
 	if err != nil {
@@ -208,7 +208,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 // @Security BearerAuth
 // @Success 200 {object} dto.UserSummary
 // @Failure 401 {object} dto.ErrorHttp
-// @Router /auth/me [get]
+// @Router /auth/me/ [get]
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	tokenString, err := ExtractBearerToken(r)
 	if err != nil {
