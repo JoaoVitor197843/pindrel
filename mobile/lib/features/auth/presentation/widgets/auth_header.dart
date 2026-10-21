@@ -30,17 +30,7 @@ class AuthHeader extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    const _BrandMark(),
-                    const SizedBox(width: 10),
-                    Text('Plany', style: AppText.serif(24)),
-                    const SizedBox(width: 10),
-                    const Flexible(child: _Tag('SELF-HOSTED')),
-                  ],
-                ),
-              ),
+              const Expanded(child: AuthBrandRow()),
               const SizedBox(width: 8),
               ServerDropdownSelector(onAddServer: onAddServer),
             ],
@@ -64,6 +54,24 @@ class AuthHeader extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Marca `P`, nome e tag SELF-HOSTED.
+class AuthBrandRow extends StatelessWidget {
+  const AuthBrandRow({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const _BrandMark(),
+        const SizedBox(width: 10),
+        Text('Plany', style: AppText.serif(24)),
+        const SizedBox(width: 10),
+        const Flexible(child: _Tag('SELF-HOSTED')),
+      ],
     );
   }
 }
