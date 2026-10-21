@@ -1,0 +1,58 @@
+# CI do mobile (Flutter). Roda só quando o mobile, o schema protobuf ou este arquivo mudam.
+#
+# - Usa o label `ci-flutter` (imagem ci-flutter:1, ver .forgejo/images/ci-flutter.Dockerfile).
+# - Análise: `flutter analyze` (Dart, flutter_lints).
+# - Testes: não roda o teste de integração que chama o servidor Go ("Testa a chamada de api para o go");
+#   arquivos de teste vazios (placeholders) são ignorados até ganharem conteúdo, senão o
+#   flutter test falha ao carregá-los.
+# - RAM: um teste por vez (--concurrency=1) para caber no Raspberry Pi.
+name: mobile
+
+on:
+  push:
+    paths:
+      - "mobile/**"
+      - "shared/protos/**"
+      - ".forgejo/workflows/mobile.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - "shared/protos/**"
+      - ".forgejo/workflows/mobile.yml"
+
+jobs:
+  analyze-and-test:
+    runs-on: ci-flutter
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      CI: "true"
+      FLUTTER_SUPPRESS_ANALYTICS: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Flutter da imagem = versão pinada no .fvmrc
+        run: |
+          want=$(sed -n 's/.*"flutter": *"\([^"]*\)".*/\1/p' .fvmrc)
+          have=$(flutter --version | awk 'NR==1{print $2}')
+          echo ".fvmrc: $want | imagem: $have"
+          [ "$want" = "$have" ]
+
+      - name: Dependências
+        run: flutter pub get
+
+      - name: Análise — flutter analyze
+        run: flutter analyze
+
+      - name: Testes (sem os que dependem do servidor)
+        run: |
+          files=$(find test -name '*_test.dart' -size +0)
+          if [ -z "$files" ]; then echo "nenhum teste com conteúdo"; exit 0; fi
+          flutter test --concurrency=1 $files --name '^(?!Testa a chamada de api para o go)'
+
+      - name: Pico de memória do job
+        if: always()
+        run: |
+          echo "pico: $(( $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0) / 1048576 )) MiB"
