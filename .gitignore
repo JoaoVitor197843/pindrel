@@ -50,3 +50,6 @@ web/.yarn/install-state.gz
 .claude/settings.local.json
 
 docs/*.md
+
+# Imagens de referência de design (não versionar)
+docs/
