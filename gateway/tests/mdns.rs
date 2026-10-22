@@ -17,6 +17,16 @@ async fn with_mdns(name: &str, backend: &Backend) -> plany_gateway::server::Runn
     .await
 }
 
+async fn with_mdns_refresh(name: &str, backend: &Backend, refresh: Duration) -> plany_gateway::server::Running {
+    let n = name.to_string();
+    gateway_with(&[backend], move |c| {
+        c.mdns = true;
+        c.server_name = n;
+        c.mdns_refresh = refresh;
+    })
+    .await
+}
+
 async fn eventually(what: &str, f: impl Fn() -> bool) -> bool {
     for _ in 0..100 {
         if f() {
@@ -57,10 +67,10 @@ async fn gateways_find_each_other_but_not_themselves_and_say_goodbye() {
         .iter()
         .any(|s| s.name == "plany-test-beta" && s.port == i32::from(b.addr.port())));
 
-    let before = a.app.registry.list().len();
+    // by name, not by count: other tests in this process bring servers up and down on the same LAN
     b.shutdown().await; // sends the mDNS goodbye
     assert!(
-        eventually("A forgets B", || a.app.registry.list().len() < before).await,
+        eventually("A forgets B", || !names(&a).contains(&"plany-test-beta".to_string())).await,
         "a gateway that left must disappear from the list"
     );
     a.shutdown().await;
@@ -100,4 +110,36 @@ impl Decode for DiscoveredServers {
             .map(|m: DiscoveredServers| m.servers)
             .expect("protobuf body")
     }
+}
+
+#[tokio::test]
+async fn the_search_is_restarted_periodically_and_events_keep_flowing_after_each_restart() {
+    let be = Backend::start("a").await;
+    // aggressive refresh: every restart replaces the receiver, so this proves nothing is lost in the swap
+    let ms = Duration::from_millis(300);
+    let (a, b) = (
+        with_mdns_refresh("plany-test-refresh-a", &be, ms).await,
+        with_mdns_refresh("plany-test-refresh-b", &be, ms).await,
+    );
+    assert!(eventually("the search was restarted several times", || a.app.registry.searches() >= 4).await);
+    if !eventually("A sees B", || names(&a).contains(&"plany-test-refresh-b".to_string())).await {
+        eprintln!("(no multicast here: skipping the rest)");
+        return;
+    }
+    // a server that appears only after several restarts is still found, and one that leaves is still forgotten
+    let late = with_mdns_refresh("plany-test-refresh-late", &be, ms).await;
+    assert!(eventually("A sees the late one", || names(&a).contains(&"plany-test-refresh-late".to_string())).await);
+    late.shutdown().await;
+    assert!(eventually("A forgets it", || !names(&a).contains(&"plany-test-refresh-late".to_string())).await);
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_refresh_of_zero_never_restarts_the_search() {
+    let be = Backend::start("a").await;
+    let g = with_mdns_refresh("plany-test-norefresh", &be, Duration::ZERO).await;
+    time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(g.app.registry.searches(), 1, "only the initial search");
+    g.shutdown().await;
 }

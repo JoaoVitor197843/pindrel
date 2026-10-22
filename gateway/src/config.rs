@@ -11,6 +11,9 @@ pub struct Config {
     pub mdns: bool,
     /// Interface names to announce on; empty = the one that holds the default route.
     pub mdns_interfaces: Vec<String>,
+    /// How often the LAN search is restarted while no other server is known (4x that once one is); zero turns it off.
+    /// Wi-Fi drops many multicast frames and the library's own retries back off up to an hour.
+    pub mdns_refresh: Duration,
     pub probe_interval: Duration,
     pub max_connections: usize,
     pub rate_limit: bool,
@@ -29,6 +32,7 @@ impl Config {
             server_name: "Plany".into(),
             mdns: true,
             mdns_interfaces: Vec::new(),
+            mdns_refresh: Duration::from_secs(15),
             probe_interval: Duration::from_secs(3),
             max_connections: 1024,
             rate_limit: true,
@@ -58,6 +62,7 @@ impl Config {
         };
         let port = parse("GATEWAY_PORT", "8080", 1, 65535) as u16;
         let probe = parse("PROBE_INTERVAL_SECS", "3", 1, 3600);
+        let mdns_refresh = parse("MDNS_REFRESH_SECS", "15", 0, 3600);
         let max_connections = parse("MAX_CONNECTIONS", "1024", 1, 100_000) as usize;
         let max_body = parse("MAX_BODY_BYTES", "1048576", 1, 64 << 20) as usize;
         let mut flag = |key: &str, default: bool| -> bool {
@@ -92,6 +97,7 @@ impl Config {
             mdns_interfaces: get("MDNS_INTERFACES")
                 .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
                 .unwrap_or_default(),
+            mdns_refresh: Duration::from_secs(mdns_refresh),
             probe_interval: Duration::from_secs(probe),
             max_connections,
             rate_limit,
