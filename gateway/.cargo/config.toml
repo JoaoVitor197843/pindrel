@@ -1,0 +1,7 @@
+# Cross-compiling for a 64-bit Raspberry Pi from another machine needs no C toolchain: rust-lld
+# links the static musl binary. `+crt-static` and `pic` are required: without them the binary
+# linked this way segfaulted at startup on a real Pi 4 (Debian 13), before main().
+#   rustup target add aarch64-unknown-linux-musl
+#   cargo build --release --target aarch64-unknown-linux-musl
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "linker=rust-lld", "-C", "link-self-contained=yes", "-C", "relocation-model=pic", "-C", "target-feature=+crt-static"]
