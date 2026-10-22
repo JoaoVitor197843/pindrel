@@ -11,11 +11,13 @@ on:
     paths:
       - "backend/**"
       - "shared/protos/**"
+      - "gateway/tests/golden/**"
       - ".forgejo/workflows/backend.yml"
   pull_request:
     paths:
       - "backend/**"
       - "shared/protos/**"
+      - "gateway/tests/golden/**"
       - ".forgejo/workflows/backend.yml"
 
 jobs:
