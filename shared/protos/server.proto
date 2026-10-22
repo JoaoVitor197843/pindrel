@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package sync;
+
+option go_package = "backend/internal/api/dto";
+
+message ServerInfo {
+  string name = 1;
+  bool registration_enabled = 2;
+}
+
+// Plany servers found on the local network (answer of GET /server/discover/, built by the gateway).
+message DiscoveredServer {
+  string name = 1;
+  string host = 2;
+  repeated string addresses = 3;
+  int32 port = 4;
+}
+
+message DiscoveredServers {
+  repeated DiscoveredServer servers = 1;
+}
