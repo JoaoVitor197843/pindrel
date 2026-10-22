@@ -9,18 +9,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Plany is a self-hosted, Notion-style notes workspace (AGPL-3.0). Three clients-of-one-API live in this monorepo:
+Plany is a self-hosted, Notion-style notes workspace (AGPL-3.0). Three clients-of-one-API and a gateway live in this monorepo:
 
 - `backend/` — Go API (Go module name is `plany`, so imports look like `plany/internal/auth`)
+- `gateway/` — Rust (the only Rust in the project): the front-facing process of a deployment. Load balancer over the API replicas, per-IP rate limits, mDNS announcement and LAN discovery (`GET /server/discover/`). Static binary of ~1.4 MB, ~2-5 MB of RAM; runs natively on Linux (x86/arm), Windows and macOS (only `cargo check` was run for the non-Linux targets) or as a `scratch` Docker image of ~2.5 MB. Nothing in the Go API depends on it.
 - `web/` — Svelte 5 + Vite + Tailwind SPA (Yarn Berry with PnP SDKs in `web/.yarn`)
 - `mobile/` — Flutter app (mobile + desktop), Flutter version pinned via FVM (`mobile/.fvmrc`)
 - `shared/protos/` — Protobuf schema shared by all three
 
 Only the auth routes are implemented so far. Notes, vault and bulk sync are planned.
 
-**Client/server roles:** the Go API exists for authentication, cloud storage and sync. `mobile/` is fully self-sufficient (local storage, works without any server; the API is optional). `web/` ships embedded in the API image and depends on it for login, but is semi-self-sufficient: notes are kept in the browser's IndexedDB (`idb`). Both login screens will have a top tab to add another server: web **always defaults to the embedded server** (other servers found via mDNS are extra options; browsers cannot do mDNS, so the embedded backend does the discovery and hands the list to the web), mobile picks a random server found on the current network. mDNS (`_plany._tcp`) advertises the front-facing service, i.e. the load balancer when there is one, never each API instance. All planned, not implemented.
+**Client/server roles:** the Go API exists for authentication, cloud storage and sync. `mobile/` is fully self-sufficient (local storage, works without any server; the API is optional). `web/` ships embedded in the API image and depends on it for login, but is semi-self-sufficient: notes are kept in the browser's IndexedDB (`idb`). Both login screens will have a top tab to add another server: web **always defaults to the embedded server** (other servers found via mDNS are extra options; browsers cannot do mDNS, so the embedded backend does the discovery and hands the list to the web), mobile picks a random server found on the current network. mDNS (`_plany._tcp`) advertises the front-facing service, i.e. the gateway, never each API instance. The gateway side is implemented (see Gateway); the web and mobile login tabs are not.
 
-**The API must be explicitly stateless** so it can run behind a load balancer: no session/cache/counter state in process memory; state lives in Postgres or the JWT; `JWT_SECRET` is shared across instances. Current violation: the login/register IP rate limiters (`main.go`) and the global `httprate` limit keep counters in memory per instance.
+**The API must be explicitly stateless** so it can run behind a load balancer: no session/cache/counter state in process memory; state lives in Postgres or the JWT; `JWT_SECRET` is shared across instances. The in-memory login/register limiters and the global `httprate` limit are per instance, so they are behind `IN_APP_RATE_LIMIT` (default `true`, for the single-instance setup); with the gateway overlay it is `false` and the gateway does the limiting instead.
 
 ## Commands
 
@@ -58,6 +59,17 @@ fvm flutter test
 fvm flutter analyze        # flutter_lints
 ```
 
+### Gateway (run from `gateway/`)
+
+```bash
+cargo test                     # unit + integration (fake replicas) + binary + mDNS; mDNS tests say so and pass without multicast
+cargo fmt --check && cargo clippy --all-targets -- -D warnings
+cargo build --release          # target/release/gateway
+UPSTREAMS=127.0.0.1:9101-9110 GATEWAY_PORT=8200 SERVER_NAME=Casa cargo run --release
+```
+
+Environment: `UPSTREAMS` (required, `ip:port[-port]` list, e.g. `127.0.0.1:9000-9099,10.0.0.5:8080`), `GATEWAY_PORT` (8080), `SERVER_NAME` (Plany), `MDNS_ENABLED` (true), `MDNS_INTERFACES`, `RATE_LIMIT_ENABLED` (true), `PROBE_INTERVAL_SECS` (3), `MAX_CONNECTIONS` (1024), `MAX_BODY_BYTES` (1 MiB). The gateway protobuf (`ErrorHttp`, `DiscoveredServers`) is encoded by hand; `gateway/tests/golden/*.bin` are generated with `protoc --encode` and decoded by both the Rust tests and `backend/internal/api/golden_test.go`, and a test checks the field numbers against `shared/protos`. After changing `server.proto`/`auth.proto` regenerate them. Behaviour to keep: the gateway is the edge, so it replaces any client `X-Forwarded-For`; a failed *connection* is retried on the next replica even for POST (the replica never saw it), a timeout is not (504); no WebSocket upgrade support yet (needed for the planned `/ws/sync`).
+
 ### Protobuf (run from repo root)
 
 ```bash
@@ -70,6 +82,8 @@ make proto-ts    # -> web/src/types/shared/protos/*.ts (ts-proto)
 
 ### Docker
 
+`docker compose -f compose.yml -f compose.lb.yml up -d --build --scale plany=2` adds the Rust `gateway` (`gateway/Dockerfile`, multi-stage to a `scratch` image, 16m cap, host network, healthcheck `/gateway healthcheck`) in front of the replicas, which stop publishing on the network and publish only on `127.0.0.1:9000-9099` (one port per replica, up to 100; widen both ranges for more) because the host network has no docker DNS. The replicas then run with `IN_APP_RATE_LIMIT=false` (the gateway limits). Measured with 2 replicas: gateway container 0.9 MiB (cgroup) / 1.8 MB RSS, API 43-63 MiB each (peaks after Argon2 logins), Postgres ~24 MiB. The real replica limit is Postgres (`max_connections=20`: with `DB_MAX_CONNS` pools, ~8 replicas at the default; more needs a smaller pool or PgBouncer). A plain `docker compose up` has no gateway and therefore no mDNS.
+
 `docker compose up --build` builds one image (the `Dockerfile` builds both `web/` and the Go server) and runs it with `postgres:18-alpine`. The final image is a stripped static Go binary on Alpine, run as non-root with `GOMEMLIMIT=100MiB` and a `wget` healthcheck on `/`. The container always listens on 8080; compose's `PORT` only picks the host port. Compose reads `backend/.env` when present (optional) and also sets defaults inline. It enforces the RAM budget: `mem_limit` 128m for `plany` + 128m for `postgres` (= the recommended 256 MB), `GOMEMLIMIT=100MiB`, small Postgres buffers, and Postgres published on loopback only.
 
 ## Backend architecture
@@ -81,7 +95,7 @@ Request flow: `cmd/api/main.go` wires everything (config → pgx pool → `db.Ne
 - Per domain package (`internal/auth`, and `internal/vault`, which is still empty stubs): `handler.go` (HTTP, proto decode/encode, maps sentinel errors to status codes and error-code strings) → `service.go` (business logic, returns `Err*` sentinel errors) → sqlc `*db.Queries` as the repository. No separate repository layer exists for auth.
 - Input validation lives in `internal/validator` (ozzo-validation, operating on proto dto types). Handlers call it before the service.
 - DB access: write SQL in `internal/database/queries/*.sql` with sqlc annotations, then run `sqlc generate`. Never edit `internal/database/db/` by hand. UUID columns map to `github.com/google/uuid.UUID`.
-- Chosen (not yet added) Go mDNS library: `github.com/libp2p/zeroconf/v2`. Set `GOMEMLIMIT` below the RAM ceiling.
+- mDNS is **not done by the Go API**; the Rust `gateway/` does it (`gateway/src/discovery.rs`, crate `mdns-sd`): it announces `_plany._tcp` named `SERVER_NAME` on the LAN interface only (the one holding the default route; `MDNS_INTERFACES` overrides), resolves name conflicts by renaming (`Plany (2)`; avahi renames to `Plany #2`), says goodbye on shutdown and keeps a live list of the other servers (itself hidden) served as protobuf `DiscoveredServers` at `GET /server/discover/` (the browser has no mDNS). The only Go piece is `GET /server/info/` (`internal/server`: `ServerInfo` with name and `registration_enabled`, built once at startup, so changing them needs a restart). mDNS only works on the host network: a bridge container cannot see the LAN, and Docker Desktop (Windows/macOS) runs containers in a VM, so there the gateway must run as a native binary pointing `UPSTREAMS` at published `localhost` ports (not tested). A second avahi on the same machine is fine for the gateway (tested: avahi renamed itself), unlike a second avahi, which loops on hostname conflicts. Not implemented: a stable server id in the TXT record. Set `GOMEMLIMIT` below the RAM ceiling.
 - Config: `internal/config/config.go` parses env vars with a generic `parseEnv` that collects every error before failing. A `nil` fallback means the variable is required. Add new settings there and to `backend/.env.example` and `compose.yml`.
 
 Auth model:
@@ -116,6 +130,6 @@ Known gaps in the current code:
 
 ## Conventions
 
-- **Tests are mandatory.** Every component or service created (Go, Web or Flutter) must ship with automated tests written together with the implementation, not afterwards.
+- **Tests are mandatory.** Every component or service created (Go, Rust, Web or Flutter) must ship with automated tests written together with the implementation, not afterwards.
 - Log messages, comments, and some error strings mix Portuguese and English. Match the language of the surrounding code.
 - Go tests use external test packages (`package auth_test`) and compare protobuf messages with `go-cmp` + `protocmp`.
