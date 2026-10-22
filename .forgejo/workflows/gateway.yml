@@ -1,0 +1,54 @@
+# CI do gateway (Rust). Roda só quando o gateway, o schema protobuf ou este arquivo mudam.
+#
+# - Os testes de mDNS precisam de multicast; onde ele não existe eles avisam e passam.
+# - Limites de RAM para caber no Raspberry Pi (jobs rodam com capacity 1 e no máx. ~1,5 GB):
+#   um job de compilação por vez e testes com o perfil de desenvolvimento (sem LTO).
+name: gateway
+
+on:
+  push:
+    paths:
+      - "gateway/**"
+      - "shared/protos/**"
+      - ".forgejo/workflows/gateway.yml"
+  pull_request:
+    paths:
+      - "gateway/**"
+      - "shared/protos/**"
+      - ".forgejo/workflows/gateway.yml"
+
+jobs:
+  analyze-and-test:
+    runs-on: ci
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: gateway
+    env:
+      CARGO_BUILD_JOBS: "1"
+      CARGO_TERM_COLOR: never
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          cargo --version
+          rustc --version
+
+      - name: Análise — rustfmt
+        run: cargo fmt --check
+
+      - name: Análise — clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Testes (unitários, integração, binário e mDNS)
+        run: cargo test --locked
+
+      - name: Compila em release (perfil de produção)
+        run: cargo build --release --locked
+
+      - name: Tamanho e pico de memória do job
+        if: always()
+        run: |
+          ls -l target/release/gateway 2>/dev/null | awk '{printf "binário: %.1f MB\n", $5/1048576}' || true
+          echo "pico: $(( $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0) / 1048576 )) MiB"
