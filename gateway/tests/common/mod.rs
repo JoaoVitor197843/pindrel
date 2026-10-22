@@ -52,7 +52,19 @@ impl Backend {
     }
 
     pub async fn start_on(addr: SocketAddr, id: &'static str) -> Backend {
-        let listener = TcpListener::bind(addr).await.unwrap();
+        // a killed backend frees its port a moment later, so retry for a while
+        let mut tries = 0;
+        let listener = loop {
+            match TcpListener::bind(addr).await {
+                Ok(l) => break l,
+                Err(e) if tries < 40 => {
+                    tries += 1;
+                    let _ = e;
+                    time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(e) => panic!("could not bind {addr}: {e}"),
+            }
+        };
         let addr = listener.local_addr().unwrap();
         let task = tokio::spawn(async move {
             let mut conns = tokio::task::JoinSet::new(); // dropped with the task: killing the backend closes its connections

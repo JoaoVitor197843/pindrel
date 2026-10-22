@@ -44,6 +44,101 @@ pub fn discovered_servers(list: &[Server]) -> Vec<u8> {
     out
 }
 
+const MAX_SERVERS: usize = 256;
+const MAX_ADDRESSES: usize = 16;
+const MAX_TEXT: usize = 255;
+
+struct Reader<'a>(&'a [u8]);
+
+impl<'a> Reader<'a> {
+    fn varint(&mut self) -> Option<u64> {
+        let mut v = 0u64;
+        for shift in (0..64).step_by(7) {
+            let (&b, rest) = self.0.split_first()?;
+            self.0 = rest;
+            v |= u64::from(b & 0x7f) << shift;
+            if b & 0x80 == 0 {
+                return Some(v);
+            }
+        }
+        None
+    }
+
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> {
+        if n > self.0.len() {
+            return None;
+        }
+        let (head, tail) = self.0.split_at(n);
+        self.0 = tail;
+        Some(head)
+    }
+
+    fn bytes(&mut self) -> Option<&'a [u8]> {
+        let n = usize::try_from(self.varint()?).ok()?;
+        self.take(n)
+    }
+
+    /// Skips a field of an unknown number, by wire type.
+    fn skip(&mut self, wire: u64) -> Option<()> {
+        match wire {
+            0 => self.varint().map(|_| ()),
+            1 => self.take(8).map(|_| ()),
+            2 => self.bytes().map(|_| ()),
+            5 => self.take(4).map(|_| ()),
+            _ => None,
+        }
+    }
+}
+
+fn text(b: &[u8]) -> Option<String> {
+    if b.len() > MAX_TEXT {
+        return None;
+    }
+    String::from_utf8(b.to_vec()).ok()
+}
+
+fn server(b: &[u8]) -> Option<Server> {
+    let mut r = Reader(b);
+    let (mut name, mut host, mut ips, mut port) = (String::new(), String::new(), Vec::new(), 0u16);
+    while !r.0.is_empty() {
+        let tag = r.varint()?;
+        match (tag >> 3, tag & 7) {
+            (1, 2) => name = text(r.bytes()?)?,
+            (2, 2) => host = text(r.bytes()?)?,
+            (3, 2) => {
+                if ips.len() >= MAX_ADDRESSES {
+                    return None;
+                }
+                ips.push(text(r.bytes()?)?);
+            }
+            (4, 0) => port = u16::try_from(r.varint()?).ok()?,
+            (_, wire) => r.skip(wire)?,
+        }
+    }
+    (!name.is_empty() && port != 0).then_some(Server { name, host, ips, port })
+}
+
+/// Reads a `DiscoveredServers` message (what `discovered_servers` writes, also the format of the
+/// file with the servers remembered between runs). `None` when it is malformed or over the limits;
+/// it never panics, whatever the input.
+pub fn parse_discovered_servers(b: &[u8]) -> Option<Vec<Server>> {
+    let mut r = Reader(b);
+    let mut out = Vec::new();
+    while !r.0.is_empty() {
+        let tag = r.varint()?;
+        match (tag >> 3, tag & 7) {
+            (1, 2) => {
+                if out.len() >= MAX_SERVERS {
+                    return None;
+                }
+                out.push(server(r.bytes()?)?);
+            }
+            (_, wire) => r.skip(wire)?,
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +225,89 @@ mod tests {
             },
         ];
         assert_eq!(discovered_servers(&list), want);
+    }
+
+    #[test]
+    fn parser_reads_back_what_the_encoder_wrote() {
+        let list = vec![server("Casa do João & Maria", 8200), server("a", 1), server(&"n".repeat(63), 65535)];
+        assert_eq!(parse_discovered_servers(&discovered_servers(&list)), Some(list));
+        assert_eq!(parse_discovered_servers(&[]), Some(vec![]));
+    }
+
+    #[test]
+    fn parser_reads_the_golden_file_written_by_protoc() {
+        let raw = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/discovered.bin")).unwrap();
+        let got = parse_discovered_servers(&raw).unwrap();
+        assert_eq!(got.len(), 2);
+        assert_eq!((got[0].name.as_str(), got[0].port, got[0].ips.len()), ("Casa do João", 8080, 2));
+        assert_eq!(
+            (got[1].name.as_str(), got[1].host.as_str(), got[1].port),
+            ("Servidor", "srv", 39215)
+        );
+    }
+
+    #[test]
+    fn parser_skips_unknown_fields() {
+        // field 9 (varint) before the server and field 7 (bytes) inside it
+        let mut b = vec![0x48, 0x05];
+        let mut entry = Vec::new();
+        field(0x0a, b"N", &mut entry);
+        field(0x3a, b"future", &mut entry);
+        entry.extend_from_slice(&[0x20, 0x50]);
+        field(0x0a, &entry, &mut b);
+        let got = parse_discovered_servers(&b).unwrap();
+        assert_eq!((got[0].name.as_str(), got[0].port), ("N", 80));
+    }
+
+    #[test]
+    fn parser_rejects_malformed_input_without_panicking() {
+        let good = discovered_servers(&[server("N", 8080)]);
+        // every truncation of a valid message
+        for n in 0..good.len() {
+            assert!(parse_discovered_servers(&good[..n]).is_none() || n == 0, "prefix of {n} bytes");
+        }
+        let cases: Vec<Vec<u8>> = vec![
+            vec![0x0a, 0x05, 1, 2],                                                 // length beyond the data
+            vec![0x0a, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f], // absurd length
+            vec![0x80; 12],                                                         // unterminated varint
+            vec![0x0b],                                                             // wire type 3 (group)
+            vec![0x0a, 0x02, 0x0a, 0x00],                                           // server without a name or a port
+            vec![0x0a, 0x04, 0x0a, 0x01, 0xff, 0x20],                               // invalid utf-8 / truncated
+        ];
+        for c in cases {
+            assert!(parse_discovered_servers(&c).is_none(), "{c:?}");
+        }
+        // port out of range, name too long, too many servers, too many addresses
+        let mut e = Vec::new();
+        field(0x0a, b"N", &mut e);
+        e.push(0x20);
+        varint(70_000, &mut e);
+        let mut b = Vec::new();
+        field(0x0a, &e, &mut b);
+        assert!(parse_discovered_servers(&b).is_none());
+        assert!(parse_discovered_servers(&discovered_servers(&[server(&"x".repeat(300), 80)])).is_none());
+        let many: Vec<Server> = (0..257).map(|i| server(&format!("s{i}"), 80)).collect();
+        assert!(parse_discovered_servers(&discovered_servers(&many)).is_none());
+        let mut crowded = server("N", 80);
+        crowded.ips = (0..17).map(|i| format!("10.0.0.{i}")).collect();
+        assert!(parse_discovered_servers(&discovered_servers(&[crowded])).is_none());
+    }
+
+    #[test]
+    fn parser_survives_random_bytes() {
+        // deterministic pseudo-random garbage, many lengths: must return, not panic or hang
+        let mut x = 0x2545_f491_4f6c_dd1du64;
+        for len in 0..400 {
+            let b: Vec<u8> = (0..len)
+                .map(|_| {
+                    x ^= x << 13;
+                    x ^= x >> 7;
+                    x ^= x << 17;
+                    (x >> 24) as u8
+                })
+                .collect();
+            let _ = parse_discovered_servers(&b);
+        }
     }
 
     /// The field numbers used above must be the ones declared in the shared .proto files.

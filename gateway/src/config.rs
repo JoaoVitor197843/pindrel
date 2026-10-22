@@ -15,6 +15,10 @@ pub struct Config {
     /// Wi-Fi drops many multicast frames and the library's own retries back off up to an hour.
     pub mdns_refresh: Duration,
     pub probe_interval: Duration,
+    /// How often the remembered servers that are no longer announced are tried again; zero turns it off.
+    pub known_interval: Duration,
+    /// Where to keep the remembered servers between runs (unset: only in memory).
+    pub known_file: Option<std::path::PathBuf>,
     pub max_connections: usize,
     pub rate_limit: bool,
     pub max_body: usize,
@@ -34,6 +38,8 @@ impl Config {
             mdns_interfaces: Vec::new(),
             mdns_refresh: Duration::from_secs(15),
             probe_interval: Duration::from_secs(3),
+            known_interval: Duration::from_secs(15),
+            known_file: None,
             max_connections: 1024,
             rate_limit: true,
             max_body: 1 << 20,
@@ -63,6 +69,7 @@ impl Config {
         let port = parse("GATEWAY_PORT", "8080", 1, 65535) as u16;
         let probe = parse("PROBE_INTERVAL_SECS", "3", 1, 3600);
         let mdns_refresh = parse("MDNS_REFRESH_SECS", "15", 0, 3600);
+        let known_interval = parse("KNOWN_PROBE_SECS", "15", 0, 3600);
         let max_connections = parse("MAX_CONNECTIONS", "1024", 1, 100_000) as usize;
         let max_body = parse("MAX_BODY_BYTES", "1048576", 1, 64 << 20) as usize;
         let mut flag = |key: &str, default: bool| -> bool {
@@ -99,6 +106,8 @@ impl Config {
                 .unwrap_or_default(),
             mdns_refresh: Duration::from_secs(mdns_refresh),
             probe_interval: Duration::from_secs(probe),
+            known_interval: Duration::from_secs(known_interval),
+            known_file: get("KNOWN_SERVERS_FILE").map(std::path::PathBuf::from),
             max_connections,
             rate_limit,
             max_body,
