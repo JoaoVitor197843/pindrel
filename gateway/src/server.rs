@@ -8,15 +8,16 @@ use hyper_util::{
 };
 use tokio::{
     net::TcpListener,
-    sync::{watch, Semaphore},
+    sync::{oneshot, watch, Semaphore},
     task::JoinHandle,
     time,
 };
 
 use crate::{
     config::Config,
-    discovery::{self, Registry},
+    discovery::{self, Lan, Registry},
     handler::{handle, App},
+    known,
 };
 
 pub struct Running {
@@ -24,22 +25,32 @@ pub struct Running {
     pub app: Arc<App>,
     shutdown: watch::Sender<bool>,
     task: JoinHandle<()>,
+    /// Fires once the listener is closed.
+    closed: oneshot::Receiver<()>,
     mdns: Option<mdns_sd::ServiceDaemon>,
 }
 
 impl Running {
-    /// Stops accepting, lets in-flight requests finish (up to 5 s) and leaves the mDNS group.
+    /// Stops accepting, leaves the mDNS group and lets in-flight requests finish (up to 5 s).
+    /// The port is closed *before* the goodbye: the others check a server that stops being
+    /// announced by connecting to it, and must not find it still open.
     pub async fn shutdown(self) {
+        let _ = self.shutdown.send(true);
+        let _ = time::timeout(Duration::from_secs(2), self.closed).await;
         if let Some(d) = &self.mdns {
             let _ = d.shutdown();
         }
-        let _ = self.shutdown.send(true);
         let _ = self.task.await;
     }
 }
 
 /// Binds `0.0.0.0:cfg.port` (0 = any free port) and starts serving.
 pub async fn start(cfg: Config) -> io::Result<Running> {
+    start_with(cfg, Lan::detect()).await
+}
+
+/// Like `start`, with the local network given (tests use one that contains loopback).
+pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Running> {
     let listener = TcpListener::bind(("0.0.0.0", cfg.port)).await?;
     let addr = listener.local_addr()?;
     let lan = discovery::lan_ip();
@@ -69,8 +80,14 @@ pub async fn start(cfg: Config) -> io::Result<Running> {
         }
     }
 
-    let app = Arc::new(App::new(cfg, registry));
+    let remember = cfg.known_interval > Duration::ZERO && (cfg.mdns || cfg.known_file.is_some());
+    let (known_file, known_interval) = (cfg.known_file.clone(), cfg.known_interval);
+    let app = Arc::new(App::new(cfg, registry.clone()));
     let (tx, rx) = watch::channel(false);
+
+    if remember {
+        tokio::spawn(known::run(registry, local_net, known_file, known_interval, rx.clone()));
+    }
 
     // keeps the list of live replicas fresh
     let (a, mut stop) = (app.clone(), rx.clone());
@@ -97,17 +114,19 @@ pub async fn start(cfg: Config) -> io::Result<Running> {
     });
     app.pool.probe().await; // so the first request already knows who is up
 
-    let task = tokio::spawn(accept_loop(app.clone(), listener, rx));
+    let (closed_tx, closed) = oneshot::channel();
+    let task = tokio::spawn(accept_loop(app.clone(), listener, rx, closed_tx));
     Ok(Running {
         addr,
         app,
         shutdown: tx,
         task,
+        closed,
         mdns,
     })
 }
 
-async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Receiver<bool>) {
+async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Receiver<bool>, closed: oneshot::Sender<()>) {
     let permits = Arc::new(Semaphore::new(app.cfg.max_connections));
     let graceful = GracefulShutdown::new();
     loop {
@@ -132,6 +151,8 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
             drop(permit);
         });
     }
+    drop(listener); // nobody can connect any more, even while the open requests finish
+    let _ = closed.send(());
     tokio::select! {
         _ = graceful.shutdown() => {}
         _ = time::sleep(Duration::from_secs(5)) => eprintln!("shutdown: some connections were still open after 5 s"),

@@ -2,6 +2,7 @@
 pub mod config;
 pub mod discovery;
 pub mod handler;
+pub mod known;
 pub mod limiter;
 pub mod pool;
 pub mod proto;
