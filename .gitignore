@@ -53,3 +53,6 @@ docs/*.md
 
 # Imagens de referência de design (não versionar)
 docs/
+
+# Rust (gateway)
+gateway/target
