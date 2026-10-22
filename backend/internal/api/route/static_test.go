@@ -179,3 +179,27 @@ func TestRouter_UnknownPathStatusByMethod(t *testing.T) {
 		}
 	}
 }
+
+// With InAppRateLimit on the login route is limited per instance; with it off (load balancer
+// does the limiting) the API keeps no counters and never answers 429 itself.
+func TestRouter_InAppRateLimitToggle(t *testing.T) {
+	statuses := func(inApp bool) []int {
+		r := SetupRouter(&config.Config{InAppRateLimit: inApp}, nil, &auth.Handler{},
+			AuthMiddleware.NewIPRateLimiter(0, 1), AuthMiddleware.NewIPRateLimiter(0, 1))
+		var out []int
+		for range 3 {
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/auth/login/", nil))
+			out = append(out, rec.Code)
+		}
+		return out
+	}
+	if got := statuses(true); got[1] != http.StatusTooManyRequests || got[2] != http.StatusTooManyRequests {
+		t.Errorf("limit on: got %v, want 429 after the burst", got)
+	}
+	for _, c := range statuses(false) {
+		if c == http.StatusTooManyRequests {
+			t.Errorf("limit off: unexpected 429")
+		}
+	}
+}

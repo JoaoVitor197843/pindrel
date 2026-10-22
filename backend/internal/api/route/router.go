@@ -10,6 +10,7 @@ import (
 	"plany/internal/config"
 	"plany/internal/database/db"
 	AuthMiddleware "plany/internal/middleware"
+	"plany/internal/server"
 	"strings"
 	"time"
 
@@ -34,31 +35,38 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
-	r.Use(httprate.LimitBy(
-		100,
-		1*time.Minute,
-		func(r *http.Request) (string, error) {
-			ip, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				ip = r.RemoteAddr
-			}
-			parsedIP := net.ParseIP(ip)
-			if parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsPrivate()) {
-				if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-					ips := strings.Split(xff, ",")
-					clientIP := strings.TrimSpace(ips[0])
-					if clientIP != "" {
-						return clientIP, nil
+	if cfg.InAppRateLimit {
+		r.Use(httprate.LimitBy(
+			100,
+			1*time.Minute,
+			func(r *http.Request) (string, error) {
+				ip, _, err := net.SplitHostPort(r.RemoteAddr)
+				if err != nil {
+					ip = r.RemoteAddr
+				}
+				parsedIP := net.ParseIP(ip)
+				if parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsPrivate()) {
+					if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+						ips := strings.Split(xff, ",")
+						clientIP := strings.TrimSpace(ips[0])
+						if clientIP != "" {
+							return clientIP, nil
+						}
 					}
 				}
-			}
-			return ip, err
-		}))
+				return ip, err
+			}))
+	}
 
-	r.With(AuthMiddleware.RateLimitMiddleware(loginLimiter)).
-		Post("/auth/login/", h.Login)
-	r.With(AuthMiddleware.RateLimitMiddleware(registerLimiter)).
-		Post("/auth/register/", h.Register)
+	// with InAppRateLimit off, the load balancer in front does the rate limiting (keeps the API stateless)
+	loginRL, registerRL := noMiddleware, noMiddleware
+	if cfg.InAppRateLimit {
+		loginRL = AuthMiddleware.RateLimitMiddleware(loginLimiter)
+		registerRL = AuthMiddleware.RateLimitMiddleware(registerLimiter)
+	}
+	r.With(loginRL).Post("/auth/login/", h.Login)
+	r.With(registerRL).Post("/auth/register/", h.Register)
+	r.Get("/server/info/", server.NewHandler(cfg.ServerName, cfg.RegistrationEnabled).Info)
 	r.Post("/auth/logout/", h.Logout)
 	r.Post("/auth/refresh/", h.Refresh)
 	r.Get("/auth/me/", h.Me)
@@ -78,6 +86,8 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 
 	return r
 }
+
+func noMiddleware(next http.Handler) http.Handler { return next }
 
 // publicDir is where the Docker image places the web build.
 const publicDir = "./public"

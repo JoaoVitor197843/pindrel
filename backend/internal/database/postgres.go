@@ -33,8 +33,9 @@ func NewConnection(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Poo
 		return nil, fmt.Errorf("failed to create the connection pool: %w", err)
 	}
 
-	config.MaxConns = 15
-	config.MinConns = 2
+	// small pool: each API replica opens its own, and the shared Postgres has a tiny RAM budget
+	config.MaxConns = int32(cfg.MaxConns)
+	config.MinConns = min(2, config.MaxConns)
 	config.MaxConnLifetime = 1 * time.Hour
 	config.MaxConnIdleTime = 15 * time.Minute
 

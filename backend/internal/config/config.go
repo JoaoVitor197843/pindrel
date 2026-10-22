@@ -27,16 +27,20 @@ type DatabaseConfig struct {
 	Password string
 	DBName   string
 	SSLMode  SSLMode
+	MaxConns int
 }
 
 type Config struct {
 	Port                string
+	ServerName          string
 	Database            DatabaseConfig
 	JWTSecret           string
 	JWTAccessExpiry     time.Duration
 	JWTRefreshExpiry    time.Duration
 	RegistrationEnabled bool
 	DebugMode           bool
+	// InAppRateLimit: per-instance in-memory rate limits. Turn it off behind a load balancer that limits instead.
+	InAppRateLimit bool
 }
 
 func ptr[T any](v T) *T {
@@ -85,15 +89,6 @@ func parseSSLMode(val string) (SSLMode, error) {
 	}
 }
 
-func getEnvString(key, fallback string) string {
-	val, exists := os.LookupEnv(key)
-	val = strings.TrimSpace(val)
-	if !exists || val == "" {
-		return fallback
-	}
-	return val
-}
-
 func parsePortRange(min, max int) func(string) (int, error) {
 	return func(val string) (int, error) {
 		port, err := strconv.Atoi(val)
@@ -118,7 +113,10 @@ func Load() (*Config, error) {
 	jwtSecret := parseEnv(c, "JWT_SECRET", nil, parseString)
 	jwtAccessExpiry := parseEnv(c, "JWT_ACCESS_EXPIRY", nil, time.ParseDuration)
 	jwtRefreshExpiry := parseEnv(c, "JWT_REFRESH_EXPIRY", nil, time.ParseDuration)
+	serverName := parseEnv(c, "SERVER_NAME", ptr("Plany"), parseString)
 	registrationEnabled := parseEnv(c, "REGISTRATION_ENABLED", ptr(true), strconv.ParseBool)
+	inAppRateLimit := parseEnv(c, "IN_APP_RATE_LIMIT", ptr(true), strconv.ParseBool)
+	dbMaxConns := parseEnv(c, "DB_MAX_CONNS", ptr(4), parsePortRange(1, 100))
 	debugMode := parseEnv(c, "DEBUG_MODE", ptr(false), strconv.ParseBool)
 	if len(c.errs) > 0 {
 		return nil, fmt.Errorf("erros de configuração no ambiente:\n - %w", errors.Join(c.errs...))
@@ -132,11 +130,14 @@ func Load() (*Config, error) {
 			Password: dbPassword,
 			DBName:   dbName,
 			SSLMode:  sslMode,
+			MaxConns: dbMaxConns,
 		},
+		ServerName:          serverName,
 		JWTSecret:           jwtSecret,
 		JWTAccessExpiry:     jwtAccessExpiry,
 		JWTRefreshExpiry:    jwtRefreshExpiry,
 		RegistrationEnabled: registrationEnabled,
 		DebugMode:           debugMode,
+		InAppRateLimit:      inAppRateLimit,
 	}, nil
 }
