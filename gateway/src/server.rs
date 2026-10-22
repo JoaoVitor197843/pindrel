@@ -48,7 +48,14 @@ pub async fn start(cfg: Config) -> io::Result<Running> {
 
     let mut mdns = None;
     if cfg.mdns {
-        match discovery::start(&cfg.server_name, addr.port(), lan, &cfg.mdns_interfaces, registry.clone()) {
+        match discovery::start(
+            &cfg.server_name,
+            addr.port(),
+            lan,
+            &cfg.mdns_interfaces,
+            cfg.mdns_refresh,
+            registry.clone(),
+        ) {
             Ok(d) => {
                 eprintln!(
                     "mDNS: announcing {:?} as {} on port {}",

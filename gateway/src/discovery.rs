@@ -3,10 +3,15 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, UdpSocket},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
 
 use mdns_sd::{IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
+use tokio::time;
 
 pub const SERVICE_TYPE: &str = "_plany._tcp.local.";
 
@@ -23,6 +28,7 @@ pub struct Registry {
     found: Mutex<HashMap<String, Server>>,
     own_port: u16,
     own_ips: Vec<String>,
+    searches: AtomicU64,
 }
 
 impl Registry {
@@ -31,6 +37,7 @@ impl Registry {
             found: Mutex::new(HashMap::new()),
             own_port,
             own_ips,
+            searches: AtomicU64::new(0),
         }
     }
 
@@ -40,6 +47,11 @@ impl Registry {
 
     pub fn remove(&self, fullname: &str) {
         self.found.lock().unwrap().remove(fullname);
+    }
+
+    /// How many times the LAN search was (re)started.
+    pub fn searches(&self) -> u64 {
+        self.searches.load(Ordering::Relaxed)
     }
 
     /// The other servers, sorted by name.
@@ -71,7 +83,8 @@ pub fn start(
     port: u16,
     lan: Option<IpAddr>,
     ifaces: &[String],
-    registry: std::sync::Arc<Registry>,
+    refresh: Duration,
+    registry: Arc<Registry>,
 ) -> Result<ServiceDaemon, String> {
     let e = |e: mdns_sd::Error| e.to_string();
     let d = ServiceDaemon::new().map_err(e)?;
@@ -94,32 +107,75 @@ pub fn start(
     }
     .map_err(e)?;
     d.register(info).map_err(e)?;
-    let rx = d.browse(SERVICE_TYPE).map_err(e)?;
-    tokio::spawn(async move {
-        while let Ok(ev) = rx.recv_async().await {
-            match ev {
-                ServiceEvent::ServiceResolved(i) => {
-                    let full = i.get_fullname().to_string();
-                    let name = full.strip_suffix(&format!(".{SERVICE_TYPE}")).unwrap_or(&full).to_string();
-                    let mut ips: Vec<String> = i.get_addresses_v4().iter().map(|a| a.to_string()).collect();
-                    ips.sort();
-                    let host = i.get_hostname().trim_end_matches('.').trim_end_matches(".local").to_string();
-                    registry.upsert(
-                        full,
-                        Server {
-                            name,
-                            host,
-                            ips,
-                            port: i.get_port(),
-                        },
-                    );
-                }
-                ServiceEvent::ServiceRemoved(_, full) => registry.remove(&full),
-                _ => {}
+    let first = d.browse(SERVICE_TYPE).map_err(e)?;
+    registry.searches.fetch_add(1, Ordering::Relaxed);
+    tokio::spawn(browse_loop(d.clone(), first, refresh, registry));
+    Ok(d)
+}
+
+/// How long to wait before restarting the search: often while nobody else is known (the first
+/// answers may have been lost), rarely afterwards.
+pub fn next_wait(refresh: Duration, others_known: bool) -> Duration {
+    if others_known {
+        refresh * 4
+    } else {
+        refresh
+    }
+}
+
+fn apply(registry: &Registry, ev: ServiceEvent) {
+    match ev {
+        ServiceEvent::ServiceResolved(i) => {
+            let full = i.get_fullname().to_string();
+            let name = full.strip_suffix(&format!(".{SERVICE_TYPE}")).unwrap_or(&full).to_string();
+            let mut ips: Vec<String> = i.get_addresses_v4().iter().map(|a| a.to_string()).collect();
+            ips.sort();
+            let host = i.get_hostname().trim_end_matches('.').trim_end_matches(".local").to_string();
+            registry.upsert(
+                full,
+                Server {
+                    name,
+                    host,
+                    ips,
+                    port: i.get_port(),
+                },
+            );
+        }
+        ServiceEvent::ServiceRemoved(_, full) => registry.remove(&full),
+        _ => {}
+    }
+}
+
+/// Feeds the registry from the search and restarts it every `refresh` (see `next_wait`). The
+/// library resends its query with a delay that doubles up to an hour, and Wi-Fi drops 20-50% of
+/// multicast frames, so a lost answer could otherwise delay discovery for minutes. Calling
+/// `browse` again replaces the receiver, restarts that backoff at one second and replays the cache.
+async fn browse_loop(d: ServiceDaemon, first: mdns_sd::Receiver<ServiceEvent>, refresh: Duration, registry: Arc<Registry>) {
+    let mut rx = first;
+    loop {
+        let restart = time::sleep(if refresh.is_zero() {
+            Duration::MAX / 4
+        } else {
+            next_wait(refresh, !registry.list().is_empty())
+        });
+        tokio::pin!(restart);
+        loop {
+            tokio::select! {
+                ev = rx.recv_async() => match ev {
+                    Ok(ev) => apply(&registry, ev),
+                    Err(_) => return, // the daemon was shut down
+                },
+                _ = &mut restart => break,
             }
         }
-    });
-    Ok(d)
+        match d.browse(SERVICE_TYPE) {
+            Ok(next) => {
+                registry.searches.fetch_add(1, Ordering::Relaxed);
+                rx = next;
+            }
+            Err(_) => return,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +205,13 @@ mod tests {
         let r = Registry::new(8200, vec!["192.168.1.5".into()]);
         r.upsert("x".into(), srv("X", "192.168.1.6", 8200));
         assert_eq!(r.list().len(), 1);
+    }
+
+    #[test]
+    fn search_restarts_often_while_alone_and_rarely_once_others_are_known() {
+        let r = Duration::from_secs(15);
+        assert_eq!(next_wait(r, false), Duration::from_secs(15));
+        assert_eq!(next_wait(r, true), Duration::from_secs(60));
     }
 
     #[test]
