@@ -19,6 +19,7 @@ services:
     environment:
       # port inside the container is fixed; ${PORT} above only picks the host port
       - PORT=8080
+      - SERVER_NAME=${SERVER_NAME:-Plany}
       - DB_USER=${DB_USER:-dev}
       - DB_PASSWORD=${DB_PASSWORD:-change_me}
       - DB_HOST=${DB_HOST:-postgres}
@@ -30,6 +31,8 @@ services:
       - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY:-720h}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
       - DEBUG_MODE=${DEBUG_MODE:-false}
+      - DB_MAX_CONNS=${DB_MAX_CONNS:-4}
+      - IN_APP_RATE_LIMIT=${IN_APP_RATE_LIMIT:-true}
       # Go soft memory limit, kept below mem_limit so the GC works before the container is killed
       - GOMEMLIMIT=${GOMEMLIMIT:-100MiB}
     depends_on:
