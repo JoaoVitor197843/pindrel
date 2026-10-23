@@ -14,6 +14,28 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// maxBodyBytes caps a request body. The largest valid auth payload is well under 1 KiB (e-mail 254,
+// username 32 characters, password 72 bytes); the rest is slack. It keeps one request from using
+// the instance's RAM.
+const maxBodyBytes = 16 << 10
+
+// readBody reads the (capped) body. On failure it has already written the response.
+func readBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	defer r.Body.Close()
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			api.WriteError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "request body is too large")
+			return nil, false
+		}
+		// the client gave up or sent a broken body: its fault, not a server error
+		api.WriteError(w, http.StatusBadRequest, "invalid_input", "could not read request body")
+		return nil, false
+	}
+	return body, true
+}
+
 type Handler struct {
 	service         *Service
 	jwtSecret       string
@@ -39,17 +61,16 @@ func NewHandler(service *Service, secret string, accessExp, refreshExp time.Dura
 // @Param input body dto.RegisterInput true "Register data"
 // @Success 201 {object} dto.RegisterResponse
 // @Failure 400 {object} dto.ErrorHttp
+// @Failure 413 {object} dto.ErrorHttp
+// @Failure 503 {object} dto.ErrorHttp
 // @Failure 403 {object} dto.ErrorHttp
 // @Failure 409 {object} dto.ErrorHttp
 // @Router /auth/register/ [post]
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Printf("read bytes error: %v", err)
-		api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
+	body, ok := readBody(w, r)
+	if !ok {
 		return
 	}
-	defer r.Body.Close()
 	var input dto.RegisterInput
 	if err := proto.Unmarshal(body, &input); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "invalid_input", "malformed request body")
@@ -68,6 +89,9 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusConflict, "email_already_exists", "This email is already registered")
 		case errors.Is(err, ErrShortPassword), errors.Is(err, ErrCommonPassword):
 			api.WriteError(w, http.StatusBadRequest, "invalid_input", "password does not meet requirements")
+		case errors.Is(err, ErrServerBusy):
+			w.Header().Set("Retry-After", "5")
+			api.WriteError(w, http.StatusServiceUnavailable, "server_busy", "server is busy, try again shortly")
 		default:
 			log.Printf("register error: %v", err)
 			api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
@@ -93,15 +117,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 // @Success 200 {object} dto.LoginRefreshResponse
 // @Failure 400 {object} dto.ErrorHttp
 // @Failure 401 {object} dto.ErrorHttp
+// @Failure 413 {object} dto.ErrorHttp
+// @Failure 503 {object} dto.ErrorHttp
 // @Router /auth/login/ [post]
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		log.Printf("read bytes error: %v", err)
-		api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
+	body, ok := readBody(w, r)
+	if !ok {
 		return
 	}
-	defer r.Body.Close()
 	var input dto.LoginInput
 	if err := proto.Unmarshal(body, &input); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "invalid_input", "malformed request body")
@@ -116,6 +139,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, ErrInvalidCredentials):
 			api.WriteError(w, http.StatusUnauthorized, "invalid_credentials", "Invalid email or password")
+		case errors.Is(err, ErrServerBusy):
+			w.Header().Set("Retry-After", "5")
+			api.WriteError(w, http.StatusServiceUnavailable, "server_busy", "server is busy, try again shortly")
 		default:
 			log.Printf("login error: %v", err)
 			api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")

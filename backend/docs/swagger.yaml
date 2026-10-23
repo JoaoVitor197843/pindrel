@@ -78,6 +78,14 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/dto.ErrorHttp'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
       summary: Open Session
       tags:
       - auth
@@ -162,6 +170,14 @@ paths:
             $ref: '#/definitions/dto.ErrorHttp'
         "409":
           description: Conflict
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+        "413":
+          description: Request Entity Too Large
+          schema:
+            $ref: '#/definitions/dto.ErrorHttp'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/dto.ErrorHttp'
       summary: Create a new account

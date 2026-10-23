@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"plany/internal/database/db"
+	"plany/internal/validator"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -16,6 +19,19 @@ var (
 	ErrInvalidCredentials   = errors.New("invalid credentials")
 	ErrUserNotFound         = errors.New("user not found")
 )
+
+// pgUniqueViolation is the Postgres error code for a UNIQUE constraint violation.
+const pgUniqueViolation = "23505"
+
+// dummyHash is verified when the e-mail does not exist so that login takes the same time (one
+// Argon2) whether or not the account exists. Computed once, on first use, to keep startup cheap.
+var dummyHash = sync.OnceValue(func() string {
+	h, err := HashPassword("plany-dummy-password-for-timing")
+	if err != nil {
+		panic(err)
+	}
+	return h
+})
 
 type Service struct {
 	repo                *db.Queries
@@ -38,9 +54,15 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 	if err != nil {
 		return nil, err
 	}
-	user_params := db.CreateUserParams{Email: email, Username: username, PasswordHash: hashedPassword}
+	user_params := db.CreateUserParams{Email: email, Username: validator.NormalizeUsername(username), PasswordHash: hashedPassword}
 	user, err := s.repo.CreateUser(ctx, user_params)
 	if err != nil {
+		// two registrations of the same e-mail at once: the UNIQUE constraint is the real guard,
+		// the GetUserByEmail above is only a shortcut
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+			return nil, ErrEmailAlreadyExists
+		}
 		return nil, err
 	}
 	return &user, nil
@@ -51,6 +73,7 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			_, _ = VerifyPassword(dummyHash(), password)
 			return nil, ErrInvalidCredentials
 		}
 		return nil, err
