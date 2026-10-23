@@ -1,7 +1,8 @@
 # CI do backend (Go). Roda só quando o backend, o schema protobuf ou este arquivo mudam.
 #
-# - Não roda os testes que precisam de Postgres/servidor (TestHandler_*, TestService_*,
-#   TestJwtToken_*, TestPostgresConnection): no runner não há banco. Rode-os localmente.
+# - Não roda os testes que precisam de Postgres/servidor (todos os `TestDB_*`): no runner não há banco
+#   nem backend/.env. Rode-os localmente. O teste internal/testnaming garante que todo teste que usa o banco
+#   tenha esse prefixo.
 # - Limites de RAM para caber no Raspberry Pi (jobs rodam com capacity 1 e no máx. ~1,5 GB):
 #   GOMEMLIMIT baixo, -p=1 (um pacote por vez) e CGO desligado (sem gcc, sem -race).
 name: backend
@@ -54,7 +55,7 @@ jobs:
         run: go vet ./...
 
       - name: Testes (sem os que dependem de banco)
-        run: go test ./... -skip '^(TestHandler_|TestService_|TestJwtToken_|TestPostgresConnection)'
+        run: go test ./... -skip '^TestDB_'
 
       - name: Pico de memória do job
         if: always()

@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func TestJwtToken_TokenValidationPass_ReturnUserID(t *testing.T) {
+func TestDB_JwtToken_TokenValidationPass_ReturnUserID(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	testSecret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
@@ -28,7 +28,7 @@ func TestJwtToken_TokenValidationPass_ReturnUserID(t *testing.T) {
 	}
 }
 
-func TestJwtToken_ExpiredToken_ReturnsError(t *testing.T) {
+func TestDB_JwtToken_ExpiredToken_ReturnsError(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	secret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
@@ -45,7 +45,7 @@ func TestJwtToken_ExpiredToken_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestJwtToken_WrongSecret_ReturnsError(t *testing.T) {
+func TestDB_JwtToken_WrongSecret_ReturnsError(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	correctSecret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
@@ -63,7 +63,7 @@ func TestJwtToken_WrongSecret_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestJwtToken_RevokedToken_ReturnsError(t *testing.T) {
+func TestDB_JwtToken_RevokedToken_ReturnsError(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 

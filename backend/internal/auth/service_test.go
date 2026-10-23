@@ -14,7 +14,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func TestService_Register_RegistrationDisabled(t *testing.T) {
+func TestDB_Service_Register_RegistrationDisabled(t *testing.T) {
 	godotenv.Load("../../.env")
 	cfg, err := config.Load()
 	if err != nil {
@@ -36,7 +36,7 @@ func TestService_Register_RegistrationDisabled(t *testing.T) {
 	}
 }
 
-func TestService_Register_DuplicateEmail(t *testing.T) {
+func TestDB_Service_Register_DuplicateEmail(t *testing.T) {
 	godotenv.Load("../../.env")
 	cfg, err := config.Load()
 	if err != nil {
@@ -64,7 +64,7 @@ func TestService_Register_DuplicateEmail(t *testing.T) {
 	}
 }
 
-func TestService_Login_Success(t *testing.T) {
+func TestDB_Service_Login_Success(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -87,7 +87,7 @@ func TestService_Login_Success(t *testing.T) {
 	}
 }
 
-func TestService_Login_WrongPassword(t *testing.T) {
+func TestDB_Service_Login_WrongPassword(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -107,7 +107,7 @@ func TestService_Login_WrongPassword(t *testing.T) {
 	}
 }
 
-func TestService_Logout_RevokesToken(t *testing.T) {
+func TestDB_Service_Logout_RevokesToken(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -136,7 +136,7 @@ func TestService_Logout_RevokesToken(t *testing.T) {
 	}
 }
 
-func TestService_Refresh_Success(t *testing.T) {
+func TestDB_Service_Refresh_Success(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -164,7 +164,7 @@ func TestService_Refresh_Success(t *testing.T) {
 	}
 }
 
-func TestService_Refresh_RevokedToken(t *testing.T) {
+func TestDB_Service_Refresh_RevokedToken(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -193,7 +193,7 @@ func TestService_Refresh_RevokedToken(t *testing.T) {
 	}
 }
 
-func TestService_Me_Success(t *testing.T) {
+func TestDB_Service_Me_Success(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -221,7 +221,7 @@ func TestService_Me_Success(t *testing.T) {
 	}
 }
 
-func TestService_Me_RevokedToken(t *testing.T) {
+func TestDB_Service_Me_RevokedToken(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 

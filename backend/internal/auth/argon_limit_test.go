@@ -129,7 +129,7 @@ func TestArgon_SlotsAreReleasedAfterErrors(t *testing.T) {
 }
 
 // Over HTTP: a login flood against a busy server answers 401 or 503, never 500, and sets Retry-After.
-func TestHandler_Login_FloodAnswers503NotOOMOr500(t *testing.T) {
+func TestDB_Handler_Login_FloodAnswers503NotOOMOr500(t *testing.T) {
 	resetArgon(t)
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
