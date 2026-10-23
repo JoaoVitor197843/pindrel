@@ -1,0 +1,11 @@
+# Overlay: run the RELEASED images from the registry instead of building (a host that deploys, e.g. the
+# Raspberry Pi). Always used together with the other two files; deploy/update.sh does exactly this:
+#   docker compose -f compose.yml -f compose.lb.yml -f compose.registry.yml up -d --scale plany=2
+# `!reset null` drops the build sections, so this host never compiles anything.
+services:
+  plany:
+    image: ${REGISTRY:-raspberry-joao.tail7a986c.ts.net}/${REGISTRY_OWNER:-joao_vitor}/plany:${PLANY_TAG:-latest}
+    build: !reset null
+  gateway:
+    image: ${REGISTRY:-raspberry-joao.tail7a986c.ts.net}/${REGISTRY_OWNER:-joao_vitor}/plany-gateway:${PLANY_TAG:-latest}
+    build: !reset null
