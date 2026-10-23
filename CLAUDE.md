@@ -134,7 +134,7 @@ Known gaps in the current code:
 ## Conventions
 
 - **Tests are mandatory.** Every component or service created (Go, Rust, Web or Flutter) must ship with automated tests written together with the implementation, not afterwards.
-- **Break it on purpose (attack tests).** When writing tests, also write attack tests wherever they apply, and try to break the system by every means: DoS and DDoS (floods of requests or connections, many source addresses, huge bodies, slow or never-finished requests, resource exhaustion), hostile or malformed input, spoofed headers, injection. If something breaks, fix the code; do not weaken the test.
+- **Stress the system (concurrency and robustness tests).** When writing tests, also write concurrency and robustness tests wherever they apply, and try to break the system by every means: heavy load (floods of requests or connections, many source addresses, huge bodies, slow or never-finished requests, resource exhaustion), malformed or unexpected input, spoofed headers, injection. If something breaks, fix the code; do not weaken the test.
 - **Break it like a confused person (careless-use tests).** Also write tests as if you were an elderly person or just a very random one, and try to break it that way too: wrong or repeated taps and clicks, doing things in an odd order, leaving halfway, empty, huge or strange text, stray spaces, a screen that is too small or too crowded, a bad connection. If something breaks, fix it.
 - Log messages, comments, and some error strings mix Portuguese and English. Match the language of the surrounding code.
 - Go tests use external test packages (`package auth_test`) and compare protobuf messages with `go-cmp` + `protocmp`.
