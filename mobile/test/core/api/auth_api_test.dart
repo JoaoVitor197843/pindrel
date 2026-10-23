@@ -7,6 +7,7 @@ import 'package:mobile/shared/protos/auth.pb.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
+  stressTests();
   test('Testa a chamada de api para o go', () async {
     var bytes = LoginInput(
       email: 'testemail@t.com',
@@ -154,5 +155,71 @@ void main() {
     expect(parseSetCookies('HttpOnly; Secure'), isEmpty);
     final cookies = parseSetCookies('a=1; Max-Age=-1');
     expect(cookies.single.isRemoval, isTrue);
+  });
+}
+
+// ---- uso descuidado / conexão ruim ----
+void stressTests() {
+  test('erro de rede propaga e não mexe nos cookies guardados', () async {
+    final store = MemoryCookieStore();
+    await store.write('refresh_token', 'abc');
+    final api = ApiClient(
+      client: MockClient((_) async => throw const SocketException('sem rede')),
+      baseUrl: 'http://abc',
+      cookies: store,
+    );
+    await expectLater(
+      api.postProto('/auth/login/', LoginInput()),
+      throwsA(isA<SocketException>()),
+    );
+    expect(await store.readAll(), {'refresh_token': 'abc'});
+  });
+
+  test('resposta de erro (401/500) também atualiza cookies e é devolvida', () async {
+    final store = MemoryCookieStore();
+    final api = ApiClient(
+      client: MockClient(
+        (_) async => http.Response(
+          '',
+          HttpStatus.unauthorized,
+          headers: {'set-cookie': 'refresh_token=; Max-Age=0'},
+        ),
+      ),
+      baseUrl: 'http://abc',
+      cookies: store,
+    );
+    await store.write('refresh_token', 'velho');
+    final res = await api.postProto('/auth/refresh/', LoginInput());
+    expect(res.statusCode, 401);
+    expect(await store.readAll(), isEmpty);
+  });
+
+  test('Set-Cookie gigante ou com lixo não lança', () {
+    expect(parseSetCookies('a=${'x' * 200000}').single.value.length, 200000);
+    expect(parseSetCookies(',,,;;;===').length, lessThanOrEqualTo(1));
+    expect(parseSetCookies('a=1; Max-Age=abc').single.maxAge, isNull);
+    expect(parseSetCookies('   ,   '), isEmpty);
+  });
+
+  test('Max-Age positivo não é remoção; valor vazio é', () {
+    expect(parseSetCookies('a=1; Max-Age=60').single.isRemoval, isFalse);
+    expect(parseSetCookies('a=; Max-Age=60').single.isRemoval, isTrue);
+  });
+
+  test('o corpo vai como protobuf mesmo vazio, e chamadas seguidas não se misturam', () async {
+    final bodies = <int>[];
+    final api = ApiClient(
+      client: MockClient((req) async {
+        bodies.add(req.bodyBytes.length);
+        return http.Response('', HttpStatus.ok);
+      }),
+      baseUrl: 'http://abc',
+      cookies: MemoryCookieStore(),
+    );
+    await Future.wait([
+      api.postProto('/a/', LoginInput()),
+      api.postProto('/b/', LoginInput(email: 'a@b.c', password: 'x' * 72)),
+    ]);
+    expect(bodies..sort(), [0, greaterThan(70)]);
   });
 }

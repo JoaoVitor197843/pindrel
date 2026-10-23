@@ -77,7 +77,8 @@ class _AuthFormState extends State<AuthForm> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const _FieldLabel('Senha'),
+            const Flexible(child: _FieldLabel('Senha')),
+            const SizedBox(width: 8),
             _MonoAction(
               label: _obscure ? 'MOSTRAR' : 'OCULTAR',
               onTap: () => setState(() => _obscure = !_obscure),
@@ -122,13 +123,16 @@ class _AuthFormState extends State<AuthForm> {
               ),
             ),
             const SizedBox(width: 8),
-            InkWell(
-              onTap: () => RecoveryKeySheet.show(context),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  'Chave de recuperação',
-                  style: TextStyle(color: AppColors.accentBorder),
+            Flexible(
+              child: InkWell(
+                onTap: () => RecoveryKeySheet.show(context),
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Text(
+                    'Chave de recuperação',
+                    textAlign: TextAlign.end,
+                    style: TextStyle(color: AppColors.accentBorder),
+                  ),
                 ),
               ),
             ),
