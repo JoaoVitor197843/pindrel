@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { selection, servers } from '../lib/stores/servers.svelte'
+import { directory, navigation, selection } from '../lib/stores/servers.svelte'
+import { found, mockDiscover } from '../test/discovery'
 import { viewport } from '../test/setup'
 import Login from './Login.svelte'
 
@@ -8,7 +9,12 @@ const click = (el: HTMLElement) => fireEvent.click(el)
 
 const openMenu = () => click(screen.getByRole('button', { name: 'Selecionar servidor' }))
 
-beforeEach(() => selection.select(servers[0]))
+beforeEach(async () => {
+  selection.connecting = null
+  directory.others = []
+  mockDiscover([found('Escritório')])
+  await directory.refresh()
+})
 
 describe('Login — layout mobile', () => {
   it('mostra cabeçalho e formulário de login, sem o painel desktop', () => {
@@ -109,26 +115,33 @@ describe('Login — seletor de servidor', () => {
     await openMenu()
 
     const items = screen.getAllByRole('menuitemradio')
-    expect(items).toHaveLength(servers.length)
+    expect(items).toHaveLength(directory.list.length)
     expect(items[0].getAttribute('aria-checked')).toBe('true')
     expect(items[0].className).toContain('border-accent-line')
     expect(within(items[0]).getByTestId('selected-check')).toBeTruthy()
     expect(screen.getAllByTestId('selected-check')).toHaveLength(1)
     expect(screen.getByRole('menuitem', { name: '+ Adicionar servidor...' })).toBeTruthy()
 
+    const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
     await click(screen.getByRole('menuitemradio', { name: /Escritório/ }))
 
-    // o menu fecha e o botão passa a mostrar o novo servidor
+    // o menu fecha, o botão mostra a troca e o formulário esmaece sem aceitar toques
     expect(screen.queryByRole('menu')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Escritório')
+    expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Abrindo Escritório…')
+    const form = screen.getByRole('heading', { name: 'Bem-vindo de volta' }).closest('.transition-opacity')
+    expect(form?.className).toContain('opacity-30')
+    await vi.waitFor(() => expect(go).toHaveBeenCalledWith('http://192.168.0.20:8095'))
+    go.mockRestore()
+  })
 
+  it('servidor que não responde: a tela volta ao normal e avisa', async () => {
+    vi.mocked(fetch).mockRejectedValue(new TypeError('sem rota'))
+    render(Login)
     await openMenu()
-    const after = screen.getAllByRole('menuitemradio')
-    expect(after[0].getAttribute('aria-checked')).toBe('false')
-    expect(after[0].className).not.toContain('bg-accent/45')
-    expect(after[1].getAttribute('aria-checked')).toBe('true')
-    expect(after[1].className).toContain('bg-accent/45')
-    expect(screen.getAllByTestId('selected-check')).toHaveLength(1)
+    await click(screen.getByRole('menuitemradio', { name: /Escritório/ }))
+    await vi.waitFor(() => expect(screen.getByRole('status').textContent).toContain('Escritório não respondeu.'))
+    expect(screen.getByRole('heading', { name: 'Bem-vindo de volta' }).closest('.transition-opacity')?.className).not.toContain('opacity-30')
+    expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Embutido')
   })
 
   it('o servidor embutido é o padrão', () => {
@@ -172,13 +185,14 @@ describe('Login — layout desktop', () => {
     expect(screen.getByText(`→ Rodando em: ${window.location.host}`)).toBeTruthy()
   })
 
-  it('trocar de servidor atualiza o rodapé', async () => {
+  it('o rodapé continua no servidor embutido durante a troca de servidor', async () => {
+    const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
     render(Login)
     await openMenu()
-
     await click(screen.getByRole('menuitemradio', { name: /Escritório/ }))
-
-    expect(screen.getByText('→ Rodando em: 192.168.0.20')).toBeTruthy()
+    expect(screen.getByText(`→ Rodando em: ${window.location.host}`)).toBeTruthy()
+    await vi.waitFor(() => expect(go).toHaveBeenCalled())
+    go.mockRestore()
   })
 
   it('senha, registro e offline continuam funcionando', async () => {

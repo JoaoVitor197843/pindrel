@@ -1,4 +1,4 @@
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 
 // jsdom não implementa matchMedia; este stub avalia `min-width` contra `viewport.width`.
 export const viewport = {
@@ -40,3 +40,10 @@ window.matchMedia = (query: string) => {
 }
 
 afterEach(() => viewport.set(450))
+
+// Sem servidor por trás: o gateway "não existe" (404) a menos que o teste troque o fetch.
+const noGateway = async () => new Response(null, { status: 404 })
+vi.stubGlobal('fetch', vi.fn(noGateway))
+beforeEach(() => {
+  vi.mocked(fetch).mockReset().mockImplementation(noGateway)
+})

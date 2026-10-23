@@ -1,0 +1,79 @@
+# Release: em push na main, monta as imagens do Plany (API + web embutido) e do gateway para amd64 e arm64
+# e as publica no registry do Forgejo. O Raspberry Pi as puxa sozinho (deploy/update.sh, timer do systemd).
+#
+# - Roda no runner do PC (label `build`): é ele quem tem o Docker do host, RAM e CPU. O Pi não compila nada.
+# - Não há emulação: os Dockerfiles compilam para arm64 com compilação cruzada (Go e Rust no estágio da máquina
+#   de build; o estágio final não tem RUN).
+# - Precisa de dois secrets do repositório (Configurações > Actions > Secrets):
+#     REGISTRY_USER   usuário do Forgejo dono dos pacotes
+#     REGISTRY_TOKEN  token de acesso com escopo write:package
+# - Os testes de cada parte rodam nos workflows backend/web/gateway (em push e PR); a release parte do que
+#   já passou neles. Ela só confere que a imagem compila.
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "web/**"
+      - "gateway/**"
+      - "shared/protos/**"
+      - "Dockerfile"
+      - ".forgejo/workflows/release.yml"
+  workflow_dispatch:
+
+# duas releases ao mesmo tempo disputariam a tag `latest`
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  images:
+    runs-on: build
+    timeout-minutes: 60
+    container:
+      image: ci-docker:1
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    env:
+      REGISTRY: raspberry-joao.tail7a986c.ts.net
+      OWNER: joao_vitor
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login no registry
+        env:
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_TOKEN" ] || { echo "faltam os secrets REGISTRY_USER e REGISTRY_TOKEN"; exit 1; }
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+
+      # contêiner do buildkit na rede do host: resolve o registry como o resto do PC; o estado (cache do cargo,
+      # do go e do yarn) fica no builder e serve às próximas releases
+      - name: Builder multi-arch
+        run: |
+          docker buildx inspect release >/dev/null 2>&1 \
+            || docker buildx create --name release --driver docker-container --driver-opt network=host
+          docker buildx use release
+          docker buildx inspect --bootstrap
+
+      - name: Imagens (amd64 + arm64)
+        run: |
+          sha=$(git rev-parse --short=12 HEAD)
+          build() { # build <nome> <contexto> <dockerfile>
+            docker buildx build --platform linux/amd64,linux/arm64 --push \
+              -t "$REGISTRY/$OWNER/$1:$sha" -t "$REGISTRY/$OWNER/$1:latest" \
+              -f "$3" "$2"
+          }
+          build plany . Dockerfile
+          build plany-gateway gateway gateway/Dockerfile
+          echo "publicado: $sha"
+
+      - name: Conferir as duas arquiteturas no registry
+        run: |
+          for name in plany plany-gateway; do
+            docker buildx imagetools inspect "$REGISTRY/$OWNER/$name:latest" | tee /tmp/inspect.txt
+            grep -q 'linux/amd64' /tmp/inspect.txt && grep -q 'linux/arm64' /tmp/inspect.txt
+          done

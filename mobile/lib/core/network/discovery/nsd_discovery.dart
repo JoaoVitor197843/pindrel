@@ -46,18 +46,23 @@ class PluginNsdApi implements NsdApi {
 /// Bonjour no iOS e macOS, DNS-SD no Windows), via plugin `nsd`.
 ///
 /// O Wi-Fi perde muitos pacotes multicast e as retentativas do sistema ficam
-/// cada vez mais espaçadas; por isso, enquanto nada foi achado, a busca é
-/// reiniciada a cada [restartWhileEmpty].
+/// cada vez mais espaçadas; por isso, enquanto nada foi achado (ou algum
+/// servidor está perdido), a busca é reiniciada a cada [restartWhileEmpty].
+/// Um servidor "perdido" segue na lista por [lostGrace]; se for achado de novo
+/// nesse prazo, nada muda para o usuário (ver [ServerTable]).
 class NsdDiscovery implements ServerDiscovery {
   NsdDiscovery({
     this.api = const PluginNsdApi(),
     this.serviceType = plannyServiceType,
     this.restartWhileEmpty = const Duration(seconds: 15),
+    this.lostGrace = ServerTable.defaultLostGrace,
   });
+
 
   final NsdApi api;
   final String serviceType;
   final Duration restartWhileEmpty;
+  final Duration lostGrace;
 
   @override
   Stream<List<DiscoveredServer>> watch() {
@@ -65,6 +70,7 @@ class NsdDiscovery implements ServerDiscovery {
     final controller = StreamController<List<DiscoveredServer>>();
     Object? session;
     Timer? restartTimer;
+    Timer? expireTimer;
     var closed = false;
     var restarting = false;
 
@@ -72,17 +78,29 @@ class NsdDiscovery implements ServerDiscovery {
       if (!closed) controller.add(table.snapshot);
     }
 
+    void scheduleExpiry() {
+      if (closed || expireTimer?.isActive == true || !table.hasLost) return;
+      expireTimer = Timer(lostGrace ~/ 3, () {
+        if (closed) return;
+        if (table.expire(lostGrace)) emit();
+        scheduleExpiry();
+      });
+    }
+
     void onService(nsd.ServiceStatus status, nsd.Service service) {
       final name = service.name;
       if (name == null || name.isEmpty) return;
-      final changed = switch (status) {
-        nsd.ServiceStatus.found => switch (_toServer(service)) {
-          final server? => table.upsert(server),
-          null => false,
-        },
-        nsd.ServiceStatus.lost => table.remove(name),
-      };
+      var changed = false;
+      switch (status) {
+        case nsd.ServiceStatus.found:
+          final server = _toServer(service);
+          if (server != null) changed = table.upsert(server);
+        case nsd.ServiceStatus.lost:
+          // não sai na hora: pode ser só um anúncio perdido no Wi-Fi
+          table.markLost(name);
+      }
       if (changed) emit();
+      scheduleExpiry();
     }
 
     Future<void> begin() async {
@@ -113,7 +131,8 @@ class NsdDiscovery implements ServerDiscovery {
       emit();
       begin();
       restartTimer = Timer.periodic(restartWhileEmpty, (_) async {
-        if (closed || restarting || !table.isEmpty) return;
+        if (closed || restarting) return;
+        if (!table.isEmpty && !table.hasLost) return;
         restarting = true;
         await end();
         if (!closed) await begin();
@@ -123,6 +142,7 @@ class NsdDiscovery implements ServerDiscovery {
     controller.onCancel = () async {
       closed = true;
       restartTimer?.cancel();
+      expireTimer?.cancel();
       await end();
     };
     return controller.stream;
