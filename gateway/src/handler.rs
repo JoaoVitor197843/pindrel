@@ -1,0 +1,148 @@
+//! Request handling: rate limits, GET /server/discover/, and the reverse proxy to the replicas.
+use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc};
+
+use bytes::Bytes;
+use http_body_util::{combinators::BoxBody, BodyExt, Full, LengthLimitError, Limited};
+use hyper::{body::Incoming, header, Method, Request, Response, StatusCode};
+use hyper_util::{
+    client::legacy::{connect::HttpConnector, Client},
+    rt::TokioExecutor,
+};
+use tokio::time;
+
+use crate::{config::Config, discovery::Registry, limiter::Limiters, pool::Pool, proto};
+
+pub type Body = BoxBody<Bytes, hyper::Error>;
+
+pub struct App {
+    pub cfg: Config,
+    pub pool: Pool,
+    pub limiters: Limiters,
+    pub registry: Arc<Registry>,
+    client: Client<HttpConnector, Full<Bytes>>,
+}
+
+impl App {
+    pub fn new(cfg: Config, registry: Arc<Registry>) -> Self {
+        let pool = Pool::new(cfg.upstreams.clone());
+        let client = Client::builder(TokioExecutor::new())
+            .pool_max_idle_per_host(4)
+            .pool_idle_timeout(std::time::Duration::from_secs(30))
+            .build_http();
+        Self {
+            cfg,
+            pool,
+            limiters: Limiters::standard(),
+            registry,
+            client,
+        }
+    }
+}
+
+const HOP_BY_HOP: [&str; 8] = [
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
+
+fn reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Response<Body> {
+    let mut r = Response::new(Full::new(Bytes::from(body)).map_err(|e| match e {}).boxed());
+    *r.status_mut() = status;
+    r.headers_mut()
+        .insert(header::CONTENT_TYPE, header::HeaderValue::from_static(content_type));
+    r.headers_mut()
+        .insert(header::X_CONTENT_TYPE_OPTIONS, header::HeaderValue::from_static("nosniff"));
+    r
+}
+
+/// Errors use the same protobuf `ErrorHttp` body as the API.
+fn error(status: StatusCode, code: &str, message: &str) -> Response<Body> {
+    reply(status, "application/x-protobuf", proto::error_http(code, message))
+}
+
+fn rate_limited() -> Response<Body> {
+    error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "too many requests, try again later")
+}
+
+pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> Result<Response<Body>, Infallible> {
+    let ip = peer.ip();
+    if app.cfg.rate_limit && !app.limiters.global.allow(ip) {
+        return Ok(rate_limited());
+    }
+    let path = req.uri().path();
+    if req.method() == Method::GET && path == "/server/discover/" {
+        let mut r = reply(
+            StatusCode::OK,
+            "application/x-protobuf",
+            proto::discovered_servers(&app.registry.list()),
+        );
+        r.headers_mut()
+            .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+        return Ok(r);
+    }
+    if app.cfg.rate_limit && req.method() == Method::POST {
+        let limiter = match path {
+            "/auth/login/" => Some(&app.limiters.login),
+            "/auth/register/" => Some(&app.limiters.register),
+            _ => None,
+        };
+        if limiter.is_some_and(|l| !l.allow(ip)) {
+            return Ok(rate_limited());
+        }
+    }
+    Ok(proxy(&app, ip, req).await)
+}
+
+async fn proxy(app: &App, client_ip: IpAddr, req: Request<Incoming>) -> Response<Body> {
+    let (parts, body) = req.into_parts();
+    // The body is buffered once so that a request can be replayed on another replica when the
+    // first one refuses the connection (safe even for POST: nothing was sent yet).
+    let body = match time::timeout(app.cfg.body_timeout, Limited::new(body, app.cfg.max_body).collect()).await {
+        Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "request_timeout", "request body took too long"),
+        Ok(Err(e)) if e.downcast_ref::<LengthLimitError>().is_some() => {
+            return error(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", "request body too large")
+        }
+        Ok(Err(_)) => return error(StatusCode::BAD_REQUEST, "bad_request", "could not read the request body"),
+        Ok(Ok(b)) => b.to_bytes(),
+    };
+    let path_and_query = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    for target in app.pool.rotation() {
+        let mut b = Request::builder()
+            .method(parts.method.clone())
+            .uri(format!("http://{target}{path_and_query}"));
+        for (k, v) in &parts.headers {
+            // the client address replaces whatever X-Forwarded-For the client sent: the gateway is the edge
+            if k != header::CONTENT_LENGTH && k.as_str() != "x-forwarded-for" && !HOP_BY_HOP.contains(&k.as_str()) {
+                b = b.header(k, v);
+            }
+        }
+        let out = match b.header("x-forwarded-for", client_ip.to_string()).body(Full::new(body.clone())) {
+            Ok(r) => r,
+            Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "invalid request"),
+        };
+        match time::timeout(app.cfg.upstream_timeout, app.client.request(out)).await {
+            Err(_) => {
+                return error(
+                    StatusCode::GATEWAY_TIMEOUT,
+                    "gateway_timeout",
+                    "the replica took too long to answer",
+                )
+            }
+            Ok(Ok(resp)) => {
+                let (mut p, inc) = resp.into_parts();
+                for h in HOP_BY_HOP {
+                    p.headers.remove(h);
+                }
+                return Response::from_parts(p, inc.boxed());
+            }
+            Ok(Err(e)) if e.is_connect() => app.pool.mark_down(target),
+            Ok(Err(_)) => break,
+        }
+    }
+    error(StatusCode::BAD_GATEWAY, "bad_gateway", "no replica available")
+}
