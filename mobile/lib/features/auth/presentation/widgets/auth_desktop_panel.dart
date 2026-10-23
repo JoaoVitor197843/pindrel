@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'auth_header.dart';
-import 'server_dropdown_selector.dart';
 
 /// Painel esquerdo do layout desktop: marca, slogan, diferenciais e rodapé.
 class AuthDesktopPanel extends StatelessWidget {
+  /// No desktop há espaço: o nome do servidor e a bolinha cabem sem reticências.
+  static const desktopSelectorMaxWidth = 260.0;
+
   const AuthDesktopPanel({super.key, this.onAddServer});
 
   final VoidCallback? onAddServer;
@@ -37,12 +39,9 @@ class AuthDesktopPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(child: AuthBrandRow()),
-              const SizedBox(width: 8),
-              ServerDropdownSelector(onAddServer: onAddServer),
-            ],
+          AuthBrandAndServerRow(
+            onAddServer: onAddServer,
+            maxSelectorWidth: desktopSelectorMaxWidth,
           ),
           Expanded(
             child: Center(

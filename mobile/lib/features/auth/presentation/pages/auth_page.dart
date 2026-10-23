@@ -3,10 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../data/server_list_state.dart';
 import '../providers/servers_provider.dart';
 import '../widgets/auth_desktop_panel.dart';
 import '../widgets/auth_form.dart';
 import '../widgets/auth_header.dart';
+import '../widgets/pulsing_dot.dart';
+import '../widgets/server_dropdown_selector.dart';
 
 /// Tela de login / cadastro com layout adaptativo: cabeçalho + formulário em
 /// telas estreitas, painel institucional + formulário lado a lado em largas.
@@ -124,18 +127,51 @@ class _DesktopLayout extends StatelessWidget {
   }
 }
 
+/// Rodapé do desktop: o endereço do servidor escolhido e se ele está na rede.
 class _ServerFooter extends ConsumerWidget {
   const _ServerFooter();
 
+  static const _fontSize = 12.0;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final server = ref.watch(selectedServerProvider);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 32),
-      child: Text(
-        '→ Rodando em: ${server.address}',
-        style: AppText.mono(12, letterSpacing: 0.6),
-      ),
+    final controller = ref.watch(serverListControllerProvider);
+    return StreamBuilder<ServerListState>(
+      initialData: controller.current,
+      stream: controller.stream,
+      builder: (context, snapshot) {
+        final state = snapshot.requireData;
+        final server = state.selected;
+        final text = switch (state.connection) {
+          ServerConnection.none => '→ Procurando servidores na rede...',
+          ServerConnection.connected => '→ Rodando em: ${server!.address}',
+          ServerConnection.disconnected =>
+            '→ Desconectado de: ${server!.address}',
+        };
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 32, left: 24, right: 24),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (server != null) ...[
+                PulsingDot(
+                  key: const ValueKey('server-footer-dot'),
+                  color: connectionColor(state.connection),
+                  diameter: dotDiameterFor(_fontSize),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Flexible(
+                child: Text(
+                  text,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.mono(_fontSize, letterSpacing: 0.6),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
