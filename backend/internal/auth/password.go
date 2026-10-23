@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 
@@ -16,8 +18,50 @@ import (
 
 var (
 	ErrShortPassword  = errors.New("your password is short, please try another password")
+	ErrServerBusy     = errors.New("too many password operations in progress, try again shortly")
+	ErrInvalidHash    = errors.New("the stored password hash is malformed")
 	ErrCommonPassword = errors.New("your password is common, please try another password")
 )
+
+// Each Argon2 run keeps ~19 MiB alive (argonMemory). Without a cap, N simultaneous logins cost
+// N*19 MiB (measured: 16 -> 330 MiB, 64 -> 1 GiB), far over the RAM ceiling. Only argonSlots run at
+// once; the others wait up to argonWait and then get ErrServerBusy (503), which is cheaper than an OOM kill.
+const (
+	defaultArgonSlots = 2
+	defaultArgonWait  = 5 * time.Second
+)
+
+var argon = struct {
+	mu    sync.RWMutex
+	slots chan struct{}
+	wait  time.Duration
+}{slots: make(chan struct{}, defaultArgonSlots), wait: defaultArgonWait}
+
+// SetArgonLimits changes how many Argon2 runs may happen at once and how long a request waits for a
+// slot. It only affects operations started afterwards.
+func SetArgonLimits(slots int, wait time.Duration) {
+	argon.mu.Lock()
+	defer argon.mu.Unlock()
+	argon.slots = make(chan struct{}, max(1, slots))
+	argon.wait = wait
+}
+
+// argonKey runs argon2id under the concurrency cap.
+func argonKey(password, salt []byte, iterations, memory uint32, parallelism uint8, keyLen uint32) ([]byte, error) {
+	argon.mu.RLock()
+	slots, wait := argon.slots, argon.wait
+	argon.mu.RUnlock()
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
+	case <-timer.C:
+		return nil, ErrServerBusy
+	}
+	return argon2.IDKey(password, salt, iterations, memory, parallelism, keyLen), nil
+}
 
 type hashParams struct {
 	memory      uint32
@@ -44,7 +88,9 @@ func buildSet(raw string) map[string]struct{} {
 	lines := strings.Split(raw, "\n")
 	set := make(map[string]struct{}, len(lines))
 	for _, line := range lines {
-		set[strings.TrimSpace(line)] = struct{}{}
+		if word := strings.TrimSpace(line); word != "" {
+			set[word] = struct{}{}
+		}
 	}
 	return set
 }
@@ -71,7 +117,10 @@ func HashPassword(password string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	hash := argon2.IDKey([]byte(password), salt, argonIterations, argonMemory, argonParalelism, argonKeyLen)
+	hash, err := argonKey([]byte(password), salt, argonIterations, argonMemory, argonParalelism, argonKeyLen)
+	if err != nil {
+		return "", err
+	}
 	saltB64 := base64.RawStdEncoding.EncodeToString(salt)
 	hashB64 := base64.RawStdEncoding.EncodeToString(hash)
 	encoded := fmt.Sprintf("%d$%d$%d$%d$%s$%s", argonMemory, argonIterations, argonParalelism, argonKeyLen, saltB64, hashB64)
@@ -80,6 +129,9 @@ func HashPassword(password string) (string, error) {
 
 func VerifyPassword(hash, password string) (bool, error) {
 	params := strings.Split(hash, "$")
+	if len(params) != 6 {
+		return false, ErrInvalidHash
+	}
 	var p hashParams
 	memory, err := strconv.ParseUint(params[0], 10, 32)
 	if err != nil {
@@ -111,7 +163,14 @@ func VerifyPassword(hash, password string) (bool, error) {
 		return false, err
 	}
 	p.hash = originalHash
-	compareHash := argon2.IDKey([]byte(password), p.salt, p.iterations, p.memory, p.parallelism, p.keyLen)
+	// argon2.IDKey panics on zero rounds/threads
+	if p.iterations < 1 || p.parallelism < 1 || p.keyLen < 1 || p.memory < 1 {
+		return false, ErrInvalidHash
+	}
+	compareHash, err := argonKey([]byte(password), p.salt, p.iterations, p.memory, p.parallelism, p.keyLen)
+	if err != nil {
+		return false, err
+	}
 	if subtle.ConstantTimeCompare(p.hash, compareHash) != 1 {
 		return false, nil
 	}

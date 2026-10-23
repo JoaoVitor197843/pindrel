@@ -106,7 +106,7 @@ Auth model:
 - The access token goes in the response body. The refresh token goes in an `HttpOnly` `refresh_token` cookie.
 - Logout revokes tokens by inserting the `jti` into `revoked_tokens`. `ValidateToken` checks that table on every call.
 - `middleware.AuthMiddleware` puts the user's UUID into the context under `pkg/context.UserIDKey`. Protected routes go inside the `r.Group(...)` in `router.go`.
-- Passwords are hashed with Argon2id (`internal/auth/password.go`). A common-password blocklist is embedded from `internal/auth/data/`.
+- Passwords are hashed with Argon2id (`internal/auth/password.go`). A common-password blocklist is embedded from `internal/auth/data/`. Each Argon2 run keeps ~19 MiB alive, so only 2 run at once per instance (`SetArgonLimits`); the others wait up to 5 s and then get `503 server_busy` + `Retry-After`. Measured before the cap: 16 simultaneous logins = 330 MiB RSS, 64 = 1 GiB; `GOMEMLIMIT` does not help because the memory is live. Login also verifies a dummy hash when the e-mail does not exist, so response time does not reveal which accounts exist. Request bodies of `/auth/login/` and `/auth/register/` are capped at 16 KiB (413 `payload_too_large`).
 
 Router details:
 - Routes are registered **with trailing slashes** (`/auth/login/`).
