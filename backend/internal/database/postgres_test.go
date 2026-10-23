@@ -10,7 +10,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func TestPostgresConnection(t *testing.T) {
+func TestDB_PostgresConnection(t *testing.T) {
 	godotenv.Load("../../.env")
 	cfg, err := config.Load()
 	if err != nil {

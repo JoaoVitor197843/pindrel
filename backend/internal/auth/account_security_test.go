@@ -25,7 +25,7 @@ func median(d []time.Duration) time.Duration {
 
 // Enumeração por tempo: "e-mail inexistente" não pode ser bem mais rápido que "senha errada".
 // Sem o hash falso, o primeiro caso pula o Argon2 e responde em ~1 ms contra dezenas de ms.
-func TestService_Login_TimingDoesNotRevealUnknownEmail(t *testing.T) {
+func TestDB_Service_Login_TimingDoesNotRevealUnknownEmail(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	svc := auth.NewService(repo, true)
@@ -60,7 +60,7 @@ func TestService_Login_TimingDoesNotRevealUnknownEmail(t *testing.T) {
 }
 
 // Maiúsculas/minúsculas: o e-mail é a mesma conta (CITEXT); o login funciona em qualquer caixa.
-func TestService_Email_IsCaseInsensitive(t *testing.T) {
+func TestDB_Service_Email_IsCaseInsensitive(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	svc := auth.NewService(repo, true)
@@ -83,7 +83,7 @@ func TestService_Email_IsCaseInsensitive(t *testing.T) {
 
 // Decisão registrada: username é só nome de exibição, não identifica a conta nem é único.
 // Se isso mudar (por exemplo @menções), a migration precisa de um índice único sobre a forma normalizada.
-func TestService_Username_IsDisplayNameOnly(t *testing.T) {
+func TestDB_Service_Username_IsDisplayNameOnly(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	svc := auth.NewService(repo, true)
@@ -99,7 +99,7 @@ func TestService_Username_IsDisplayNameOnly(t *testing.T) {
 
 // Concorrência: N cadastros do mesmo e-mail ao mesmo tempo. Exatamente um vence; os outros
 // recebem ErrEmailAlreadyExists (409), nunca um erro cru do banco (500).
-func TestService_Register_ConcurrentSameEmail(t *testing.T) {
+func TestDB_Service_Register_ConcurrentSameEmail(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	svc := auth.NewService(repo, true)
@@ -139,7 +139,7 @@ func TestService_Register_ConcurrentSameEmail(t *testing.T) {
 }
 
 // O mesmo pelo handler: o perdedor da corrida responde 409 email_already_exists.
-func TestHandler_Register_ConcurrentSameEmail_Returns409(t *testing.T) {
+func TestDB_Handler_Register_ConcurrentSameEmail_Returns409(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	email := uniqueEmail("corrida-h")
@@ -190,7 +190,7 @@ func deleteUserByEmail(t *testing.T, repo *db.Queries, email, _ string) {
 }
 
 // Logout de ponta a ponta: depois dele, nem o access nem o refresh antigos valem.
-func TestHandler_Logout_InvalidatesAccessAndRefresh(t *testing.T) {
+func TestDB_Handler_Logout_InvalidatesAccessAndRefresh(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	u := registerUser(t, h, repo, "logout-e2e")
@@ -230,7 +230,7 @@ func TestHandler_Logout_InvalidatesAccessAndRefresh(t *testing.T) {
 
 // Um refresh token não serve como access token e vice-versa não vira sessão nova depois do logout.
 // (Hoje os dois são o mesmo tipo de token; este teste documenta o que é garantido: a revogação vale.)
-func TestHandler_Login_TwoSessionsAreIndependent(t *testing.T) {
+func TestDB_Handler_Login_TwoSessionsAreIndependent(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	u := registerUser(t, h, repo, "duas-sessoes")
@@ -316,7 +316,7 @@ func TestValidator_NormalizeUsername(t *testing.T) {
 	}
 }
 
-func TestService_Register_StoresNormalizedUsername(t *testing.T) {
+func TestDB_Service_Register_StoresNormalizedUsername(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	svc := auth.NewService(repo, true)
@@ -333,7 +333,7 @@ func TestService_Register_StoresNormalizedUsername(t *testing.T) {
 
 // Mensagem do registro: a decisão (aceitável num servidor pessoal) é revelar "e-mail já cadastrado" com 409.
 // O login, por outro lado, nunca distingue conta inexistente de senha errada.
-func TestHandler_Login_SameAnswerForUnknownEmailAndWrongPassword(t *testing.T) {
+func TestDB_Handler_Login_SameAnswerForUnknownEmailAndWrongPassword(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 	u := registerUser(t, h, repo, "mesma-resposta")

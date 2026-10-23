@@ -40,7 +40,7 @@ func smallPool(t *testing.T, maxConns int) *pgxpool.Pool {
 // real query. pgxpool must queue the extra ones rather than fail them or let any of them leak
 // a connection. This is the "many concurrent requests hitting one pool" DoS described in
 // CLAUDE.md, at the connection-pool layer instead of the HTTP layer.
-func TestPool_FloodOfQueriesQueuesInsteadOfFailing(t *testing.T) {
+func TestDB_Pool_FloodOfQueriesQueuesInsteadOfFailing(t *testing.T) {
 	const maxConns = 3
 	const flood = 60 // 20x the pool size
 	pool := smallPool(t, maxConns)
@@ -88,7 +88,7 @@ func TestPool_FloodOfQueriesQueuesInsteadOfFailing(t *testing.T) {
 // never-finished requests" case from CLAUDE.md). It must not crash the pool or let the
 // legitimate request hang forever: a request with its own deadline should fail on time, and
 // the pool must recover once that client goes away.
-func TestPool_NeverFinishingConnectionsBoundLegitimateWait(t *testing.T) {
+func TestDB_Pool_NeverFinishingConnectionsBoundLegitimateWait(t *testing.T) {
 	const maxConns = 2
 	pool := smallPool(t, maxConns)
 	bg := context.Background()
@@ -138,7 +138,7 @@ func TestPool_NeverFinishingConnectionsBoundLegitimateWait(t *testing.T) {
 
 // Careless/unusual use: acquiring with an already-cancelled context must fail immediately
 // (not block, not silently succeed and leak a connection the caller never expects to release).
-func TestPool_AcquireWithCancelledContext_FailsWithoutLeaking(t *testing.T) {
+func TestDB_Pool_AcquireWithCancelledContext_FailsWithoutLeaking(t *testing.T) {
 	pool := smallPool(t, 2)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -161,7 +161,7 @@ func TestPool_AcquireWithCancelledContext_FailsWithoutLeaking(t *testing.T) {
 
 // A burst of failed/cancelled acquires, repeated, must not slowly leak connections either
 // (e.g. a client opening and abandoning many requests in a row).
-func TestPool_RepeatedCancelledAcquires_NeverLeak(t *testing.T) {
+func TestDB_Pool_RepeatedCancelledAcquires_NeverLeak(t *testing.T) {
 	pool := smallPool(t, 2)
 
 	for i := 0; i < 200; i++ {
@@ -186,7 +186,7 @@ func TestPool_RepeatedCancelledAcquires_NeverLeak(t *testing.T) {
 
 // Stress: each of several concurrent "clients" cancels its own context mid-flood while others
 // keep running real queries. One client giving up must not disturb the others.
-func TestPool_MixedCancelledAndLiveQueries_IsolatedPerCaller(t *testing.T) {
+func TestDB_Pool_MixedCancelledAndLiveQueries_IsolatedPerCaller(t *testing.T) {
 	pool := smallPool(t, 3)
 	const n = 30
 
@@ -225,7 +225,7 @@ func TestPool_MixedCancelledAndLiveQueries_IsolatedPerCaller(t *testing.T) {
 
 // Sanity check that smallPool's override actually takes effect, so the concurrency tests above are
 // exercising the limit they claim to.
-func TestPool_MaxConnsOverrideTakesEffect(t *testing.T) {
+func TestDB_Pool_MaxConnsOverrideTakesEffect(t *testing.T) {
 	for _, max := range []int{1, 5} {
 		pool := smallPool(t, max)
 		if got := pool.Stat().MaxConns(); got != int32(max) {
