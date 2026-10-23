@@ -28,13 +28,7 @@ class AuthHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              const Expanded(child: AuthBrandRow()),
-              const SizedBox(width: 8),
-              ServerDropdownSelector(onAddServer: onAddServer),
-            ],
-          ),
+          AuthBrandAndServerRow(onAddServer: onAddServer),
           const SizedBox(height: 16),
           Text.rich(
             TextSpan(
@@ -58,9 +52,59 @@ class AuthHeader extends StatelessWidget {
   }
 }
 
+/// A marca à esquerda e o seletor de servidor à direita. A marca tem prioridade:
+/// o botão do servidor fica com o espaço que sobra (até [maxSelectorWidth]), e
+/// o nome dentro dele ganha reticências se não couber.
+class AuthBrandAndServerRow extends StatelessWidget {
+  const AuthBrandAndServerRow({
+    super.key,
+    this.onAddServer,
+    this.maxSelectorWidth = ServerDropdownSelector.defaultMaxWidth,
+  });
+
+  final VoidCallback? onAddServer;
+  final double maxSelectorWidth;
+
+  static const gap = 8.0;
+
+  /// Menor largura útil do botão (bolinha, um pedaço do nome e a seta).
+  static const minSelectorWidth = 96.0;
+
+  /// Largura do botão numa linha de [rowWidth]: o que sobra depois da marca,
+  /// entre [minSelectorWidth] e [maxSelectorWidth].
+  static double selectorWidthFor(double rowWidth, double maxSelectorWidth) =>
+      (rowWidth - gap - AuthBrandRow.minWidth)
+          .clamp(minSelectorWidth, maxSelectorWidth)
+          .toDouble();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Row(
+          children: [
+            const Expanded(child: AuthBrandRow()),
+            const SizedBox(width: gap),
+            ServerDropdownSelector(
+              onAddServer: onAddServer,
+              maxWidth: selectorWidthFor(
+                constraints.maxWidth,
+                maxSelectorWidth,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 /// Marca `P`, nome e tag SELF-HOSTED.
 class AuthBrandRow extends StatelessWidget {
   const AuthBrandRow({super.key});
+
+  /// Largura da marca e do nome, sem a tag (que encolhe com reticências).
+  static const minWidth = 132.0;
 
   @override
   Widget build(BuildContext context) {

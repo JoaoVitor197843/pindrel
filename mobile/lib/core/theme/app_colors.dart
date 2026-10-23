@@ -14,6 +14,9 @@ abstract final class AppColors {
   static const accentBorder = Color(0xFF6B8E61);
   static const accentSoft = Color(0x734A5D44);
 
+  /// Vermelho-terra para o que saiu do ar (servidor desconectado).
+  static const offline = Color(0xFFC4574A);
+
   static const primaryButton = Color(0xFFF5F2EB);
   static const onPrimaryButton = Color(0xFF141412);
 }

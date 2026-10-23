@@ -66,5 +66,11 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>O Plany procura na rede local os servidores Plany disponíveis.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_plany._tcp</string>
+	</array>
 </dict>
 </plist>
