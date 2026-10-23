@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/network/discovery/discovered_server.dart';
 import 'package:mobile/core/network/discovery/mdns_discovery.dart';
+import 'package:mobile/core/network/discovery/server_table.dart';
 
 class FakeMdnsApi implements MdnsApi {
   FakeMdnsApi(this.script);
@@ -11,6 +12,7 @@ class FakeMdnsApi implements MdnsApi {
   final List<Object> script;
   int scans = 0;
   int stops = 0;
+  int starts = 0;
   int concurrent = 0;
   int maxConcurrent = 0;
   Duration scanTime = Duration.zero;
@@ -18,6 +20,7 @@ class FakeMdnsApi implements MdnsApi {
 
   @override
   Future<void> start() async {
+    starts++;
     if (startError != null) throw startError!;
   }
 
@@ -49,11 +52,16 @@ void main() {
   late List<Object> errors;
   late StreamSubscription<List<DiscoveredServer>> sub;
 
-  MdnsDiscovery make(FakeMdnsApi api, {int misses = 3}) => MdnsDiscovery(
+  MdnsDiscovery make(
+    FakeMdnsApi api, {
+    Duration grace = const Duration(milliseconds: 70),
+    Duration restart = const Duration(hours: 1),
+  }) => MdnsDiscovery(
     api: api,
     interval: _interval,
     scanTimeout: _interval,
-    missesBeforeRemoval: misses,
+    lostGrace: grace,
+    restartWhileEmpty: restart,
   );
 
   Future<void> listen(MdnsDiscovery d) async {
@@ -114,24 +122,49 @@ void main() {
     expect(emitted.last.single.addresses, ['10.0.0.4']);
   });
 
-  test('um servidor só sai depois de faltar em varreduras seguidas', () async {
+  test('um servidor só sai depois de ficar perdido por todo o prazo', () async {
     final api = FakeMdnsApi([
       [found('A')],
       <MdnsFound>[],
       <MdnsFound>[],
-      [found('A')], // voltou: o contador zera
-      <MdnsFound>[],
-      <MdnsFound>[],
-      <MdnsFound>[], // terceira falta seguida: sai
+      [found('A')], // voltou: a marca de perdido some
       <MdnsFound>[],
     ]);
     await listen(make(api));
     await wait(25 * 4);
-    expect(emitted.last.map((s) => s.name), [
-      'A',
-    ], reason: 'faltou 2 vezes, depois voltou');
-    await wait(25 * 5);
-    expect(emitted.last, isEmpty, reason: '3 faltas seguidas');
+    expect(emitted.last.map((s) => s.name), ['A'], reason: 'voltou no prazo');
+    await wait(25 * 8);
+    expect(emitted.last, isEmpty, reason: 'perdido além do prazo');
+  });
+
+  test('com a lista vazia, reinicia o cliente de tempos em tempos', () async {
+    final api = FakeMdnsApi([<MdnsFound>[]]);
+    await listen(make(api, restart: const Duration(milliseconds: 40)));
+    await wait(200);
+    expect(api.starts, greaterThanOrEqualTo(3));
+    expect(api.stops, api.starts - 1);
+  });
+
+  test('depois de achar algo, deixa o cliente em paz', () async {
+    final api = FakeMdnsApi([
+      [found('A')],
+    ]);
+    await listen(make(api, restart: const Duration(milliseconds: 40)));
+    await wait(200);
+    expect(api.starts, 1);
+    expect(api.stops, 0);
+  });
+
+  test('a tabela tem teto e recusa nomes absurdos', () async {
+    final api = FakeMdnsApi([
+      [
+        for (var i = 0; i < 300; i++) found('S$i', ip: '10.0.${i ~/ 250}.1'),
+        found('N' * 500),
+      ],
+    ]);
+    await listen(make(api));
+    await wait(80);
+    expect(emitted.last.length, ServerTable.defaultMaxServers);
   });
 
   test('uma varredura que falha vira erro, mas a busca continua', () async {

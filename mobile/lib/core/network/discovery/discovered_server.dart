@@ -71,6 +71,12 @@ bool isUsableIpv4(String ip) {
   return true;
 }
 
-/// IPv4 utilizáveis de [ips], sem repetição e em ordem estável.
+/// Quantos endereços de um mesmo servidor interessam; o resto é descartado.
+const maxAddressesPerServer = 8;
+
+/// IPv4 utilizáveis de [ips], sem repetição, em ordem estável e no máximo
+/// [maxAddressesPerServer].
 List<String> usableIpv4(Iterable<String> ips) =>
-    ({...ips.where(isUsableIpv4)}.toList()..sort());
+    ({...ips.where(isUsableIpv4)}.toList()..sort())
+        .take(maxAddressesPerServer)
+        .toList();
