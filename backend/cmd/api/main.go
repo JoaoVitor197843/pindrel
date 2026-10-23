@@ -42,18 +42,21 @@ func main() {
 	authRepo := db.New(dbPool)
 	authService := auth.NewService(authRepo, cfg.RegistrationEnabled)
 	authHandler := auth.NewHandler(authService, cfg.JWTSecret, cfg.JWTAccessExpiry, cfg.JWTRefreshExpiry)
-	loginLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
-	registerLimiter := middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
-		cleanupAge := 30 * time.Minute
-		for range ticker.C {
-			log.Println("Cleaning Limiters...")
-			loginLimiter.Cleanup(cleanupAge)
-			registerLimiter.Cleanup(cleanupAge)
-			log.Println("Limiters Cleaned")
-		}
-	}()
+	var loginLimiter, registerLimiter *middleware.IPRateLimiter
+	if cfg.InAppRateLimit {
+		loginLimiter = middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
+		registerLimiter = middleware.NewIPRateLimiter(rate.Every(1*time.Minute/5), 5)
+		go func() {
+			ticker := time.NewTicker(10 * time.Minute)
+			cleanupAge := 30 * time.Minute
+			for range ticker.C {
+				log.Println("Cleaning Limiters...")
+				loginLimiter.Cleanup(cleanupAge)
+				registerLimiter.Cleanup(cleanupAge)
+				log.Println("Limiters Cleaned")
+			}
+		}()
+	}
 	r := route.SetupRouter(cfg, authRepo, authHandler, loginLimiter, registerLimiter)
 
 	srv := &http.Server{

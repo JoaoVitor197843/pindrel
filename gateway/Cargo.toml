@@ -1,0 +1,37 @@
+[package]
+name = "plany-gateway"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "Front-facing process of a Plany deployment: load balancer, rate limiter and mDNS announcer/discovery"
+
+[lib]
+name = "plany_gateway"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gateway"
+path = "src/main.rs"
+
+# Few, small dependencies on purpose: the whole process must stay in a few MB of RAM.
+[dependencies]
+bytes = "1"
+gethostname = "1"
+http-body-util = "0.1"
+if-addrs = "0.15"
+hyper = { version = "1", default-features = false, features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio", "server", "server-graceful", "client-legacy", "http1"] }
+mdns-sd = { version = "0.21", default-features = false, features = ["async"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros", "signal", "sync"] }
+
+[dev-dependencies]
+# prost is only used by the tests, to decode what the hand-written encoder produces
+prost = { version = "0.13", default-features = false, features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

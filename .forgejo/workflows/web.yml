@@ -1,0 +1,49 @@
+# CI do web (Svelte + Vite + Tailwind). Roda só quando o web, o schema protobuf ou este arquivo mudam.
+#
+# - Análise: `yarn check` = svelte-check (Svelte + TypeScript) + tsc da config do Vite.
+# - Testes: vitest em jsdom, sem rede nem servidor. Arquivos de teste vazios (placeholders) são
+#   ignorados até ganharem conteúdo, senão o vitest falha com "No test suite found".
+# - RAM: heap do Node limitado para caber no Raspberry Pi.
+name: web
+
+on:
+  push:
+    paths:
+      - "web/**"
+      - "shared/protos/**"
+      - ".forgejo/workflows/web.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - "shared/protos/**"
+      - ".forgejo/workflows/web.yml"
+
+jobs:
+  analyze-and-test:
+    runs-on: ci
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NODE_OPTIONS: --max-old-space-size=512
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependências (lockfile imutável)
+        run: yarn install --immutable
+
+      - name: Análise — svelte-check + tsc
+        run: yarn check
+
+      - name: Testes
+        run: |
+          files=$(find src -name '*.test.ts' -size +0)
+          if [ -z "$files" ]; then echo "nenhum teste com conteúdo"; exit 0; fi
+          yarn vitest run --no-file-parallelism $files
+
+      - name: Pico de memória do job
+        if: always()
+        run: |
+          echo "pico: $(( $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0) / 1048576 )) MiB"

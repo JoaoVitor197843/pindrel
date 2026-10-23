@@ -1,0 +1,62 @@
+# CI do backend (Go). Roda só quando o backend, o schema protobuf ou este arquivo mudam.
+#
+# - Não roda os testes que precisam de Postgres/servidor (TestHandler_*, TestService_*,
+#   TestJwtToken_*, TestPostgresConnection): no runner não há banco. Rode-os localmente.
+# - Limites de RAM para caber no Raspberry Pi (jobs rodam com capacity 1 e no máx. ~1,5 GB):
+#   GOMEMLIMIT baixo, -p=1 (um pacote por vez) e CGO desligado (sem gcc, sem -race).
+name: backend
+
+on:
+  push:
+    paths:
+      - "backend/**"
+      - "shared/protos/**"
+      - "gateway/tests/golden/**"
+      - ".forgejo/workflows/backend.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - "shared/protos/**"
+      - "gateway/tests/golden/**"
+      - ".forgejo/workflows/backend.yml"
+
+jobs:
+  analyze-and-test:
+    runs-on: ci
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CGO_ENABLED: "0"
+      GOMEMLIMIT: 640MiB
+      GOFLAGS: -p=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão do Go compatível com o go.mod
+        run: |
+          want=$(awk '/^go /{print $2}' go.mod)
+          have=$(go env GOVERSION | sed 's/^go//')
+          echo "go.mod: $want | runner: $have"
+          # o runner precisa ser >= ao go.mod (senão o Go baixaria outro toolchain)
+          [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ]
+
+      - name: Dependências
+        run: go mod download
+
+      - name: Análise — gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Arquivos sem gofmt:"; echo "$unformatted"; exit 1; fi
+
+      - name: Análise — go vet
+        run: go vet ./...
+
+      - name: Testes (sem os que dependem de banco)
+        run: go test ./... -skip '^(TestHandler_|TestService_|TestJwtToken_|TestPostgresConnection)'
+
+      - name: Pico de memória do job
+        if: always()
+        run: |
+          echo "pico: $(( $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0) / 1048576 )) MiB"
