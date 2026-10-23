@@ -34,6 +34,7 @@ func WriteResponse(w http.ResponseWriter, statusCode int, body proto.Message) {
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, "internal_error", "serializing error")
 		log.Printf("error on serializing proto response: %v", err)
+		return
 	}
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
