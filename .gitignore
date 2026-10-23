@@ -56,3 +56,6 @@ docs/
 
 # Rust (gateway)
 gateway/target
+
+# estado local do deploy/update.sh
+.deploy-state/
