@@ -91,7 +91,7 @@
       </button>
     </div>
 
-    <button type="submit" class="h-[13.5] rounded-field bg-cream text-base font-semibold text-on-cream">
+    <button type="submit" class="h-13.5 rounded-field bg-cream text-base font-semibold text-on-cream">
       {register ? 'Criar conta' : 'Entrar'}
     </button>
   </form>
@@ -105,7 +105,7 @@
   <button
     type="button"
     onclick={continueOffline}
-    class="h-[13.5] rounded-field border border-line text-fg"
+    class="h-13.5 rounded-field border border-line text-fg"
   >
     Continuar offline neste dispositivo
   </button>

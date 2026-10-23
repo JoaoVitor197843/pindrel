@@ -4,10 +4,68 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
     <title>Plany</title>
+    <!--
+      Esqueleto da tela de login: HTML e CSS puros, pintado assim que o HTML chega e antes do bundle.
+      Cobre a troca de servidor (a página nova vem de outro servidor) e qualquer carregamento.
+      main.ts o remove ao montar o app. Cores iguais às do tema (app.css); sem JavaScript.
+    -->
+    <style>
+      html, body { margin: 0; background: #141412; }
+      .sk { min-height: 100vh; background: #141412; }
+      .sk i { display: block; background: #2e2e2a; border-radius: 10px; animation: sk-pulse 1.5s ease-in-out infinite; }
+      .sk-head { background: #1e1e1b; border-bottom: 1px solid #2e2e2a; border-radius: 0 0 32px 32px; padding: 16px 24px 28px; }
+      .sk-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .sk-brand { display: flex; align-items: center; gap: 10px; }
+      .sk-brand i:first-child { width: 36px; height: 36px; border-radius: 8px; }
+      .sk-brand i:last-child { width: 72px; height: 22px; }
+      .sk-select { width: 124px; height: 31px; }
+      .sk-slogan { width: 220px; height: 20px; margin-top: 16px; }
+      .sk-form { max-width: 480px; margin: 0 auto; padding: 28px 24px 24px; display: flex; flex-direction: column; gap: 20px; }
+      .sk-title { width: 60%; height: 32px; }
+      .sk-field { height: 50px; }
+      .sk-btn { height: 54px; }
+      .sk-side { display: none; }
+      @keyframes sk-pulse { 50% { opacity: 0.45; } }
+      @media (prefers-reduced-motion: reduce) { .sk i { animation: none; } }
+      @media (min-width: 840px) {
+        .sk { display: grid; grid-template-columns: 11fr 12fr; }
+        .sk-head { display: none; }
+        .sk-side { display: flex; flex-direction: column; gap: 24px; background: #1e1e1b; border-right: 1px solid #2e2e2a; padding: 40px 48px 32px; }
+        .sk-side .sk-hero { width: 70%; height: 90px; margin-top: 80px; }
+        .sk-side .sk-line { height: 16px; }
+        .sk-form { width: 100%; box-sizing: border-box; padding: 32px 48px; justify-content: center; }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div class="sk" id="skeleton" aria-hidden="true">
+        <header class="sk-head">
+          <div class="sk-row">
+            <div class="sk-brand"><i></i><i></i></div>
+            <i class="sk-select"></i>
+          </div>
+          <i class="sk-slogan"></i>
+        </header>
+        <aside class="sk-side">
+          <div class="sk-row">
+            <div class="sk-brand"><i></i><i></i></div>
+            <i class="sk-select"></i>
+          </div>
+          <i class="sk-hero"></i>
+          <i class="sk-line" style="width: 85%"></i>
+          <i class="sk-line" style="width: 60%"></i>
+        </aside>
+        <div class="sk-form">
+          <i class="sk-title"></i>
+          <i class="sk-field"></i>
+          <i class="sk-field"></i>
+          <i class="sk-btn"></i>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

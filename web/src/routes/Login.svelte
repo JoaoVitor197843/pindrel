@@ -3,7 +3,7 @@
   import AuthForm from '../lib/components/auth/AuthForm.svelte'
   import AuthHeader from '../lib/components/auth/AuthHeader.svelte'
   import DesktopPanel from '../lib/components/auth/DesktopPanel.svelte'
-  import { selection } from '../lib/stores/servers.svelte'
+  import { directory, selection } from '../lib/stores/servers.svelte'
   import { toast } from '../lib/stores/toast.svelte'
 
   interface Props {
@@ -15,6 +15,12 @@
   // Mesmo ponto de quebra (840) da AuthPage do mobile.
   const desktop = new MediaQuery('min-width: 840px')
 
+  // consulta o gateway enquanto a tela de login existe
+  $effect(() => directory.start())
+
+  // durante a troca de servidor o formulário esmaece e não aceita toques
+  const fade = 'transition-opacity duration-300 motion-reduce:transition-none'
+
   const addServer = () => toast.show('Adicionar servidor chega em breve.')
 </script>
 
@@ -24,7 +30,7 @@
       <DesktopPanel onaddserver={addServer} />
       <div class="flex flex-col">
         <div class="flex flex-1 items-center justify-center px-12 py-8">
-          <div class="w-full max-w-[480px]">
+          <div class="w-full max-w-[480px] {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
             <AuthForm showSubtitle {oncontinueoffline} />
           </div>
         </div>
@@ -35,7 +41,7 @@
     </div>
   {:else}
     <AuthHeader onaddserver={addServer} />
-    <div class="mx-auto max-w-[480px] px-6 pt-7 pb-6">
+    <div class="mx-auto max-w-[480px] px-6 pt-7 pb-6 {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
       <AuthForm {oncontinueoffline} />
     </div>
   {/if}
