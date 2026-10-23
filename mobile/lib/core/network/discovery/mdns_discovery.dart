@@ -102,44 +102,59 @@ String _withoutLocal(String host) {
 }
 
 /// Descoberta por varreduras mDNS feitas pelo próprio app (`multicast_dns`).
-/// É o caminho do Linux, onde o plugin `nsd` não existe.
+/// É o caminho do Linux, onde o plugin `nsd` não existe. Segue as mesmas regras
+/// do `NsdDiscovery`:
 ///
-/// Cada varredura vale por si só: um servidor só sai da lista depois de faltar
-/// em [missesBeforeRemoval] varreduras seguidas, porque no Wi-Fi uma resposta
-/// perdida é comum e não quer dizer que o servidor foi embora.
+/// * um servidor que some de uma varredura é só marcado como perdido e segue na
+///   lista por [lostGrace]; se voltar nesse prazo, nada muda (no Wi-Fi uma
+///   resposta perdida é comum e não quer dizer que o servidor foi embora);
+/// * enquanto nada foi achado (ou algum servidor está perdido), o cliente mDNS
+///   é reiniciado a cada [restartWhileEmpty], como o nsd reinicia a busca;
+/// * a tabela tem teto e recusa nomes absurdos ([ServerTable]).
 class MdnsDiscovery implements ServerDiscovery {
   MdnsDiscovery({
     MdnsApi? api,
     this.serviceType = plannyServiceType,
     this.interval = const Duration(seconds: 5),
     this.scanTimeout = const Duration(seconds: 3),
-    this.missesBeforeRemoval = 3,
+    this.restartWhileEmpty = const Duration(seconds: 15),
+    this.lostGrace = ServerTable.defaultLostGrace,
   }) : _api = api ?? PluginMdnsApi();
 
   final MdnsApi _api;
   final String serviceType;
   final Duration interval;
   final Duration scanTimeout;
-  final int missesBeforeRemoval;
+  final Duration restartWhileEmpty;
+  final Duration lostGrace;
 
   @override
   Stream<List<DiscoveredServer>> watch() {
     final table = ServerTable();
-    final misses = <String, int>{};
     final controller = StreamController<List<DiscoveredServer>>();
     Timer? timer;
     var closed = false;
     var scanning = false;
     var started = false;
+    var lastStart = DateTime.now();
 
     void emit() {
       if (!closed) controller.add(table.snapshot);
+    }
+
+    Future<void> restartIfStuck() async {
+      if (!table.isEmpty && !table.hasLost) return;
+      if (DateTime.now().difference(lastStart) < restartWhileEmpty) return;
+      _api.stop();
+      await _api.start();
+      lastStart = DateTime.now();
     }
 
     Future<void> scanOnce() async {
       if (closed || scanning || !started) return;
       scanning = true;
       try {
+        await restartIfStuck();
         final found = await _api.scan(serviceType, scanTimeout);
         if (closed) return;
         var changed = false;
@@ -147,7 +162,6 @@ class MdnsDiscovery implements ServerDiscovery {
         for (final f in found) {
           if (f.port <= 0 || f.port > 65535) continue;
           seen.add(f.name);
-          misses.remove(f.name);
           changed |= table.upsert(
             DiscoveredServer(
               name: f.name,
@@ -158,15 +172,9 @@ class MdnsDiscovery implements ServerDiscovery {
           );
         }
         for (final server in table.snapshot) {
-          if (seen.contains(server.name)) continue;
-          final n = (misses[server.name] ?? 0) + 1;
-          if (n >= missesBeforeRemoval) {
-            misses.remove(server.name);
-            changed |= table.remove(server.name);
-          } else {
-            misses[server.name] = n;
-          }
+          if (!seen.contains(server.name)) table.markLost(server.name);
         }
+        changed |= table.expire(lostGrace);
         if (changed) emit();
       } catch (error, stack) {
         if (!closed) controller.addError(error, stack);
@@ -184,6 +192,7 @@ class MdnsDiscovery implements ServerDiscovery {
         return;
       }
       started = true;
+      lastStart = DateTime.now();
       if (closed) {
         _api.stop();
         return;

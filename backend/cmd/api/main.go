@@ -39,6 +39,13 @@ func main() {
 		log.Fatalf("failed to connect to postgres: %v", err)
 	}
 	defer dbPool.Close()
+	// the schema is part of the release: apply what the binary ships before serving (replicas wait on a lock)
+	migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), 2*time.Minute)
+	err = database.Migrate(migrateCtx, dbPool, database.Migrations())
+	cancelMigrate()
+	if err != nil {
+		log.Fatalf("failed to migrate the database: %v", err)
+	}
 	authRepo := db.New(dbPool)
 	authService := auth.NewService(authRepo, cfg.RegistrationEnabled)
 	authHandler := auth.NewHandler(authService, cfg.JWTSecret, cfg.JWTAccessExpiry, cfg.JWTRefreshExpiry)

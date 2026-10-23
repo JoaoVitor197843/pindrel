@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/network/discovery/discovered_server.dart';
 import 'package:mobile/core/network/discovery/nsd_discovery.dart';
+import 'package:mobile/core/network/discovery/server_table.dart';
 import 'package:nsd/nsd.dart' as nsd;
 
 class FakeNsdApi implements NsdApi {
@@ -64,9 +65,12 @@ void main() {
 
   Future<void> listen({
     Duration restart = const Duration(hours: 1),
+    Duration grace = const Duration(milliseconds: 30),
     NsdDiscovery? discovery,
   }) async {
-    final d = discovery ?? NsdDiscovery(api: api, restartWhileEmpty: restart);
+    final d =
+        discovery ??
+        NsdDiscovery(api: api, restartWhileEmpty: restart, lostGrace: grace);
     sub = d.watch().listen(emitted.add, onError: errors.add);
     await settle();
   }
@@ -157,7 +161,49 @@ void main() {
     api.lost('Alfa');
     api.lost('Inexistente');
     await settle();
+    expect(
+      emitted.last.map((s) => s.name),
+      ['Alfa', 'Zeta'],
+      reason: 'perdido não sai na hora',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 80));
     expect(emitted.last.map((s) => s.name), ['Zeta']);
+  });
+
+  test('um "perdido" falso, achado de novo no prazo, não muda a lista', () async {
+    await listen(grace: const Duration(milliseconds: 60));
+    api.found('A', host: 'a.local', ips: ['10.0.0.1']);
+    await settle();
+    final count = emitted.length;
+    api.lost('A');
+    await settle();
+    api.found('A', host: 'a.local', ips: ['10.0.0.1']);
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    expect(emitted.length, count, reason: 'nenhuma emissão nova');
+    expect(emitted.last.single.name, 'A');
+  });
+
+  test('com um servidor perdido, reinicia a busca para achá-lo', () async {
+    await listen(
+      restart: const Duration(milliseconds: 20),
+      grace: const Duration(milliseconds: 200),
+    );
+    api.found('A', host: 'a.local', ips: ['10.0.0.1']);
+    await settle();
+    final starts = api.starts;
+    api.lost('A');
+    await Future<void>.delayed(const Duration(milliseconds: 70));
+    expect(api.starts, greaterThan(starts));
+  });
+
+  test('a tabela tem teto: anúncios em enxurrada não a enchem', () async {
+    await listen();
+    for (var i = 0; i < 500; i++) {
+      api.found('S$i', host: 'h$i.local', ips: ['10.0.0.${i % 250 + 1}']);
+    }
+    api.found('N' * 500, host: 'x.local', ips: ['10.0.0.1']);
+    await settle();
+    expect(emitted.last.length, ServerTable.defaultMaxServers);
   });
 
   test(

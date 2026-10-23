@@ -141,7 +141,7 @@ func loginUser(t *testing.T, h *auth.Handler, u testUser) (string, *http.Cookie)
 // Register
 // ---------------------------------------------------------------------------
 
-func TestHandler_Register_Success(t *testing.T) {
+func TestDB_Handler_Register_Success(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -173,7 +173,7 @@ func TestHandler_Register_Success(t *testing.T) {
 	}
 }
 
-func TestHandler_Register_EmailAlreadyExists(t *testing.T) {
+func TestDB_Handler_Register_EmailAlreadyExists(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -189,7 +189,7 @@ func TestHandler_Register_EmailAlreadyExists(t *testing.T) {
 	requireError(t, rec, http.StatusConflict, "email_already_exists")
 }
 
-func TestHandler_Register_RegistrationDisabled(t *testing.T) {
+func TestDB_Handler_Register_RegistrationDisabled(t *testing.T) {
 	handler, _, cleanup := setupTest(t, false)
 	defer cleanup()
 
@@ -203,7 +203,7 @@ func TestHandler_Register_RegistrationDisabled(t *testing.T) {
 	requireError(t, rec, http.StatusForbidden, "registration_disabled")
 }
 
-func TestHandler_Register_ValidationErrors(t *testing.T) {
+func TestDB_Handler_Register_ValidationErrors(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -226,7 +226,7 @@ func TestHandler_Register_ValidationErrors(t *testing.T) {
 
 // Corpo vazio é um protobuf válido (todos os campos no valor zero),
 // então quem barra é a validação e não o Unmarshal.
-func TestHandler_Register_EmptyBody(t *testing.T) {
+func TestDB_Handler_Register_EmptyBody(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -236,7 +236,7 @@ func TestHandler_Register_EmptyBody(t *testing.T) {
 	requireError(t, rec, http.StatusUnprocessableEntity, "validation_failed")
 }
 
-func TestHandler_Register_MalformedBody(t *testing.T) {
+func TestDB_Handler_Register_MalformedBody(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -250,7 +250,7 @@ func TestHandler_Register_MalformedBody(t *testing.T) {
 // Login
 // ---------------------------------------------------------------------------
 
-func TestHandler_Login_Success(t *testing.T) {
+func TestDB_Handler_Login_Success(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -281,7 +281,7 @@ func TestHandler_Login_Success(t *testing.T) {
 	}
 }
 
-func TestHandler_Login_InvalidCredentials(t *testing.T) {
+func TestDB_Handler_Login_InvalidCredentials(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -307,7 +307,7 @@ func TestHandler_Login_InvalidCredentials(t *testing.T) {
 	}
 }
 
-func TestHandler_Login_EmptyBody(t *testing.T) {
+func TestDB_Handler_Login_EmptyBody(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -317,7 +317,7 @@ func TestHandler_Login_EmptyBody(t *testing.T) {
 	requireError(t, rec, http.StatusUnprocessableEntity, "validation_failed")
 }
 
-func TestHandler_Login_MalformedBody(t *testing.T) {
+func TestDB_Handler_Login_MalformedBody(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -331,7 +331,7 @@ func TestHandler_Login_MalformedBody(t *testing.T) {
 // Logout
 // ---------------------------------------------------------------------------
 
-func TestHandler_Logout_Success(t *testing.T) {
+func TestDB_Handler_Logout_Success(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -357,7 +357,7 @@ func TestHandler_Logout_Success(t *testing.T) {
 	requireError(t, rec2, http.StatusUnauthorized, "unauthorized")
 }
 
-func TestHandler_Logout_NoToken(t *testing.T) {
+func TestDB_Handler_Logout_NoToken(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -371,7 +371,7 @@ func TestHandler_Logout_NoToken(t *testing.T) {
 // Refresh
 // ---------------------------------------------------------------------------
 
-func TestHandler_Refresh_Success(t *testing.T) {
+func TestDB_Handler_Refresh_Success(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -394,7 +394,7 @@ func TestHandler_Refresh_Success(t *testing.T) {
 	}
 }
 
-func TestHandler_Refresh_NoToken(t *testing.T) {
+func TestDB_Handler_Refresh_NoToken(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -408,7 +408,7 @@ func TestHandler_Refresh_NoToken(t *testing.T) {
 // Me
 // ---------------------------------------------------------------------------
 
-func TestHandler_Me_Success(t *testing.T) {
+func TestDB_Handler_Me_Success(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)
 	defer cleanup()
 
@@ -430,7 +430,7 @@ func TestHandler_Me_Success(t *testing.T) {
 	}
 }
 
-func TestHandler_Me_Unauthorized(t *testing.T) {
+func TestDB_Handler_Me_Unauthorized(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
 
