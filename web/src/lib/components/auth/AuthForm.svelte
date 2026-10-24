@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fade, slide } from 'svelte/transition'
+  import { ms } from '../../motion'
   import { toast } from '../../stores/toast.svelte'
   import RecoveryKeyModal from './RecoveryKeyModal.svelte'
 
@@ -16,7 +18,7 @@
   let recoveryOpen = $state(false)
 
   const field =
-    'w-full rounded-field border border-line bg-surface px-4 py-4 text-fg placeholder:text-muted focus:border-accent-line focus:outline-none'
+    'w-full rounded-field border border-line bg-surface px-4 py-4 text-fg placeholder:text-muted transition-colors duration-200 focus:border-accent-line focus:outline-none'
 
   function continueOffline() {
     if (oncontinueoffline) return oncontinueoffline()
@@ -31,17 +33,22 @@
 
 <div class="flex flex-col gap-5">
   <div>
-    <h1 class="font-serif text-3xl">{register ? 'Criar nova conta' : 'Bem-vindo de volta'}</h1>
-    {#if showSubtitle}
-      <p class="mt-2 text-muted">
-        {register ? 'Crie sua conta para começar a escrever.' : 'Entre para continuar de onde você parou.'}
-      </p>
-    {/if}
+    <!-- o texto novo aparece com fade (o antigo é trocado na hora, sem os dois empilhados) -->
+    {#key register}
+      <h1 class="font-serif text-3xl" in:fade={{ duration: ms(200) }}>
+        {register ? 'Criar nova conta' : 'Bem-vindo de volta'}
+      </h1>
+      {#if showSubtitle}
+        <p class="mt-2 text-muted" in:fade={{ duration: ms(200) }}>
+          {register ? 'Crie sua conta para começar a escrever.' : 'Entre para continuar de onde você parou.'}
+        </p>
+      {/if}
+    {/key}
   </div>
 
   <form class="flex flex-col gap-5" onsubmit={submit}>
     {#if register}
-      <div class="flex flex-col gap-2">
+      <div class="flex flex-col gap-2" transition:slide={{ duration: ms(200) }}>
         <label for="username" class="font-semibold">Username</label>
         <input id="username" type="text" autocomplete="username" placeholder="seu_usuario" class={field} />
       </div>
@@ -58,7 +65,7 @@
         <button
           type="button"
           onclick={() => (obscure = !obscure)}
-          class="font-mono text-xs uppercase tracking-[1.4px] text-muted"
+          class="font-mono text-xs uppercase tracking-[1.4px] text-muted transition-colors duration-150 hover:text-fg"
         >
           {obscure ? 'MOSTRAR' : 'OCULTAR'}
         </button>
@@ -76,7 +83,7 @@
       <label class="flex cursor-pointer items-center gap-2.5">
         <input type="checkbox" bind:checked={keepSignedIn} class="peer sr-only" />
         <span
-          class="flex size-5 items-center justify-center rounded-sm border border-accent-line peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-accent-line {keepSignedIn
+          class="flex size-5 items-center justify-center rounded-sm border border-accent-line transition-colors duration-150 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-accent-line {keepSignedIn
             ? ''
             : 'text-transparent'}"
         >
@@ -86,12 +93,12 @@
         </span>
         <span>Manter conectado</span>
       </label>
-      <button type="button" onclick={() => (recoveryOpen = true)} class="text-accent-line">
+      <button type="button" onclick={() => (recoveryOpen = true)} class="text-accent-line transition-opacity duration-150 hover:opacity-80">
         Chave de recuperação
       </button>
     </div>
 
-    <button type="submit" class="h-13.5 rounded-field bg-cream text-base font-semibold text-on-cream">
+    <button type="submit" class="h-13.5 rounded-field bg-cream text-base font-semibold text-on-cream transition duration-150 hover:bg-cream/90 active:scale-[0.98]">
       {register ? 'Criar conta' : 'Entrar'}
     </button>
   </form>
@@ -105,7 +112,7 @@
   <button
     type="button"
     onclick={continueOffline}
-    class="h-13.5 rounded-field border border-line text-fg"
+    class="h-13.5 rounded-field border border-line text-fg transition duration-150 hover:bg-surface active:scale-[0.98]"
   >
     Continuar offline neste dispositivo
   </button>
