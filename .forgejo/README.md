@@ -39,6 +39,29 @@ serviço, tire a folga daqui antes.
 Religar uma ferramenta: `docker update --restart=unless-stopped <nome> && docker start <nome>`.
 Os limites de Forgejo e runner estão no `compose.yml` do Forgejo no Pi (backup: `compose.yml.bak-pre-limites`).
 
+## A release só acontece com tudo verde
+
+Em push na `main` o `release.yml` **chama os quatro workflows de CI** (`uses: ./.forgejo/workflows/<x>.yml`; todos
+têm `on: workflow_call`) e o job `images` tem `needs:` de todos. Se qualquer teste falhar, nada é publicado: a tag
+`latest` não muda e o Pi continua na versão que já roda. O mesmo workflow roda em push na `dev`/PR (com filtro de
+caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar em dobro).
+
+| Job | Onde | O quê |
+|---|---|---|
+| `backend` / `analyze-and-test` | Pi (`ci`) | gofmt, vet e `go test -skip '^TestDB_'` |
+| `backend` / `database-tests` | PC (`build`, imagem `ci-pc:1`) | **todos** os testes, os `TestDB_*` também, num Postgres descartável (`services:`), com o schema aplicado por `go run ./cmd/migrate` |
+| `web` | Pi (`ci`) | `yarn check` e vitest |
+| `gateway` | PC (`build`, imagem `ci-pc:1`) | rustfmt, clippy, `cargo test` (o Pi não tem Rust) |
+| `mobile` | Pi (`ci-flutter`) | `flutter analyze` e `flutter test` |
+| `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem |
+
+A imagem `ci-pc:1` (Go + Rust com clippy/rustfmt + node + git) se constrói no PC:
+`docker build -f .forgejo/images/ci-pc.Dockerfile -t ci-pc:1 .forgejo/images`. O runner do PC tem `capacity: 2`
+(o `database-tests` e o `gateway` rodam em paralelo com o resto).
+
+Ler o log de um job: o Forgejo guarda em `/mnt/ssd-data/services/forgejo/data/gitea/actions_log/<dono>/<repo>/<id em hex>/<id>.log.zst`
+no Pi (`zstd -dc`); o id da tarefa vem de `GET /api/v1/repos/<dono>/<repo>/actions/tasks`.
+
 ## Runner de release (PC)
 
 O `release.yml` roda no runner do **PC** (`~/homelab`, contêiner `runner`), que tem o Docker do host. Uma vez:
