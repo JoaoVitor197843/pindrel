@@ -1,7 +1,7 @@
 # CI do backend (Go). Roda só quando o backend, o schema protobuf ou este arquivo mudam.
 #
 # - Um job só, no PC (runner `build`, imagem ci-pc): gofmt, go vet e TODOS os testes, os `TestDB_*` também, num
-#   Postgres descartável (`services:`), com o schema aplicado por `go run ./cmd/migrate`, o mesmo código da API.
+#   Postgres descartável (`services:`), com o schema aplicado pelo CLI golang-migrate (`migrate ... up`).
 #   (Antes havia um job no Pi sem banco, ~5 min, que rodava um subconjunto do que este já roda.)
 # - No PC os pacotes rodam em paralelo; o CI do Pi precisava de -p=1 e GOMEMLIMIT por causa da RAM.
 #
@@ -84,8 +84,8 @@ jobs:
           done
           echo "o Postgres não respondeu em 60 s"; exit 1
 
-      - name: Aplicar as migrations (o mesmo código da API)
-        run: go run ./cmd/migrate
+      - name: Aplicar as migrations (golang-migrate, o mesmo que a API usa ao iniciar)
+        run: migrate -path internal/database/migrations -database "postgres://plany:ci-only-password@postgres:5432/plany?sslmode=disable" up
 
       - name: Todos os testes, com banco
         run: go test ./... -count=1
