@@ -1,5 +1,5 @@
 //! Request handling: rate limits, GET /server/discover/, and the reverse proxy to the replicas.
-use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, LengthLimitError, Limited};
@@ -65,14 +65,20 @@ fn error(status: StatusCode, code: &str, message: &str) -> Response<Body> {
     reply(status, "application/x-protobuf", proto::error_http(code, message))
 }
 
-fn rate_limited() -> Response<Body> {
-    error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "too many requests, try again later")
+fn rate_limited(retry_after: Duration) -> Response<Body> {
+    let mut r = error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "too many requests, try again later");
+    // whole seconds, rounded up, at least 1: what the client has to wait before the bucket has a request again
+    let secs = retry_after.as_secs() + u64::from(retry_after.subsec_nanos() > 0);
+    r.headers_mut().insert(header::RETRY_AFTER, header::HeaderValue::from(secs.max(1)));
+    r
 }
 
 pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> Result<Response<Body>, Infallible> {
     let ip = peer.ip();
-    if app.cfg.rate_limit && !app.limiters.global.allow(ip) {
-        return Ok(rate_limited());
+    if app.cfg.rate_limit {
+        if let Err(wait) = app.limiters.global.check(ip) {
+            return Ok(rate_limited(wait));
+        }
     }
     let path = req.uri().path();
     if req.method() == Method::GET && path == "/server/discover/" {
@@ -91,8 +97,8 @@ pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> 
             "/auth/register/" => Some(&app.limiters.register),
             _ => None,
         };
-        if limiter.is_some_and(|l| !l.allow(ip)) {
-            return Ok(rate_limited());
+        if let Some(Err(wait)) = limiter.map(|l| l.check(ip)) {
+            return Ok(rate_limited(wait));
         }
     }
     Ok(proxy(&app, ip, req).await)

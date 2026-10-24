@@ -162,6 +162,9 @@ async fn login_and_register_have_their_own_limit_and_answer_protobuf_429() {
             (e.code.as_str(), e.message.as_str()),
             ("rate_limited", "too many requests, try again later")
         );
+        // login/register earn one request back every 12 s (5 per minute): the client is told how long to wait
+        let wait: u64 = r.header("retry-after").parse().expect("Retry-After in whole seconds");
+        assert!((1..=12).contains(&wait), "{path}: Retry-After {wait}");
     }
     // the limit is only for POST on those two paths
     assert_eq!(get(gw.addr, "/auth/login/").await.status, StatusCode::OK);

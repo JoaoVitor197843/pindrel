@@ -17,6 +17,8 @@ path = "src/main.rs"
 [dependencies]
 bytes = "1"
 gethostname = "1"
+# rate limiting math (GCRA) and clock; the table of clients is ours (src/limiter.rs), with a hard cap
+governor = { version = "0.10", default-features = false, features = ["std"] }
 http-body-util = "0.1"
 if-addrs = "0.15"
 hyper = { version = "1", default-features = false, features = ["http1", "server", "client"] }

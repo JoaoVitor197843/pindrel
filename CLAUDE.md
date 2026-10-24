@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Plany is a self-hosted, Notion-style notes workspace (AGPL-3.0). Three clients-of-one-API and a gateway live in this monorepo:
 
 - `backend/` — Go API (Go module name is `plany`, so imports look like `plany/internal/auth`)
-- `gateway/` — Rust (the only Rust in the project): the front-facing process of a deployment. Load balancer over the API replicas, per-IP rate limits, mDNS announcement and LAN discovery (`GET /server/discover/`). Static binary of ~1.4 MB, ~2-5 MB of RAM; runs natively on Linux (x86/arm), Windows and macOS (only `cargo check` was run for the non-Linux targets) or as a `scratch` Docker image of ~2.5 MB. Nothing in the Go API depends on it.
+- `gateway/` — Rust (the only Rust in the project): the front-facing process of a deployment. Load balancer over the API replicas, per-IP rate limits (`governor` for the GCRA math and clock, our own client table capped at 16 384 entries per limit, `Retry-After` on every 429), mDNS announcement and LAN discovery (`GET /server/discover/`). Static binary of ~1.4 MB, ~2-5 MB of RAM; runs natively on Linux (x86/arm), Windows and macOS (only `cargo check` was run for the non-Linux targets) or as a `scratch` Docker image of ~2.5 MB. Nothing in the Go API depends on it.
 - `web/` — Svelte 5 + Vite + Tailwind SPA (Yarn Berry with PnP SDKs in `web/.yarn`)
 - `mobile/` — Flutter app (mobile + desktop), Flutter version pinned via FVM (`mobile/.fvmrc`)
 - `shared/protos/` — Protobuf schema shared by all three
