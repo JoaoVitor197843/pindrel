@@ -48,7 +48,7 @@ caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar e
 
 | Job | Onde | O quê |
 |---|---|---|
-| `backend` / `test` | PC (`build`, imagem `ci-pc:1`) | gofmt, vet e **todos** os testes, os `TestDB_*` também, num Postgres descartável (`services:`), com o schema aplicado por `go run ./cmd/migrate` |
+| `backend` / `test` | PC (`build`, imagem `ci-pc:1`) | gofmt, vet e **todos** os testes, os `TestDB_*` também, num Postgres descartável (`services:`), com o schema aplicado pelo CLI golang-migrate (`migrate ... up`, instalado na imagem `ci-pc`) |
 | `web` | PC (`build`, imagem `ci-pc:1`) | `yarn check` e vitest |
 | `gateway` | PC (`build`, imagem `ci-pc:1`) | rustfmt, clippy, `cargo test` (o Pi não tem Rust) |
 | `mobile` | PC (`flutter`, imagem `ci-flutter:1` do PC) | `flutter analyze` e `flutter test` |
@@ -59,7 +59,7 @@ Tudo roda no PC, em paralelo (`capacity: 4`). O runner do Pi (`ci`, `ci-flutter`
 backend (~5 min) + web (~2 min) + mobile (~6 min) rodavam em fila, ~13 min no total; no PC cada um leva segundos a
 poucos minutos e começam juntos. O Pi segue disponível como alternativa (basta trocar o `runs-on`).
 
-A imagem `ci-pc:1` (Go + Rust com clippy/rustfmt + node + git) se constrói no PC:
+A imagem `ci-pc:1` (Go + Rust com clippy/rustfmt + node + yarn + CLI golang-migrate + git) se constrói no PC:
 `docker build -f .forgejo/images/ci-pc.Dockerfile -t ci-pc:1 .forgejo/images`. O runner do PC tem `capacity: 4` e os labels `build`, `flutter` e `apk`.
 
 Ler o log de um job: o Forgejo guarda em `/mnt/ssd-data/services/forgejo/data/gitea/actions_log/<dono>/<repo>/<id em hex>/<id>.log.zst`

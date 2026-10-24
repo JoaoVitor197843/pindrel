@@ -16,7 +16,7 @@ push na main ─▶ Forgejo Actions (runner do PC) ─▶ imagens amd64+arm64 no
 | `compose.registry.yml` | Pi | troca `build:` por `image:` do registry |
 | `deploy/update.sh` | Pi | baixa, recria, espera ficar saudável, volta atrás se não ficar |
 | `deploy/install-timer.sh` | Pi | instala o timer do systemd que roda o `update.sh` |
-| `database.Migrate` (API) | contêiner | aplica as migrations que vão dentro do binário ao iniciar |
+| `database.Migrate` (API, golang-migrate) | contêiner | aplica as migrations que vão dentro do binário ao iniciar |
 
 ## Atualização sem parar (rolling) e rollback
 
@@ -99,7 +99,9 @@ services:
 YML
 sed -i 's#^COMPOSE_FILE=.*#COMPOSE_FILE=compose.yml:compose.lb.yml:compose.registry.yml:compose.pi.yml#' .env
 
-# 3. o banco foi migrado à mão (sem schema_migrations): registre a versão que já está aplicada (só a 1)
+# 3. o banco foi migrado à mão (sem schema_migrations): registre a versão já aplicada (só a 1). Com o CLI
+#    golang-migrate, de qualquer máquina que alcance o banco: migrate -path backend/internal/database/migrations -database "$URL" force 1
+#    ou, direto no contêiner, o mesmo que o `force` faz (tabela e linha no formato do golang-migrate):
 docker exec plany-postgres-1 sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "CREATE TABLE IF NOT EXISTS schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL); INSERT INTO schema_migrations SELECT 1, false WHERE NOT EXISTS (SELECT 1 FROM schema_migrations)"'
 
 # 4. login no registry (token plany-pi) e primeira atualização
@@ -108,8 +110,8 @@ sh deploy/update.sh && sudo sh deploy/install-timer.sh
 ```
 
 O `update.sh` lê o `COMPOSE_FILE` do `.env`, então respeita esses ajustes e não força o número de réplicas
-(só `PLANY_REPLICAS` define). Sem o passo 3 a API nova recusa subir (tentaria criar de novo as tabelas) e o
-rollback devolve a versão antiga; a mensagem de erro do log diz exatamente o que registrar.
+(só `PLANY_REPLICAS` define). Sem o passo 3 a API nova recusa subir (o golang-migrate tentaria criar de novo as tabelas) e o
+rollback devolve a versão antiga (o erro no log é `relation "users" already exists`).
 
 O usuário precisa estar no grupo `docker`. Ver o que aconteceu: `journalctl -u plany-update -e`.
 Parar de atualizar: `sudo systemctl disable --now plany-update.timer`. Fixar uma versão: `PLANY_TAG=<commit>`
