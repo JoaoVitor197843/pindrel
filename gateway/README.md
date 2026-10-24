@@ -43,7 +43,9 @@ A porta de entrada de uma instalação do Plany. Fica na frente das réplicas da
 | `POST /auth/register/` | 5 por minuto | 5 |
 | Qualquer requisição | 100 por minuto | 20 |
 
-Um IPv6 conta pelo **prefixo /64** (quem tem a faixa inteira não burla o limite trocando de endereço). A tabela de clientes tem teto de 65 536 entradas, para que uma inundação de endereços não faça a memória crescer.
+Um IPv6 conta pelo **prefixo /64** (quem tem a faixa inteira não burla o limite trocando de endereço). A conta (GCRA, um horário por cliente) e o relógio vêm da crate `governor`; a tabela de clientes é nossa e tem **teto de 16 384 entradas por limite** (~60 bytes cada, 3 limites cabem em ~2-3 MB, folgado para o contêiner de 16 MiB). Cheia, ela primeiro esquece quem já está com o balde cheio de novo; se continuar cheia, o cliente **novo** é recusado (os que já estão na tabela seguem sendo limitados um a um, não bloqueados em bloco). Medido com 30 000 origens distintas em `POST /auth/login/`: 16 384 passam, 13 616 recebem 429, e a memória sobe 2,3 MB e para.
+
+Toda resposta 429 traz `Retry-After` (segundos inteiros, arredondados para cima, de 1 a 3600): o tempo até o balde ter uma requisição de volta.
 
 ### Proteções
 
