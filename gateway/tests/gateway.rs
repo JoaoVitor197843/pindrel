@@ -158,6 +158,57 @@ async fn a_dropped_safe_request_is_replayed_once_not_on_every_replica() {
     gw.shutdown().await;
 }
 
+// The web is opened by `localhost` or a VPN address but must show the address the LAN uses for this server.
+fn set_address(gw: &plany_gateway::server::Running, address: Option<&str>) {
+    *gw.app.address.write().unwrap() = address.map(str::to_string);
+}
+
+#[tokio::test]
+async fn server_info_carries_the_lan_address_and_only_there() {
+    let a = Backend::start("a").await;
+    let gw = gateway(&[&a]).await;
+    set_address(&gw, Some("192.168.1.9:8086"));
+    let r = get(gw.addr, "/server/info/").await;
+    assert_eq!(
+        r.header("x-plany-address"),
+        "192.168.1.9:8086",
+        "the gateway's value, not the replica's 6.6.6.6:1"
+    );
+    for (method, path) in [
+        ("HEAD", "/server/info/"),
+        ("POST", "/server/info/"),
+        ("GET", "/server/info"),
+        ("GET", "/auth/me/"),
+        ("GET", "/"),
+    ] {
+        let r = send(gw.addr, method, path, &[], "").await;
+        assert_eq!(r.header("x-plany-address"), "", "{method} {path}");
+    }
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn without_a_known_lan_address_the_header_is_absent_and_a_replicas_one_is_dropped() {
+    let a = Backend::start("a").await;
+    let gw = gateway(&[&a]).await;
+    set_address(&gw, None);
+    let r = get(gw.addr, "/server/info/").await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.header("x-plany-address"), "");
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn requests_through_a_declared_proxy_never_get_the_private_address() {
+    let a = Backend::start("a").await;
+    let gw = behind_proxy(&a, "x-forwarded-for").await;
+    set_address(&gw, Some("192.168.1.9:8086"));
+    let r = send(gw.addr, "GET", "/server/info/", &[("x-forwarded-for", "203.0.113.7")], "").await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.header("x-plany-address"), "", "the client may be anywhere on the internet");
+    gw.shutdown().await;
+}
+
 #[tokio::test]
 async fn without_any_replica_the_answer_is_a_protobuf_502() {
     let a = Backend::start("a").await;

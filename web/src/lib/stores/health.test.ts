@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { selection } from './servers.svelte'
+import { embedded, lanAddress, selection } from './servers.svelte'
 
 const answer = (status: number) => vi.mocked(fetch).mockImplementation(async () => new Response(null, { status }))
 const down = () => vi.mocked(fetch).mockImplementation(async () => Promise.reject(new TypeError('rede caiu')))
 
 beforeEach(() => {
   selection.health = 'connected'
+  selection.address = embedded.address
   // resets the failure count left by earlier tests
   answer(200)
 })
@@ -130,5 +131,57 @@ describe('selection.watchHealth', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     expect(fetch).toHaveBeenCalledTimes(2) // a single cycle goes on, not twenty
     stop()
+  })
+})
+
+describe('LAN address of the server', () => {
+  const withHeader = (value: string | null) =>
+    vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 200, headers: value === null ? {} : { 'x-plany-address': value } }))
+
+  it('the page shows the address the gateway says the LAN uses', async () => {
+    withHeader('192.168.1.163:8086')
+    await selection.check()
+    expect(selection.address).toBe('192.168.1.163:8086')
+  })
+
+  it('without the header (no gateway) or after it goes away, the page address is shown', async () => {
+    withHeader('192.168.1.163:8086')
+    await selection.check()
+    withHeader(null)
+    await selection.check()
+    expect(selection.address).toBe(embedded.address)
+  })
+
+  it('a failed check keeps the last known address', async () => {
+    withHeader('192.168.1.163:8086')
+    await selection.check()
+    down()
+    await selection.check()
+    expect(selection.address).toBe('192.168.1.163:8086')
+  })
+
+  it.each([
+    '',
+    'x',
+    '192.168.1.163',
+    '192.168.1.163:0',
+    '192.168.1.163:99999',
+    '192.168.1.163:80:80',
+    '999.1.1.1:80',
+    '127.0.0.1:8080',
+    '169.254.169.254:80',
+    '224.0.0.251:5353',
+    'evil.example.com:80',
+    '<img src=x onerror=alert(1)>:80',
+    '192.168.1.163:8086\nSet-Cookie: a=b',
+    '192.168.001.163:8086',
+    '1'.repeat(10_000),
+  ])('a bad value (%j) is ignored', (value) => {
+    expect(lanAddress(value)).toBeNull()
+  })
+
+  it('good values pass, with stray spaces trimmed', () => {
+    expect(lanAddress(' 10.0.0.5:8080 ')).toBe('10.0.0.5:8080')
+    expect(lanAddress(null)).toBeNull()
   })
 })

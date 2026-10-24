@@ -82,7 +82,8 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
 
     let remember = cfg.known_interval > Duration::ZERO && (cfg.mdns || cfg.known_file.is_some());
     let (known_file, known_interval) = (cfg.known_file.clone(), cfg.known_interval);
-    let app = Arc::new(App::new(cfg, registry.clone()));
+    let address = lan.map(|ip| format!("{ip}:{}", addr.port()));
+    let app = Arc::new(App::new(cfg, registry.clone(), address));
     let (tx, rx) = watch::channel(false);
 
     if remember {

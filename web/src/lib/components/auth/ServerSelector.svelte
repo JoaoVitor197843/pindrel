@@ -80,7 +80,7 @@
         >
           <span>
             <span class="block text-sm font-semibold">{server.name}</span>
-            <span class="block font-mono text-[11px] tracking-[0.4px] text-muted">{server.address}</span>
+            <span class="block font-mono text-[11px] tracking-[0.4px] text-muted">{server.id === selection.selected.id ? selection.address : server.address}</span>
           </span>
           {#if active}
             <svg class="size-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" data-testid="selected-check">
@@ -109,7 +109,7 @@
         >
           <span>
             <span class="block text-sm font-semibold text-muted">{selection.selected.name}</span>
-            <span class="block font-mono text-[11px] tracking-[0.4px] text-muted">{selection.selected.address}</span>
+            <span class="block font-mono text-[11px] tracking-[0.4px] text-muted">{selection.address}</span>
           </span>
           <svg class="size-[18px] text-offline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M20 6 9 17l-5-5" />
