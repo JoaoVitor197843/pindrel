@@ -48,16 +48,19 @@ caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar e
 
 | Job | Onde | O quê |
 |---|---|---|
-| `backend` / `analyze-and-test` | Pi (`ci`) | gofmt, vet e `go test -skip '^TestDB_'` |
-| `backend` / `database-tests` | PC (`build`, imagem `ci-pc:1`) | **todos** os testes, os `TestDB_*` também, num Postgres descartável (`services:`), com o schema aplicado por `go run ./cmd/migrate` |
-| `web` | Pi (`ci`) | `yarn check` e vitest |
+| `backend` / `test` | PC (`build`, imagem `ci-pc:1`) | gofmt, vet e **todos** os testes, os `TestDB_*` também, num Postgres descartável (`services:`), com o schema aplicado por `go run ./cmd/migrate` |
+| `web` | PC (`build`, imagem `ci-pc:1`) | `yarn check` e vitest |
 | `gateway` | PC (`build`, imagem `ci-pc:1`) | rustfmt, clippy, `cargo test` (o Pi não tem Rust) |
-| `mobile` | Pi (`ci-flutter`) | `flutter analyze` e `flutter test` |
-| `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem |
+| `mobile` | PC (`flutter`, imagem `ci-flutter:1` do PC) | `flutter analyze` e `flutter test` |
+| `release` / `prebuild` | PC (`build`, imagem `ci-docker:1`) | compila as imagens sem publicar, **enquanto os testes rodam**, para o cache do buildkit estar quente |
+| `release` / `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem; empurra as camadas já prontas |
+
+Tudo roda no PC, em paralelo (`capacity: 4`). O runner do Pi (`ci`, `ci-flutter`) tem um slot só e era o gargalo:
+backend (~5 min) + web (~2 min) + mobile (~6 min) rodavam em fila, ~13 min no total; no PC cada um leva segundos a
+poucos minutos e começam juntos. O Pi segue disponível como alternativa (basta trocar o `runs-on`).
 
 A imagem `ci-pc:1` (Go + Rust com clippy/rustfmt + node + git) se constrói no PC:
-`docker build -f .forgejo/images/ci-pc.Dockerfile -t ci-pc:1 .forgejo/images`. O runner do PC tem `capacity: 2`
-(o `database-tests` e o `gateway` rodam em paralelo com o resto).
+`docker build -f .forgejo/images/ci-pc.Dockerfile -t ci-pc:1 .forgejo/images`. O runner do PC tem `capacity: 4` e os labels `build`, `flutter` e `apk`.
 
 Ler o log de um job: o Forgejo guarda em `/mnt/ssd-data/services/forgejo/data/gitea/actions_log/<dono>/<repo>/<id em hex>/<id>.log.zst`
 no Pi (`zstd -dc`); o id da tarefa vem de `GET /api/v1/repos/<dono>/<repo>/actions/tasks`.
