@@ -12,6 +12,7 @@ const openMenu = () => click(screen.getByRole('button', { name: 'Selecionar serv
 beforeEach(async () => {
   selection.connecting = null
   selection.health = 'connected'
+  selection.address = selection.selected.address
   directory.others = []
   mockDiscover([found('Escritório')])
   await directory.refresh()
@@ -250,5 +251,19 @@ describe('Login — rodapé do desktop e saúde do servidor', () => {
     await vi.waitFor(() => {
       expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === '/server/info/')).toBe(true)
     })
+  })
+})
+
+describe('Login — address of the server', () => {
+  it('the footer and the menu show the LAN address when the gateway tells it', async () => {
+    viewport.set(1200)
+    vi.mocked(fetch).mockImplementation(
+      async () => new Response(null, { status: 200, headers: { 'x-plany-address': '192.168.1.163:8086' } }),
+    )
+    render(Login)
+    expect(await screen.findByText(/192\.168\.1\.163:8086/)).toBeTruthy()
+    expect(screen.queryByText(new RegExp(selection.selected.address.replace('.', '\\.') + '$'))).toBeNull()
+    await openMenu()
+    expect(screen.getAllByText('192.168.1.163:8086').length).toBeGreaterThan(0)
   })
 })

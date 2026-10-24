@@ -1,5 +1,5 @@
 //! Request handling: rate limits, GET /server/discover/, and the reverse proxy to the replicas.
-use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc, time::Duration};
+use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc, sync::RwLock, time::Duration};
 
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, LengthLimitError, Limited};
@@ -19,11 +19,13 @@ pub struct App {
     pub pool: Pool,
     pub limiters: Limiters,
     pub registry: Arc<Registry>,
+    /// This machine's address on the LAN (`192.168.1.163:8086`), once known; see `ADDRESS_HEADER`.
+    pub address: RwLock<Option<String>>,
     client: Client<HttpConnector, Full<Bytes>>,
 }
 
 impl App {
-    pub fn new(cfg: Config, registry: Arc<Registry>) -> Self {
+    pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
         let pool = Pool::new(cfg.upstreams.clone());
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(4)
@@ -34,6 +36,7 @@ impl App {
             pool,
             limiters: Limiters::standard(),
             registry,
+            address: RwLock::new(address),
             client,
         }
     }
@@ -42,6 +45,11 @@ impl App {
 /// Headers that claim to say who the client is. The gateway is the edge: it sets `x-forwarded-for` itself, and the
 /// others do not reach the API (nothing there should trust them).
 const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
+
+/// The page of a server may be opened by `localhost` or a VPN address; this header on `GET /server/info/` tells
+/// the web the address the other devices of the LAN use. It is not sent when the request came through a declared
+/// proxy (a tunnel): those clients are not on the LAN and have no use for its private address.
+pub const ADDRESS_HEADER: &str = "x-plany-address";
 
 const HOP_BY_HOP: [&str; 8] = [
     "connection",
@@ -106,10 +114,11 @@ pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> 
             return Ok(rate_limited(wait));
         }
     }
-    Ok(proxy(&app, ip, req).await)
+    let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
+    Ok(proxy(&app, ip, via_proxy, req).await)
 }
 
-async fn proxy(app: &App, client_ip: IpAddr, req: Request<Incoming>) -> Response<Body> {
+async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incoming>) -> Response<Body> {
     let (parts, body) = req.into_parts();
     // The body is buffered once so that a request can be replayed on another replica when the
     // first one refuses the connection (safe even for POST: nothing was sent yet).
@@ -152,6 +161,13 @@ async fn proxy(app: &App, client_ip: IpAddr, req: Request<Incoming>) -> Response
                 let (mut p, inc) = resp.into_parts();
                 for h in HOP_BY_HOP {
                     p.headers.remove(h);
+                }
+                p.headers.remove(ADDRESS_HEADER);
+                if !via_proxy && parts.method == Method::GET && parts.uri.path() == "/server/info/" {
+                    let address = app.address.read().ok().and_then(|a| a.clone());
+                    if let Some(v) = address.and_then(|a| header::HeaderValue::from_str(&a).ok()) {
+                        p.headers.insert(ADDRESS_HEADER, v);
+                    }
                 }
                 return Response::from_parts(p, inc.boxed());
             }

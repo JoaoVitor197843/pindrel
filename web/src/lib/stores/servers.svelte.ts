@@ -157,6 +157,16 @@ const HEALTH_FAILURES = 2
 
 export type Health = 'connected' | 'disconnected'
 
+const ADDRESS_HEADER = 'x-plany-address'
+
+/** `ip:port` of the header if it looks like a usable LAN address (the value comes from the network: never trusted blindly). */
+export function lanAddress(value: string | null): string | null {
+  const m = /^(\d{1,3}(?:\.\d{1,3}){3}):(\d{1,5})$/.exec(value?.trim() ?? '')
+  if (!m || !isUsableIpv4(m[1])) return null
+  const port = Number(m[2])
+  return port >= 1 && port <= 65535 ? `${m[1]}:${port}` : null
+}
+
 /**
  * Does the server respond? Since it is another origin, the response cannot be read (no CORS): all we know is whether
  * there was a response or a network error, which is all that is needed. https page to http server: the browser blocks
@@ -185,6 +195,11 @@ class ServerSelection {
   connecting = $state<ServerOption | null>(null)
   /** Whether this page's server responds: `disconnected` after consecutive failures, back to connected on the first success. */
   health = $state<Health>('connected')
+  /**
+   * The address to show for this server. The page may have been opened by `localhost` or a VPN address; when the
+   * gateway says which one the LAN uses (`x-plany-address` on `/server/info/`), that is the one shown.
+   */
+  address = $state(embedded.address)
 
   #failures = 0
 
@@ -204,7 +219,9 @@ class ServerSelection {
     let up = false
     try {
       // any response that is not a server error proves someone is there: 404 and 429 count
-      up = (await fetch('/server/info/', { cache: 'no-store', signal: timeout.signal })).status < 500
+      const res = await fetch('/server/info/', { cache: 'no-store', signal: timeout.signal })
+      up = res.status < 500
+      if (up) this.address = lanAddress(res.headers.get(ADDRESS_HEADER)) ?? embedded.address
     } catch {
       up = false
     } finally {

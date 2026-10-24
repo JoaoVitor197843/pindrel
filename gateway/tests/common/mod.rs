@@ -151,8 +151,12 @@ async fn backend_handler(id: &'static str, req: Request<Incoming>) -> Result<Res
     } else {
         StatusCode::OK
     };
-    Ok(Response::builder()
-        .status(status)
+    let mut res = Response::builder().status(status);
+    if path == "/server/info/" {
+        // a replica must not be able to speak for the gateway
+        res = res.header("x-plany-address", "6.6.6.6:1");
+    }
+    Ok(res
         .header("x-backend", id)
         .header("x-seen-xff", xff)
         .header("x-seen-claims", claims)
