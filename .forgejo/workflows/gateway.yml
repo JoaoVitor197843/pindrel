@@ -6,6 +6,8 @@
 name: gateway
 
 on:
+  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  workflow_call:
   push:
     paths:
       - "gateway/**"
@@ -19,7 +21,10 @@ on:
 
 jobs:
   analyze-and-test:
-    runs-on: ci
+    # sem Rust no runner `ci` (o Pi): roda no PC, na imagem ci-pc (.forgejo/images/ci-pc.Dockerfile)
+    runs-on: build
+    container:
+      image: ci-pc:1
     timeout-minutes: 30
     defaults:
       run:
