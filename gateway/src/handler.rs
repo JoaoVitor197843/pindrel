@@ -122,6 +122,10 @@ async fn proxy(app: &App, client_ip: IpAddr, req: Request<Incoming>) -> Response
         Ok(Ok(b)) => b.to_bytes(),
     };
     let path_and_query = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    // A replica that is being stopped (rolling update) can close a connection right after a request was written to it.
+    // The request may have been processed, so only the ones that change nothing are replayed, and only once: a request
+    // that kills replicas must not be able to walk through all of them.
+    let mut replays_left = usize::from(matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS));
     for target in app.pool.rotation() {
         let mut b = Request::builder()
             .method(parts.method.clone())
@@ -152,6 +156,7 @@ async fn proxy(app: &App, client_ip: IpAddr, req: Request<Incoming>) -> Response
                 return Response::from_parts(p, inc.boxed());
             }
             Ok(Err(e)) if e.is_connect() => app.pool.mark_down(target),
+            Ok(Err(_)) if replays_left > 0 => replays_left -= 1,
             Ok(Err(_)) => break,
         }
     }

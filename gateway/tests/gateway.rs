@@ -112,6 +112,52 @@ async fn a_dead_replica_is_skipped_and_even_a_post_is_replayed_on_the_next_one()
     gw.shutdown().await;
 }
 
+// A replica that is stopped by a rolling update can close a connection a request was just sent on. The request
+// may have been processed, so only the ones that change nothing (GET, HEAD, OPTIONS) go to another replica.
+#[tokio::test]
+async fn a_safe_request_dropped_by_a_replica_is_replayed_on_another_one() {
+    let (a, b) = (Backend::start_dropping().await, Backend::start("b").await);
+    let gw = gateway(&[&a, &b]).await;
+    for method in ["GET", "HEAD", "OPTIONS"] {
+        for _ in 0..4 {
+            let r = send(gw.addr, method, "/server/info/", &[], "").await;
+            assert_eq!((r.status, r.header("x-backend")), (StatusCode::OK, "b"), "{method}");
+        }
+    }
+    assert!(a.hits() > 0, "the dropping replica really was tried");
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_post_dropped_by_a_replica_is_not_replayed() {
+    let (a, b) = (Backend::start_dropping().await, Backend::start_dropping().await);
+    let gw = gateway(&[&a, &b]).await;
+    let r = send(gw.addr, "POST", "/auth/register/", &[], "once").await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(error_of(&r).code, "bad_gateway");
+    assert_eq!(
+        a.hits() + b.hits(),
+        1,
+        "the request may have been processed: only one replica ever saw it"
+    );
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_dropped_safe_request_is_replayed_once_not_on_every_replica() {
+    // a request that kills replicas must not be able to walk through all of them
+    let replicas = [
+        Backend::start_dropping().await,
+        Backend::start_dropping().await,
+        Backend::start_dropping().await,
+    ];
+    let gw = gateway(&[&replicas[0], &replicas[1], &replicas[2]]).await;
+    let r = get(gw.addr, "/poison").await;
+    assert_eq!(r.status, StatusCode::BAD_GATEWAY);
+    assert_eq!(replicas.iter().map(Backend::hits).sum::<usize>(), 2, "the first try and one replay");
+    gw.shutdown().await;
+}
+
 #[tokio::test]
 async fn without_any_replica_the_answer_is_a_protobuf_502() {
     let a = Backend::start("a").await;

@@ -1,6 +1,14 @@
 #![allow(dead_code)]
 //! Test helpers: fake API replicas, a gateway started in-process and a tiny HTTP client.
-use std::{convert::Infallible, net::SocketAddr, time::Duration};
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -14,7 +22,7 @@ use plany_gateway::{
     server::{self, Running},
 };
 use prost::Message;
-use tokio::{net::TcpListener, task::JoinHandle, time};
+use tokio::{io::AsyncReadExt, net::TcpListener, task::JoinHandle, time};
 
 #[derive(Clone, PartialEq, Message)]
 pub struct ErrorHttp {
@@ -44,6 +52,8 @@ pub struct DiscoveredServers {
 pub struct Backend {
     pub addr: SocketAddr,
     task: JoinHandle<()>,
+    /// Requests whose head arrived (only counted by `start_dropping`).
+    pub hits: Arc<AtomicUsize>,
 }
 
 impl Backend {
@@ -78,7 +88,43 @@ impl Backend {
                 });
             }
         });
-        Backend { addr, task }
+        Backend {
+            addr,
+            task,
+            hits: Arc::default(),
+        }
+    }
+
+    /// A replica that accepts the connection, reads the request head and closes without answering: what a
+    /// replica that is being stopped looks like to a request that reached it at the wrong moment.
+    pub async fn start_dropping() -> Backend {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let task = tokio::spawn(async move {
+            loop {
+                let Ok((mut s, _)) = listener.accept().await else { return };
+                let counter = counter.clone();
+                tokio::spawn(async move {
+                    let mut seen = Vec::new();
+                    let mut buf = [0u8; 1024];
+                    while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match s.read(&mut buf).await {
+                            Ok(0) | Err(_) => return,
+                            Ok(n) => seen.extend_from_slice(&buf[..n]),
+                        }
+                    }
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    // dropped here: the connection closes with no response
+                });
+            }
+        });
+        Backend { addr, task, hits }
+    }
+
+    pub fn hits(&self) -> usize {
+        self.hits.load(Ordering::SeqCst)
     }
 
     /// Simulates the replica dying: the listener and every open connection go away.
