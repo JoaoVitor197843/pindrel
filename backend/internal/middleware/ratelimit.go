@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"net"
 	"net/http"
 	"plany/internal/api"
+	"plany/internal/clientip"
 	"sync"
 	"time"
 
@@ -53,15 +53,15 @@ func (i *IPRateLimiter) Cleanup(maxAge time.Duration) {
 	}
 }
 
-func RateLimitMiddleware(limiter *IPRateLimiter) func(http.Handler) http.Handler {
+// RateLimitMiddleware limits per client. key says who the client is (clientip.Resolver.Key behind a trusted
+// proxy); nil means the address that opened the connection.
+func RateLimitMiddleware(limiter *IPRateLimiter, key func(*http.Request) string) func(http.Handler) http.Handler {
+	if key == nil {
+		key = clientip.PeerKey
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip, _, err := net.SplitHostPort(r.RemoteAddr)
-			if err != nil {
-				ip = r.RemoteAddr
-			}
-
-			l := limiter.GetLimiter(ip)
+			l := limiter.GetLimiter(key(r))
 			if !l.Allow() {
 				api.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many requests, try again later")
 				return

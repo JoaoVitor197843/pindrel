@@ -112,6 +112,7 @@ Auth model:
 
 Router details:
 - Routes are registered **with trailing slashes** (`/auth/login/`).
+- **Who a request belongs to (in-app limits).** `internal/clientip` (built on `realclientip-go`, configured by `TRUSTED_PROXIES` and `CLIENT_IP_HEADER`, same rules and names as the gateway): the connection's address, unless that address is a listed proxy, and then only the one configured header, read from the right. The library's strategies ignore who connected, so `Resolver.Key` checks the peer itself; headers over 2 KiB are ignored; IPv6 counts as its /64. Before this the global limit read the LEFTMOST `X-Forwarded-For` of any private/loopback peer, which the client writes, so it could be dodged (130 requests with 130 different values all passed); `TestRouter_GlobalLimitCannotBeDodgedWithForwardedFor` is that experiment. `config.Config.ClientKey` carries it (nil = the connection's address).
 - Login and register each have their own per-IP token-bucket limiter (`internal/middleware/ratelimit.go`, cleaned up by a goroutine in `main.go`). A global `httprate` limit of 100 requests per minute also applies.
 - Swagger UI (`/swagger/*`) is mounted only when `DEBUG_MODE=true`. The swag `@Router` annotations in `internal/auth/handler.go` match the router (no `/api` prefix, trailing slashes), and `backend/docs/` has been regenerated to stay in sync.
 
