@@ -50,7 +50,7 @@ git clone https://git.example.com/owner/Plany.git ~/plany && cd ~/plany
 # configuração: o .env da RAIZ (não o backend/.env, ver o comentário no arquivo)
 cp deploy/env.example .env && nano .env      # PORT livre, DB_PASSWORD e JWT_SECRET de verdade
 
-docker login git.example.com -u <usuário>   # senha: o token plany-pi (read:package)
+docker login git.example.com -u <usuário>   # opcional enquanto os pacotes forem públicos; senha: o token plany-pi
 sh deploy/update.sh                                   # primeira subida, para ver funcionando
 sudo sh deploy/install-timer.sh                       # liga o timer
 ```
