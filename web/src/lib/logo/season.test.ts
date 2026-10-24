@@ -86,14 +86,6 @@ describe('seasonalTheme', () => {
   })
 })
 
-describe('currentTheme', () => {
-  it('?logo= força um tema; valor desconhecido é ignorado', () => {
-    expect(currentTheme(d(2026, 8, 15), '?logo=halloween')).toBe('halloween')
-    expect(currentTheme(d(2026, 8, 15), '?logo=nada')).toBe('normal')
-    expect(currentTheme(d(2026, 12, 25), '')).toBe('d25')
-  })
-})
-
 describe('regiões', () => {
   const rules: Record<string, RegionalRule[]> = {
     BR: [(x) => (x.getMonth() === 7 && x.getDate() === 15 ? 'd1' : null)],

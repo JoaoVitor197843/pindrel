@@ -1,3 +1,5 @@
+import { forcedTheme } from './debug'
+
 export type LogoTheme =
   | 'normal'
   | 'halloween'
@@ -94,14 +96,12 @@ export function seasonalTheme(
 }
 
 /**
- * Theme to play: `?logo=<theme>` in the URL forces one (debug, otherwise each only shows once a year);
- * anything else follows the device's local date.
+ * Theme to play: a debug-forced one (see `debug.ts`) or the one of the device's local date.
  */
 export function currentTheme(
   now: Date = new Date(),
   search: string = globalThis.location?.search ?? '',
   region?: string | null,
 ): LogoTheme {
-  const forced = new URLSearchParams(search).get('logo')
-  return LOGO_THEMES.find((t) => t === forced) ?? seasonalTheme(now, region)
+  return forcedTheme(search) ?? seasonalTheme(now, region)
 }
