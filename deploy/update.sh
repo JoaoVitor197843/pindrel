@@ -74,7 +74,7 @@ main() {
     return 0
   fi
 
-  say "a versão nova não ficou saudável em ${WAIT_TIMEOUT}s"
+  say "a versão nova não ficou saudável (o `compose up --wait` falhou, limite de ${WAIT_TIMEOUT}s)"
   echo "$new_plany $new_gateway" >"$PLANY_STATE_DIR/failed"
   if [ -z "$old_plany" ] || [ -z "$old_gateway" ]; then
     say "não havia versão anterior para voltar"
