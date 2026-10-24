@@ -44,8 +44,12 @@ Ver `.forgejo/README.md`, seção "Runner de release": imagem `ci-docker:1`, lab
 ## Preparar o Pi (uma vez)
 
 ```sh
-git clone ssh://git@git.example.com:222/owner/Plany.git ~/plany && cd ~/plany   # só precisa dos compose*.yml e deploy/
-cp backend/.env.example backend/.env                  # DB_PASSWORD, JWT_SECRET etc. de verdade
+# repositório (HTTPS, sem chave: o repo é público)
+git clone https://git.example.com/owner/Plany.git ~/plany && cd ~/plany
+
+# configuração: o .env da RAIZ (não o backend/.env, ver o comentário no arquivo)
+cp deploy/env.example .env && nano .env      # PORT livre, DB_PASSWORD e JWT_SECRET de verdade
+
 docker login git.example.com -u <usuário>   # senha: o token plany-pi (read:package)
 sh deploy/update.sh                                   # primeira subida, para ver funcionando
 sudo sh deploy/install-timer.sh                       # liga o timer
