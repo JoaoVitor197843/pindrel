@@ -8,7 +8,11 @@
 name: backend
 
 on:
+  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  workflow_call:
   push:
+    # na main quem testa é o release.yml (chama este workflow); rodar de novo aqui seria trabalho em dobro
+    branches-ignore: [main]
     paths:
       - "backend/**"
       - "shared/protos/**"
@@ -61,3 +65,51 @@ jobs:
         if: always()
         run: |
           echo "pico: $(( $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0) / 1048576 )) MiB"
+
+  # TODOS os testes, os `TestDB_*` também: num Postgres descartável, no PC (o runner `ci` do Pi não tem banco).
+  # O schema vem das migrations embutidas, aplicadas pelo mesmo código que a API usa ao iniciar.
+  database-tests:
+    runs-on: build
+    timeout-minutes: 30
+    container:
+      image: ci-pc:1
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: plany
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: plany
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CGO_ENABLED: "0"
+      GOFLAGS: -p=1
+      PORT: "8080"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: plany
+      DB_PASSWORD: ci-only-password
+      DB_NAME: plany
+      SSL_MODE: disable
+      JWT_SECRET: ci-only-secret-not-used-anywhere-else
+      JWT_ACCESS_EXPIRY: 15m
+      JWT_REFRESH_EXPIRY: 720h
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Esperar o Postgres
+        shell: bash
+        run: |
+          for i in $(seq 1 60); do
+            (echo > /dev/tcp/postgres/5432) 2>/dev/null && exit 0
+            sleep 1
+          done
+          echo "o Postgres não respondeu em 60 s"; exit 1
+
+      - name: Aplicar as migrations (o mesmo código da API)
+        run: go run ./cmd/migrate
+
+      - name: Todos os testes, com banco
+        run: go test ./... -count=1

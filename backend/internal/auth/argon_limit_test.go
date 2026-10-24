@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,12 @@ func resetArgon(t *testing.T) {
 // Measured before the cap: 16 concurrent -> 330 MiB RSS, 64 -> 1 GiB (the budget is 512 MB, 256 recommended).
 func TestArgon_ConcurrentFloodStaysInsideRAMBudget(t *testing.T) {
 	resetArgon(t)
+	// The API runs with a soft memory limit (GOMEMLIMIT=100MiB in the Dockerfile and compose.yml). Without one the GC
+	// lets garbage pile up and, on a busy machine (CI), HeapInuse peaks past the budget with the very same code:
+	// 114-133 MiB measured with every CPU saturated. A limit below the budget keeps the measurement about live
+	// memory: two Argon2 slots (~38 MiB) fit under it, but 64 unbounded verifications (~1.2 GiB live) never would.
+	previous := debug.SetMemoryLimit(64 << 20)
+	t.Cleanup(func() { debug.SetMemoryLimit(previous) })
 	auth.SetArgonLimits(2, time.Minute) // nobody gives up: every request must still finish
 	hash, err := auth.HashPassword("xK9#mQ2$vL")
 	if err != nil {

@@ -9,7 +9,11 @@
 name: mobile
 
 on:
+  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  workflow_call:
   push:
+    # na main quem testa é o release.yml (chama este workflow); rodar de novo aqui seria trabalho em dobro
+    branches-ignore: [main]
     paths:
       - "mobile/**"
       - "shared/protos/**"
