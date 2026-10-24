@@ -21,6 +21,9 @@ gethostname = "1"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 http-body-util = "0.1"
 if-addrs = "0.15"
+# the client address behind a trusted proxy: header parsers (X-Forwarded-For, Forwarded, single-IP headers) and CIDR ranges
+ipnet = "2"
+real-ip = "0.1"
 hyper = { version = "1", default-features = false, features = ["http1", "server", "client"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio", "server", "server-graceful", "client-legacy", "http1"] }
 mdns-sd = { version = "0.21", default-features = false, features = ["async"] }

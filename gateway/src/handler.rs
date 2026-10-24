@@ -39,6 +39,10 @@ impl App {
     }
 }
 
+/// Headers that claim to say who the client is. The gateway is the edge: it sets `x-forwarded-for` itself, and the
+/// others do not reach the API (nothing there should trust them).
+const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
+
 const HOP_BY_HOP: [&str; 8] = [
     "connection",
     "keep-alive",
@@ -74,7 +78,8 @@ fn rate_limited(retry_after: Duration) -> Response<Body> {
 }
 
 pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> Result<Response<Body>, Infallible> {
-    let ip = peer.ip();
+    // the connection's peer, or the client a trusted proxy in front of us vouches for (never a header from anyone else)
+    let ip = app.cfg.client_ip.resolve(peer.ip(), req.headers());
     if app.cfg.rate_limit {
         if let Err(wait) = app.limiters.global.check(ip) {
             return Ok(rate_limited(wait));
@@ -123,7 +128,7 @@ async fn proxy(app: &App, client_ip: IpAddr, req: Request<Incoming>) -> Response
             .uri(format!("http://{target}{path_and_query}"));
         for (k, v) in &parts.headers {
             // the client address replaces whatever X-Forwarded-For the client sent: the gateway is the edge
-            if k != header::CONTENT_LENGTH && k.as_str() != "x-forwarded-for" && !HOP_BY_HOP.contains(&k.as_str()) {
+            if k != header::CONTENT_LENGTH && !CLIENT_ADDRESS.contains(&k.as_str()) && !HOP_BY_HOP.contains(&k.as_str()) {
                 b = b.header(k, v);
             }
         }
