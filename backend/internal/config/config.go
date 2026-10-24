@@ -3,10 +3,14 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"plany/internal/clientip"
 )
 
 type SSLMode string
@@ -41,6 +45,10 @@ type Config struct {
 	DebugMode           bool
 	// InAppRateLimit: per-instance in-memory rate limits. Turn it off behind a load balancer that limits instead.
 	InAppRateLimit bool
+	// ClientKey says which client a request belongs to, for the in-app rate limits: the connection's address, or,
+	// behind a proxy listed in TRUSTED_PROXIES, the client that proxy vouches for in CLIENT_IP_HEADER. nil = the
+	// connection's address.
+	ClientKey func(*http.Request) string
 }
 
 func ptr[T any](v T) *T {
@@ -118,6 +126,14 @@ func Load() (*Config, error) {
 	inAppRateLimit := parseEnv(c, "IN_APP_RATE_LIMIT", ptr(true), strconv.ParseBool)
 	dbMaxConns := parseEnv(c, "DB_MAX_CONNS", ptr(4), parsePortRange(1, 100))
 	debugMode := parseEnv(c, "DEBUG_MODE", ptr(false), strconv.ParseBool)
+	trustedProxies := parseEnv(c, "TRUSTED_PROXIES", ptr([]net.IPNet(nil)), clientip.ParseTrusted)
+	clientIPHeader := parseEnv(c, "CLIENT_IP_HEADER", ptr("X-Forwarded-For"), parseString)
+	var clientKey func(*http.Request) string
+	if resolver, err := clientip.New(trustedProxies, clientIPHeader); err != nil {
+		c.errs = append(c.errs, fmt.Errorf("variável CLIENT_IP_HEADER contém valor inválido ('%s'): %w", clientIPHeader, err))
+	} else {
+		clientKey = resolver.Key
+	}
 	if len(c.errs) > 0 {
 		return nil, fmt.Errorf("erros de configuração no ambiente:\n - %w", errors.Join(c.errs...))
 	}
@@ -139,5 +155,6 @@ func Load() (*Config, error) {
 		RegistrationEnabled: registrationEnabled,
 		DebugMode:           debugMode,
 		InAppRateLimit:      inAppRateLimit,
+		ClientKey:           clientKey,
 	}, nil
 }

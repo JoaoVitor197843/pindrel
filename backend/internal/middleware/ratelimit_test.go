@@ -29,7 +29,7 @@ func serve(h http.Handler, remote string, hdr map[string]string) *httptest.Respo
 func newHandler(burst int) (http.Handler, *int32) {
 	var calls int32
 	l := middleware.NewIPRateLimiter(0, burst) // rate 0: no refill, only the burst
-	h := middleware.RateLimitMiddleware(l)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := middleware.RateLimitMiddleware(l, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&calls, 1)
 	}))
 	return h, &calls
