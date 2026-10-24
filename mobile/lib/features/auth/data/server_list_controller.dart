@@ -3,6 +3,7 @@ import 'dart:math';
 
 import '../../../core/network/discovery/discovered_server.dart';
 import '../../../core/network/discovery/server_discovery.dart';
+import '../../../core/network/server_probe.dart';
 import 'server_list_state.dart';
 import 'server_option.dart';
 
@@ -16,12 +17,20 @@ import 'server_option.dart';
 /// O servidor escolhido não some quando sai da rede: fica escolhido e passa a
 /// contar como desconectado, e volta a conectado se for anunciado de novo.
 class ServerListController {
-  ServerListController({required ServerDiscovery discovery, Random? random})
-    : _random = random ?? Random() {
+  ServerListController({
+    required ServerDiscovery discovery,
+    Random? random,
+    this.probe,
+  }) : _random = random ?? Random() {
     _subscription = discovery.watch().listen(_onFound, onError: _onError);
   }
 
   final Random _random;
+
+  /// Testa o servidor antes de escolhê-lo; sem ela a escolha é imediata.
+  final ServerProbe? probe;
+  ServerOption? _connecting;
+  bool _loaded = false;
   late final StreamSubscription<List<DiscoveredServer>> _subscription;
   final StreamController<ServerListState> _out =
       StreamController<ServerListState>.broadcast();
@@ -38,13 +47,33 @@ class ServerListController {
   Stream<ServerListState> get stream => _out.stream;
 
   /// O usuário escolheu [server] (um disponível, ou o desconectado que já era o
-  /// escolhido).
-  void select(ServerOption server) {
-    _selected = server;
+  /// escolhido). Um servidor novo é testado antes ([ServerListState.connecting]
+  /// enquanto espera); se não responde, a escolha anterior fica e devolve falso.
+  Future<bool> select(ServerOption server) async {
+    final probe = this.probe;
+    final uri = server.baseUri;
+    if (probe == null || uri == null || server == _selected) {
+      _selected = server;
+      _publish();
+      return true;
+    }
+    if (_connecting != null) return false;
+    _connecting = server;
     _publish();
+    bool ok;
+    try {
+      ok = await probe(uri);
+    } catch (_) {
+      ok = false;
+    }
+    _connecting = null;
+    if (ok) _selected = server;
+    _publish();
+    return ok;
   }
 
   void _onFound(List<DiscoveredServer> found) {
+    _loaded = true;
     _error = null;
     _available = [for (final s in found) ServerOption.fromDiscovered(s)];
     final selected = _selected;
@@ -61,6 +90,7 @@ class ServerListController {
   }
 
   void _onError(Object error, StackTrace stack) {
+    _loaded = true;
     _error = error;
     _publish();
   }
@@ -72,6 +102,8 @@ class ServerListController {
       selected: selected,
       selectedConnected: selected != null && _available.contains(selected),
       searchError: _error,
+      connecting: _connecting,
+      loaded: _loaded,
     );
     if (!_out.isClosed) _out.add(_current);
   }

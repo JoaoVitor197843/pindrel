@@ -25,6 +25,11 @@ class AuthForm extends StatefulWidget {
 
 class _AuthFormState extends State<AuthForm> {
   bool _register = false;
+
+  /// Conta as trocas login/cadastro: cada uma dá chaves novas aos textos que
+  /// fazem fade. Com a mesma chave de volta (A, B, A) o AnimatedSwitcher teria
+  /// duas filhas iguais ao mesmo tempo.
+  int _switches = 0;
   bool _obscure = true;
   bool _keepSignedIn = true;
 
@@ -41,30 +46,46 @@ class _AuthFormState extends State<AuthForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          _register ? 'Criar nova conta' : 'Bem-vindo de volta',
-          style: AppText.serif(30),
+        _Swap(
+          child: Text(
+            _register ? 'Criar nova conta' : 'Bem-vindo de volta',
+            key: ValueKey(_switches),
+            style: AppText.serif(30),
+          ),
         ),
         if (widget.showSubtitle) ...[
           const SizedBox(height: 8),
-          Text(
-            _register
-                ? 'Crie sua conta para começar a escrever.'
-                : 'Entre para continuar de onde você parou.',
-            style: const TextStyle(color: AppColors.textMuted),
+          _Swap(
+            child: Text(
+              _register
+                  ? 'Crie sua conta para começar a escrever.'
+                  : 'Entre para continuar de onde você parou.',
+              key: ValueKey(_switches),
+              style: const TextStyle(color: AppColors.textMuted),
+            ),
           ),
         ],
         const SizedBox(height: 24),
-        if (_register) ...[
-          const _FieldLabel('Username'),
-          const SizedBox(height: 8),
-          const TextField(
-            key: Key('username-field'),
-            autocorrect: false,
-            decoration: InputDecoration(hintText: 'seu_usuario'),
-          ),
-          const SizedBox(height: 20),
-        ],
+        // O campo de username entra abrindo espaço e saindo o fecha.
+        _Swap(
+          resize: true,
+          child: _register
+              ? Column(
+                  key: ValueKey('username-block-$_switches'),
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: const [
+                    _FieldLabel('Username'),
+                    SizedBox(height: 8),
+                    TextField(
+                      key: Key('username-field'),
+                      autocorrect: false,
+                      decoration: InputDecoration(hintText: 'seu_usuario'),
+                    ),
+                    SizedBox(height: 20),
+                  ],
+                )
+              : SizedBox.shrink(key: ValueKey('no-username-$_switches')),
+        ),
         const _FieldLabel('E-mail'),
         const SizedBox(height: 8),
         const TextField(
@@ -181,7 +202,11 @@ class _AuthFormState extends State<AuthForm> {
               style: const TextStyle(color: AppColors.textMuted),
             ),
             InkWell(
-              onTap: () => setState(() => _register = !_register),
+              key: const ValueKey('toggle-mode'),
+              onTap: () => setState(() {
+                _register = !_register;
+                _switches++;
+              }),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(
@@ -240,6 +265,37 @@ class _OrDivider extends StatelessWidget {
         ),
         line,
       ],
+    );
+  }
+}
+
+/// Troca [child] (pela `key`) com um fade de 200 ms; com [resize] a altura
+/// também anima. Com "reduzir movimento" a troca é seca.
+class _Swap extends StatelessWidget {
+  const _Swap({required this.child, this.resize = false});
+
+  final Widget child;
+  final bool resize;
+
+  static const _duration = Duration(milliseconds: 200);
+
+  @override
+  Widget build(BuildContext context) {
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    if (reduce) return child;
+    final switcher = AnimatedSwitcher(
+      duration: _duration,
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.topLeft,
+        children: [...previous, ?current],
+      ),
+      child: child,
+    );
+    if (!resize) return switcher;
+    return AnimatedSize(
+      duration: _duration,
+      alignment: Alignment.topCenter,
+      child: switcher,
     );
   }
 }

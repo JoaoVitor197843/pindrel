@@ -11,6 +11,7 @@ const openMenu = () => click(screen.getByRole('button', { name: 'Selecionar serv
 
 beforeEach(async () => {
   selection.connecting = null
+  selection.health = 'connected'
   directory.others = []
   mockDiscover([found('Escritório')])
   await directory.refresh()
@@ -220,5 +221,34 @@ describe('Login — layout desktop', () => {
 
     await act(() => viewport.set(450))
     expect(screen.queryByText('Roda no seu hardware')).toBeNull()
+  })
+})
+
+describe('Login — rodapé do desktop e saúde do servidor', () => {
+  it('rodapé com bolinha verde enquanto o servidor responde', async () => {
+    viewport.set(1200)
+    render(Login)
+    expect(screen.getByText(/Rodando em:/)).toBeTruthy()
+    expect(screen.getByTestId('footer-dot').dataset.tone).toBe('online')
+  })
+
+  it('rodapé vermelho e "Desconectado de" quando o servidor cai, e volta ao voltar', async () => {
+    viewport.set(1200)
+    render(Login)
+    // a consulta inicial responde 'connected': espera ela acabar antes de simular a queda
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/server/info/', expect.anything()))
+    await new Promise((r) => setTimeout(r, 0))
+    selection.health = 'disconnected'
+    expect(await screen.findByText(/Desconectado de:/)).toBeTruthy()
+    expect(screen.getByTestId('footer-dot').dataset.tone).toBe('offline')
+    selection.health = 'connected'
+    expect(await screen.findByText(/Rodando em:/)).toBeTruthy()
+  })
+
+  it('o login consulta a saúde do servidor ao abrir', async () => {
+    render(Login)
+    await vi.waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url) === '/server/info/')).toBe(true)
+    })
   })
 })

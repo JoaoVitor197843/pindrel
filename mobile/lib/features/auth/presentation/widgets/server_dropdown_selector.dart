@@ -8,6 +8,7 @@ import '../../data/server_list_state.dart';
 import '../../data/server_option.dart';
 import '../providers/servers_provider.dart';
 import 'pulsing_dot.dart';
+import 'skeleton_bar.dart';
 
 /// Cor e animação da bolinha de cada situação do servidor escolhido.
 Color connectionColor(ServerConnection connection) => switch (connection) {
@@ -26,7 +27,7 @@ double dotDiameterFor(double fontSize) => (fontSize * 0.8).roundToDouble();
 /// escolhido saiu da rede, mostra-o em "Desconectados"; termina com a opção de
 /// adicionar outro. Ao lado esquerdo do nome, uma bolinha pulsante: verde com o
 /// servidor na rede, vermelha sem ele.
-class ServerDropdownSelector extends ConsumerWidget {
+class ServerDropdownSelector extends ConsumerStatefulWidget {
   const ServerDropdownSelector({
     super.key,
     this.onAddServer,
@@ -51,8 +52,23 @@ class ServerDropdownSelector extends ConsumerWidget {
   static const _addValue = Object();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ServerDropdownSelector> createState() =>
+      _ServerDropdownSelectorState();
+}
+
+class _ServerDropdownSelectorState
+    extends ConsumerState<ServerDropdownSelector> {
+  /// Menu aberto: a seta do botão gira.
+  bool _open = false;
+
+  void _setOpen(bool open) {
+    if (mounted && _open != open) setState(() => _open = open);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final controller = ref.watch(serverListControllerProvider);
+    final onAddServer = widget.onAddServer;
 
     return StreamBuilder<ServerListState>(
       initialData: controller.current,
@@ -69,9 +85,17 @@ class ServerDropdownSelector extends ConsumerWidget {
             borderRadius: BorderRadius.circular(AppTheme.radius),
             side: const BorderSide(color: AppColors.border),
           ),
-          onSelected: (value) {
+          onOpened: () => _setOpen(true),
+          onCanceled: () => _setOpen(false),
+          onSelected: (value) async {
+            _setOpen(false);
             if (value is ServerOption) {
-              controller.select(value);
+              final messenger = ScaffoldMessenger.maybeOf(context);
+              if (!await controller.select(value)) {
+                messenger?.showSnackBar(
+                  SnackBar(content: Text('${value.name} não respondeu.')),
+                );
+              }
             } else {
               onAddServer?.call();
             }
@@ -79,9 +103,16 @@ class ServerDropdownSelector extends ConsumerWidget {
           // Uma única entrada, com o seu próprio StreamBuilder: os itens de um
           // PopupMenuButton comum são montados só ao abrir.
           itemBuilder: (_) => [
-            _ServerMenuEntry(controller: controller, addValue: _addValue),
+            _ServerMenuEntry(
+              controller: controller,
+              addValue: ServerDropdownSelector._addValue,
+            ),
           ],
-          child: _SelectorButton(state: state, maxWidth: maxWidth),
+          child: _SelectorButton(
+            state: state,
+            maxWidth: widget.maxWidth,
+            open: _open,
+          ),
         );
       },
     );
@@ -89,10 +120,15 @@ class ServerDropdownSelector extends ConsumerWidget {
 }
 
 class _SelectorButton extends StatelessWidget {
-  const _SelectorButton({required this.state, required this.maxWidth});
+  const _SelectorButton({
+    required this.state,
+    required this.maxWidth,
+    required this.open,
+  });
 
   final ServerListState state;
   final double maxWidth;
+  final bool open;
 
   static const _fontSize = 11.0;
 
@@ -126,7 +162,10 @@ class _SelectorButton extends StatelessWidget {
           const SizedBox(width: 10),
           Flexible(
             child: Text(
-              (state.selected?.name ?? 'Buscando').toUpperCase(),
+              (state.connecting != null
+                      ? 'Abrindo ${state.connecting!.name}…'
+                      : state.selected?.name ?? 'Buscando')
+                  .toUpperCase(),
               overflow: TextOverflow.ellipsis,
               style: AppText.mono(
                 _fontSize,
@@ -135,7 +174,18 @@ class _SelectorButton extends StatelessWidget {
               ),
             ),
           ),
-          const Icon(Icons.expand_more, size: 16, color: AppColors.textMuted),
+          AnimatedRotation(
+            key: const ValueKey('server-chevron'),
+            turns: open ? 0.5 : 0,
+            duration: MediaQuery.maybeDisableAnimationsOf(context) ?? false
+                ? Duration.zero
+                : const Duration(milliseconds: 200),
+            child: const Icon(
+              Icons.expand_more,
+              size: 16,
+              color: AppColors.textMuted,
+            ),
+          ),
         ],
       ),
     );
@@ -174,7 +224,9 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
           children: [
             if (disconnected.isNotEmpty)
               const _SectionLabel(ServerDropdownSelector.availableLabel),
-            if (state.available.isEmpty)
+            if (!state.loaded)
+              const _ServersSkeleton()
+            else if (state.available.isEmpty)
               _Hint(
                 state.searchError != null
                     ? ServerDropdownSelector.searchFailedLabel
@@ -185,7 +237,9 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
                 server: server,
                 selected: server == state.selected,
                 connected: true,
-                onTap: () => Navigator.pop(context, server),
+                onTap: state.connecting != null
+                    ? null
+                    : () => Navigator.pop(context, server),
               ),
             if (disconnected.isNotEmpty) ...[
               const _SectionLabel(ServerDropdownSelector.disconnectedLabel),
@@ -194,7 +248,9 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
                   server: server,
                   selected: server == state.selected,
                   connected: false,
-                  onTap: () => Navigator.pop(context, server),
+                  onTap: state.connecting != null
+                    ? null
+                    : () => Navigator.pop(context, server),
                 ),
             ],
             const Divider(height: 1, color: AppColors.border),
@@ -262,7 +318,7 @@ class _ServerItem extends StatelessWidget {
 
   /// Falso na seção "Desconectados".
   final bool connected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -315,6 +371,26 @@ class _ServerItem extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Dois itens fantasma enquanto a primeira resposta da busca não chega.
+class _ServersSkeleton extends StatelessWidget {
+  const _ServersSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      key: ValueKey('servers-skeleton'),
+      padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Column(
+        children: [
+          SkeletonBar(height: 36),
+          SizedBox(height: 8),
+          SkeletonBar(height: 36),
+        ],
       ),
     );
   }
