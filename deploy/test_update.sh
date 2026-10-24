@@ -95,6 +95,7 @@ check "todas as réplicas e o gateway passam à versão nova" test "$(api_images
 check "continua com 2 réplicas" test "$(w "len([c for c in w['containers'] if c['svc']=='plany'])")" = 2
 check "rolling: nunca ficou sem réplica saudável" test "$(min_serving)" -ge 1
 check "rolling: as réplicas antigas foram trocadas uma por vez" test "$(grep -c 'no-recreate' "$S/calls")" = 2
+check "o log traz o tempo de cada etapa e o total" sh -c 'grep -q "pull das imagens: [0-9]*s" "$1" && grep -q "réplica nova saudável: [0-9]*s" "$1" && grep -q "atualizado em [0-9]*s" "$1"' _ "$work/out"
 
 # 3. sick new version: the old replicas are not even touched
 reset A A B B; ids=$(api_ids); bad B; run
@@ -178,7 +179,7 @@ out=$(sh "$here/install-timer.sh" --print)
 proj=$(cd "$here/.." && pwd)
 check "service roda o update.sh deste diretório" sh -c 'echo "$1" | grep -q "^ExecStart=$2/deploy/update.sh$"' _ "$out" "$proj"
 check "service é oneshot com timeout" sh -c 'echo "$1" | grep -q "^Type=oneshot" && echo "$1" | grep -q "^TimeoutStartSec="' _ "$out"
-check "timer repete a cada 5 min e sobrevive a reinício" sh -c 'echo "$1" | grep -q "^OnUnitActiveSec=5min" && echo "$1" | grep -q "^Persistent=true"' _ "$out"
+check "timer repete a cada 1 min e sobrevive a reinício" sh -c 'echo "$1" | grep -q "^OnUnitActiveSec=1min" && echo "$1" | grep -q "^Persistent=true"' _ "$out"
 if command -v systemd-analyze >/dev/null 2>&1; then
   mkdir -p "$work/units"
   sh "$here/install-timer.sh" --print | awk -v d="$work/units" '/^# plany-update/{f=d"/"$2; next} f{print > f}'
