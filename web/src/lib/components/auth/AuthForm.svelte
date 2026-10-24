@@ -2,6 +2,7 @@
   import { fade, slide } from 'svelte/transition'
   import { ms } from '../../motion'
   import { toast } from '../../stores/toast.svelte'
+  import Checkbox from './Checkbox.svelte'
   import RecoveryKeyModal from './RecoveryKeyModal.svelte'
 
   interface Props {
@@ -82,14 +83,8 @@
     <div class="flex items-center justify-between gap-2">
       <label class="flex cursor-pointer items-center gap-2.5">
         <input type="checkbox" bind:checked={keepSignedIn} class="peer sr-only" />
-        <span
-          class="flex size-5 items-center justify-center rounded-sm border border-accent-line transition-colors duration-150 peer-checked:bg-accent peer-focus-visible:ring-2 peer-focus-visible:ring-accent-line {keepSignedIn
-            ? ''
-            : 'text-transparent'}"
-        >
-          <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true">
-            <path d="M20 6 9 17l-5-5" />
-          </svg>
+        <span class="rounded-sm peer-focus-visible:ring-2 peer-focus-visible:ring-accent-line">
+          <Checkbox checked={keepSignedIn} />
         </span>
         <span>Manter conectado</span>
       </label>
