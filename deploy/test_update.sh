@@ -15,7 +15,7 @@ echo "$*" >>"$S/calls"
 case "$1" in
   compose)
     shift
-    while [ "${1:-}" = -f ]; do shift 2; done
+    echo "COMPOSE_FILE=${COMPOSE_FILE:-}" >>"$S/env"
     case "$1" in
       ps) svc=$3; [ -s "$S/running_$svc" ] && echo "cid-$svc"; exit 0 ;;
       pull)
@@ -59,10 +59,10 @@ reset() { # reset <rodando-api> <rodando-gw> <registry-api> <registry-gw>
   printf '%s' "$1" >"$S/running_plany"; printf '%s' "$2" >"$S/running_gateway"
   printf '%s' "$1" >"$S/local_plany"; printf '%s' "$2" >"$S/local_gateway"
   echo "$3" >"$S/registry_plany"; echo "$4" >"$S/registry_gateway"
-  : >"$S/calls"; : >"$S/ups"; : >"$S/tags"
+  : >"$S/calls"; : >"$S/ups"; : >"$S/tags"; : >"$S/env"; rm -f "$work/proj/.env"
 }
 run() {
-  STUB_DIR=$S PATH="$work/bin:$PATH" UPDATE_GIT=0 PLANY_STATE_DIR="$work/state" PLANY_REPLICAS=2 \
+  STUB_DIR=$S PATH="$work/bin:$PATH" UPDATE_GIT=0 PLANY_STATE_DIR="$work/state" PLANY_REPLICAS="${REPLICAS-}" COMPOSE_FILE="${CF-}" \
     sh "$work/proj/deploy/update.sh" >"$work/out" 2>&1
   rc=$?
 }
@@ -125,6 +125,18 @@ holder=$!
 sleep 0.5; run
 kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
 check "atualização concorrente é ignorada" test "$rc" = 0 -a "$(ups)" = 0 -a ! -s "$S/calls"
+
+# 9b. arquivos do compose: padrão, ou o COMPOSE_FILE do ambiente, ou o do .env (servidor com ajustes próprios)
+reset sha-A sha-A sha-B sha-B; run
+check "sem COMPOSE_FILE usa os três arquivos padrão" grep -q "COMPOSE_FILE=compose.yml:compose.lb.yml:compose.registry.yml" "$S/env"
+reset sha-A sha-A sha-B sha-B; echo "COMPOSE_FILE=a.yml:b.yml" >"$work/proj/.env"; run
+check "COMPOSE_FILE do .env não é sobrescrito" test "$rc" = 0 -a -z "$(grep -v 'COMPOSE_FILE=$' "$S/env" | sort -u | grep -v '^$' || true)"
+reset sha-A sha-A sha-B sha-B; CF=x.yml:y.yml run
+check "COMPOSE_FILE do ambiente é respeitado" grep -q "COMPOSE_FILE=x.yml:y.yml" "$S/env"
+reset sha-A sha-A sha-B sha-B; run
+check "sem PLANY_REPLICAS não força --scale" sh -c '! grep -q -- "--scale" "$1"' _ "$S/calls"
+reset sha-A sha-A sha-B sha-B; REPLICAS=3 run
+check "PLANY_REPLICAS vira --scale plany=3" grep -q -- "--scale plany=3" "$S/calls"
 
 # 10. o script resiste a ser trocado enquanto roda (o corpo está numa função)
 check "o arquivo termina em exit (sh lê aos poucos)" test "$(tail -n 2 "$here/update.sh" | tr '\n' ' ')" = 'main "$@" exit $? '

@@ -94,6 +94,11 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error {
 		}
 		if _, err := tx.Exec(ctx, string(body)); err != nil {
 			_ = tx.Rollback(ctx)
+			if !hasRow {
+				return fmt.Errorf("migrate: apply %s: %w (if this database was migrated by hand, record its version first: "+
+					"CREATE TABLE schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL); "+
+					"INSERT INTO schema_migrations VALUES (<last applied version>, false); see deploy/README.md)", m.name, err)
+			}
 			return fmt.Errorf("migrate: apply %s: %w", m.name, err)
 		}
 		bump := `INSERT INTO schema_migrations (version, dirty) VALUES ($1, false)`
