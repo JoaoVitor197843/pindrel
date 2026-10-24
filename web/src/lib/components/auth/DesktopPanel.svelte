@@ -57,5 +57,5 @@
     </div>
   </div>
 
-  <p class="font-mono text-xs tracking-[0.4px] text-muted">plany v0.9.4 &nbsp;•&nbsp; licença AGPL-3.0</p>
+  <p class="font-mono text-xs tracking-[0.4px] text-muted">plany v0.9.5 &nbsp;•&nbsp; licença AGPL-3.0</p>
 </aside>
