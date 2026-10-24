@@ -5,7 +5,7 @@ O Pi **puxa** as versões novas: nada entra nele de fora, e ele não compila nad
 ```
 push na main ─▶ Forgejo Actions (runner do PC) ─▶ imagens amd64+arm64 no registry do Forgejo
                                                           │
-            timer do systemd no Pi (a cada 5 min) ◀───────┘  docker compose pull → up --wait → rollback
+            timer do systemd no Pi (a cada 1 min) ◀───────┘  docker compose pull → up --wait → rollback
 ```
 
 ## O que faz cada peça

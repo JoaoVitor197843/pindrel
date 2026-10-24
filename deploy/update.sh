@@ -30,6 +30,9 @@ main() {
   [ -n "$PLANY_REPLICAS" ] && scale="--scale plany=$PLANY_REPLICAS"
 
   say() { echo "plany-update: $*"; }
+  # time of each step in the log, to see where the seconds go on the Pi
+  started=$(date +%s); lap_at=$started
+  lap() { now=$(date +%s); say "$1: $((now - lap_at))s"; lap_at=$now; }
   compose() { docker compose "$@"; }
   ref_of() { echo "$REGISTRY/$REGISTRY_OWNER/$1:$PLANY_TAG"; }
   # image id of the container running service $1 (empty if there is none)
@@ -69,8 +72,10 @@ main() {
         purge_unhealthy
         return 1
       fi
+      lap "réplica nova saudável"
       docker stop -t 20 "$stale" >/dev/null 2>&1 || true
       docker rm "$stale" >/dev/null 2>&1 || true
+      lap "réplica antiga parada"
     done
     # number of replicas explicitly requested (PLANY_REPLICAS)
     if [ -n "$scale" ]; then compose up -d --no-deps --no-recreate --wait --wait-timeout "$WAIT_TIMEOUT" $scale plany || return 1; fi
@@ -79,9 +84,10 @@ main() {
   # the gateway is a single one (host network, one port): recreating it is the only cut, and only if the image changed
   restart_gateway() { compose up -d --no-deps --wait --wait-timeout "$WAIT_TIMEOUT" gateway; }
   finish_ok() {
+    lap "gateway e conferência final"
     rm -f "$PLANY_STATE_DIR/failed"
     docker image prune -f >/dev/null 2>&1 || true
-    say "atualizado"
+    say "atualizado em $(($(date +%s) - started))s"
   }
 
   mkdir -p "$PLANY_STATE_DIR"
@@ -96,7 +102,10 @@ main() {
   services="plany gateway"
   old_plany=$(running_image plany)
   old_gateway=$(running_image gateway)
+
+  lap "git pull e leitura do estado"
   compose pull --quiet $services || { say "não foi possível baixar as imagens (rede ou login no registry)"; return 1; }
+  lap "pull das imagens"
 
   new_plany=$(docker image inspect -f '{{.Id}}' "$(ref_of plany)")
   new_gateway=$(docker image inspect -f '{{.Id}}' "$(ref_of plany-gateway)")

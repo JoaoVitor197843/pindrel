@@ -34,5 +34,6 @@ COPY --from=builder /gateway /gateway
 # non-root: the gateway only needs ports above 1024 and UDP multicast
 USER 10001:10001
 ENV GATEWAY_PORT=8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 CMD ["/gateway", "healthcheck"]
+# start-interval: probes every 1 s during the start-period (default 5 s), so recreating the gateway cuts for less time
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --start-interval=1s --retries=3 CMD ["/gateway", "healthcheck"]
 ENTRYPOINT ["/gateway"]

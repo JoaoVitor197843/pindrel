@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs the systemd timer that runs deploy/update.sh every 5 minutes.
+# Installs the systemd timer that runs deploy/update.sh every minute.
 #   sudo sh deploy/install-timer.sh            installs and enables (runs the update as the user who called sudo)
 #   sh deploy/install-timer.sh --print         only prints the units, without installing
 # The user must be in the `docker` group and have done `docker login` on the registry (see deploy/README.md).
@@ -19,7 +19,7 @@ Type=oneshot
 User=$user
 WorkingDirectory=$dir
 ExecStart=$dir/deploy/update.sh
-# the timer fires again in 5 min; a stuck update cannot hang around forever
+# the timer fires again in 1 min (flock keeps the runs apart); a stuck update cannot hang around forever
 TimeoutStartSec=15min
 UNIT
 }
@@ -31,7 +31,7 @@ Description=Procura uma versão nova do Plany
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=5min
+OnUnitActiveSec=1min
 RandomizedDelaySec=30
 Persistent=true
 
