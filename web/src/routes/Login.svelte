@@ -47,7 +47,7 @@
           />
           <span class="truncate">
             {selection.health === 'connected' ? '→ Rodando em:' : '→ Desconectado de:'}
-            {selection.address}
+            {selection.shownAddress}
           </span>
         </p>
       </div>
