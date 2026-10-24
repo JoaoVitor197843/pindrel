@@ -196,10 +196,16 @@ class ServerSelection {
   /** Whether this page's server responds: `disconnected` after consecutive failures, back to connected on the first success. */
   health = $state<Health>('connected')
   /**
-   * The address to show for this server. The page may have been opened by `localhost` or a VPN address; when the
-   * gateway says which one the LAN uses (`x-plany-address` on `/server/info/`), that is the one shown.
+   * The address of this server, once known: what the gateway says the LAN uses (`x-plany-address` on `/server/info/`),
+   * or the page's own host when it says nothing or does not answer. `null` until the first check ends: the page's host
+   * may be `localhost` or a VPN address, which is exactly what must not flash on screen before the right one arrives.
    */
-  address = $state(embedded.address)
+  address = $state<string | null>(null)
+
+  /** What to print for the address: a placeholder while it is not known yet. */
+  get shownAddress(): string {
+    return this.address ?? '…'
+  }
 
   #failures = 0
 
@@ -229,6 +235,7 @@ class ServerSelection {
       signal?.removeEventListener('abort', onAbort)
     }
     if (signal?.aborted) return
+    this.address ??= embedded.address // no answer on the first try: the page's own host is all there is
     this.#failures = up ? 0 : this.#failures + 1
     if (up) this.health = 'connected'
     else if (this.#failures >= HEALTH_FAILURES) this.health = 'disconnected'

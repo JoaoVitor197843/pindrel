@@ -12,7 +12,7 @@ const openMenu = () => click(screen.getByRole('button', { name: 'Selecionar serv
 beforeEach(async () => {
   selection.connecting = null
   selection.health = 'connected'
-  selection.address = selection.selected.address
+  selection.address = null
   directory.others = []
   mockDiscover([found('Escritório')])
   await directory.refresh()
@@ -176,7 +176,7 @@ describe('Login — seletor de servidor', () => {
 describe('Login — layout desktop', () => {
   beforeEach(() => viewport.set(1300))
 
-  it('mostra painel institucional, subtítulo e rodapé do servidor', () => {
+  it('mostra painel institucional, subtítulo e rodapé do servidor', async () => {
     render(Login)
 
     expect(screen.getByText('Roda no seu hardware')).toBeTruthy()
@@ -184,7 +184,8 @@ describe('Login — layout desktop', () => {
     expect(screen.getByText('Cofre com criptografia')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Bem-vindo de volta' })).toBeTruthy()
     expect(screen.getByText('Entre para continuar de onde você parou.')).toBeTruthy()
-    expect(screen.getByText(`→ Rodando em: ${window.location.host}`)).toBeTruthy()
+    // sem gateway (404) o endereço é o do próprio host, assim que a primeira consulta termina
+    expect(await screen.findByText(`→ Rodando em: ${window.location.host}`)).toBeTruthy()
   })
 
   it('o rodapé continua no servidor embutido durante a troca de servidor', async () => {
@@ -265,5 +266,19 @@ describe('Login — address of the server', () => {
     expect(screen.queryByText(new RegExp(selection.selected.address.replace('.', '\\.') + '$'))).toBeNull()
     await openMenu()
     expect(screen.getAllByText('192.168.1.163:8086').length).toBeGreaterThan(0)
+  })
+})
+
+describe('Login — the address does not flash the wrong one', () => {
+  it('shows a placeholder until the server answers, then the LAN address', async () => {
+    viewport.set(1200)
+    let answer!: (r: Response) => void
+    vi.mocked(fetch).mockImplementation(() => new Promise<Response>((resolve) => (answer = resolve)))
+    render(Login)
+    await vi.waitFor(() => expect(answer).toBeTypeOf('function'))
+    expect(screen.getByText(/Rodando em:/).textContent).toContain('…')
+    expect(screen.queryByText(new RegExp(selection.selected.address.replace('.', '\\.')))).toBeNull()
+    answer(new Response(null, { status: 200, headers: { 'x-plany-address': '192.168.1.163:8086' } }))
+    expect(await screen.findByText(/192\.168\.1\.163:8086/)).toBeTruthy()
   })
 })
