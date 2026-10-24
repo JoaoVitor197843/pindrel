@@ -6,7 +6,7 @@ const down = () => vi.mocked(fetch).mockImplementation(async () => Promise.rejec
 
 beforeEach(() => {
   selection.health = 'connected'
-  selection.address = embedded.address
+  selection.address = null
   // resets the failure count left by earlier tests
   answer(200)
 })
@@ -183,5 +183,38 @@ describe('LAN address of the server', () => {
   it('good values pass, with stray spaces trimmed', () => {
     expect(lanAddress(' 10.0.0.5:8080 ')).toBe('10.0.0.5:8080')
     expect(lanAddress(null)).toBeNull()
+  })
+})
+
+describe('address before the first answer', () => {
+  it('a placeholder is shown, never the page host that may be localhost or a VPN address', () => {
+    expect(selection.address).toBeNull()
+    expect(selection.shownAddress).toBe('…')
+  })
+
+  it('the first check failing falls back to the page host, and a later header wins', async () => {
+    down()
+    await selection.check()
+    expect(selection.shownAddress).toBe(embedded.address)
+    vi.mocked(fetch).mockImplementation(
+      async () => new Response(null, { status: 200, headers: { 'x-plany-address': '192.168.1.163:8086' } }),
+    )
+    await selection.check()
+    expect(selection.shownAddress).toBe('192.168.1.163:8086')
+  })
+
+  it('an answer without the header (no gateway) also falls back to the page host', async () => {
+    await selection.check()
+    expect(selection.shownAddress).toBe(embedded.address)
+  })
+
+  it('a check cancelled before it ends leaves the placeholder', async () => {
+    const controller = new AbortController()
+    vi.mocked(fetch).mockImplementation(async () => {
+      controller.abort()
+      throw new DOMException('x', 'AbortError')
+    })
+    await selection.check(controller.signal)
+    expect(selection.shownAddress).toBe('…')
   })
 })
