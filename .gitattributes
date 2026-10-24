@@ -1,0 +1,3 @@
+# the release branch keeps its own stub of the debug theme override; merges into it never replace it
+# (needs: git config merge.ours.driver true, in each clone)
+web/src/lib/logo/debug.ts merge=ours
