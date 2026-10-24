@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"plany/internal/config"
 	"plany/internal/database"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -144,6 +145,26 @@ func TestDB_Migrate_FailureRollsBackAndKeepsTheLastGoodVersion(t *testing.T) {
 	}
 	if v, _ := version(t, pool); v != 2 {
 		t.Fatalf("version = %d, want 2", v)
+	}
+}
+
+func TestDB_Migrate_ByHandDatabaseWithoutTheTableGetsAHint(t *testing.T) {
+	pool, _ := schemaPool(t, 2)
+	ctx := context.Background()
+	// tables created by hand with psql: no schema_migrations, so version 1 would run again
+	if _, err := pool.Exec(ctx, "CREATE TABLE a (id int)"); err != nil {
+		t.Fatal(err)
+	}
+	err := database.Migrate(ctx, pool, files("CREATE TABLE a (id int);"))
+	if err == nil || !strings.Contains(err.Error(), "INSERT INTO schema_migrations") {
+		t.Fatalf("want an error that explains how to record the version, got: %v", err)
+	}
+	// after recording the version by hand, it carries on and does not touch the existing table
+	if _, err := pool.Exec(ctx, "DELETE FROM schema_migrations; INSERT INTO schema_migrations VALUES (1, false)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(ctx, pool, files("CREATE TABLE a (id int);", "CREATE TABLE b (id int);")); err != nil {
+		t.Fatalf("after the baseline: %v", err)
 	}
 }
 

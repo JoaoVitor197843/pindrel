@@ -5,7 +5,10 @@
 #
 # Variáveis (todas opcionais):
 #   REGISTRY, REGISTRY_OWNER, PLANY_TAG  de onde vêm as imagens (mesmos nomes do compose.registry.yml)
-#   PLANY_REPLICAS   réplicas da API (2)
+#   COMPOSE_FILE     arquivos do compose, separados por `:` (se não houver aqui nem no .env: compose.yml,
+#                    compose.lb.yml e compose.registry.yml). Um servidor com ajustes próprios (portas, volumes)
+#                    põe um compose.<nome>.yml no fim e lista tudo no COMPOSE_FILE do .env.
+#   PLANY_REPLICAS   réplicas da API (vazio = o que os arquivos do compose definirem)
 #   WAIT_TIMEOUT     segundos esperando ficarem saudáveis (120)
 #   PLANY_STATE_DIR  onde guardar a versão que falhou (./.deploy-state)
 #   UPDATE_GIT       1 = antes, `git pull --ff-only` para trazer mudanças do compose (1)
@@ -16,11 +19,18 @@
 main() {
   cd "$(dirname "$0")/.."
   : "${REGISTRY:=raspberry-joao.tail7a986c.ts.net}" "${REGISTRY_OWNER:=joao_vitor}" "${PLANY_TAG:=latest}"
-  : "${PLANY_REPLICAS:=2}" "${WAIT_TIMEOUT:=120}" "${PLANY_STATE_DIR:=./.deploy-state}" "${UPDATE_GIT:=1}"
+  : "${PLANY_REPLICAS:=}" "${WAIT_TIMEOUT:=120}" "${PLANY_STATE_DIR:=./.deploy-state}" "${UPDATE_GIT:=1}"
   export REGISTRY REGISTRY_OWNER PLANY_TAG
 
+  if [ -z "${COMPOSE_FILE:-}" ] && ! grep -qs '^COMPOSE_FILE=' .env; then
+    COMPOSE_FILE=compose.yml:compose.lb.yml:compose.registry.yml
+    export COMPOSE_FILE
+  fi
+  scale=""
+  [ -n "$PLANY_REPLICAS" ] && scale="--scale plany=$PLANY_REPLICAS"
+
   say() { echo "plany-update: $*"; }
-  compose() { docker compose -f compose.yml -f compose.lb.yml -f compose.registry.yml "$@"; }
+  compose() { docker compose "$@"; }
   ref_of() { echo "$REGISTRY/$REGISTRY_OWNER/$1:$PLANY_TAG"; }
   # id da imagem do contêiner que roda o serviço $1 (vazio se não há)
   running_image() {
@@ -57,7 +67,7 @@ main() {
   fi
 
   say "atualizando (api ${old_plany:-nova} -> $new_plany)"
-  if compose up -d --wait --wait-timeout "$WAIT_TIMEOUT" --scale plany="$PLANY_REPLICAS" $services; then
+  if compose up -d --wait --wait-timeout "$WAIT_TIMEOUT" $scale $services; then
     rm -f "$PLANY_STATE_DIR/failed"
     docker image prune -f >/dev/null 2>&1 || true
     say "atualizado"
@@ -73,7 +83,7 @@ main() {
   # a tag do registry passa a apontar para a imagem de antes e o compose recria com ela
   docker tag "$old_plany" "$(ref_of plany)"
   docker tag "$old_gateway" "$(ref_of plany-gateway)"
-  if compose up -d --wait --wait-timeout "$WAIT_TIMEOUT" --scale plany="$PLANY_REPLICAS" $services; then
+  if compose up -d --wait --wait-timeout "$WAIT_TIMEOUT" $scale $services; then
     say "revertido para a versão anterior"
   else
     say "ATENÇÃO: nem a versão anterior ficou saudável"
