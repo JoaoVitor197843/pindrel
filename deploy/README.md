@@ -55,13 +55,59 @@ sh deploy/update.sh                                   # primeira subida, para ve
 sudo sh deploy/install-timer.sh                       # liga o timer
 ```
 
+## Servidor que já roda o Plany montado à mão (o Pi do homelab)
+
+O Pi tem a pilha em `/mnt/ssd-data/services/plany`, com imagens locais (`plany-api:pi`, `plany-gateway:pi`), um
+`compose.pi.yml` com os ajustes dele (réplicas em `127.0.0.1:19100-19109`, porque a faixa padrão tem a 9090 do
+Prometheus; Postgres sem porta publicada e com os dados em `./data/postgres`; 2 réplicas) e o `COMPOSE_FILE` no `.env`.
+Para passar ao registry **sem perder nada disso**:
+
+```sh
+cd /mnt/ssd-data/services/plany
+
+# 1. os compose e o deploy/ vêm do repositório (sparse checkout, sem baixar web/, mobile/ etc.) no mesmo diretório
+git init -q -b main && git remote add origin https://raspberry-joao.tail7a986c.ts.net/joao_vitor/Plany.git
+git sparse-checkout set --no-cone /.gitignore /compose.yml /compose.lb.yml /compose.registry.yml /deploy/
+git fetch -q origin main && git checkout -f -q main
+
+# 2. compose.pi.yml sem as linhas image:/build: (agora vêm do compose.registry.yml)
+cat > compose.pi.yml <<'YML'
+name: plany
+services:
+  plany:
+    ports: !override
+      - "127.0.0.1:19100-19109:8080"
+    deploy:
+      replicas: 2
+  postgres:
+    ports: !reset []
+    volumes: !override
+      - ./data/postgres:/var/lib/postgresql
+  gateway:
+    environment:
+      - UPSTREAMS=127.0.0.1:19100-19109
+YML
+sed -i 's#^COMPOSE_FILE=.*#COMPOSE_FILE=compose.yml:compose.lb.yml:compose.registry.yml:compose.pi.yml#' .env
+
+# 3. o banco foi migrado à mão (sem schema_migrations): registre a versão que já está aplicada (só a 1)
+docker exec plany-postgres-1 sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "CREATE TABLE IF NOT EXISTS schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL); INSERT INTO schema_migrations SELECT 1, false WHERE NOT EXISTS (SELECT 1 FROM schema_migrations)"'
+
+# 4. login no registry (token plany-pi) e primeira atualização
+docker login raspberry-joao.tail7a986c.ts.net -u joao_vitor
+sh deploy/update.sh && sudo sh deploy/install-timer.sh
+```
+
+O `update.sh` lê o `COMPOSE_FILE` do `.env`, então respeita esses ajustes e não força o número de réplicas
+(só `PLANY_REPLICAS` define). Sem o passo 3 a API nova recusa subir (tentaria criar de novo as tabelas) e o
+rollback devolve a versão antiga; a mensagem de erro do log diz exatamente o que registrar.
+
 O usuário precisa estar no grupo `docker`. Ver o que aconteceu: `journalctl -u plany-update -e`.
 Parar de atualizar: `sudo systemctl disable --now plany-update.timer`. Fixar uma versão: `PLANY_TAG=<commit>`
 no ambiente da unit (`systemctl edit plany-update.service`).
 
 ## Variáveis do `update.sh`
 
-`REGISTRY`, `REGISTRY_OWNER`, `PLANY_TAG` (`latest`), `PLANY_REPLICAS` (2), `WAIT_TIMEOUT` (120),
+`REGISTRY`, `REGISTRY_OWNER`, `PLANY_TAG` (`latest`), `PLANY_REPLICAS` (vazio: o que os compose definem), `WAIT_TIMEOUT` (120),
 `PLANY_STATE_DIR` (`./.deploy-state`), `UPDATE_GIT` (1: faz `git pull --ff-only` antes, para trazer mudanças
 nos compose).
 
