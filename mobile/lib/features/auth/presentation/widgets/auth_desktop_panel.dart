@@ -56,7 +56,7 @@ class AuthDesktopPanel extends StatelessWidget {
           Wrap(
             spacing: 12,
             children: [
-              Text('plany v0.9.4', style: AppText.mono(12, letterSpacing: 0.4)),
+              Text('plany v0.9.5', style: AppText.mono(12, letterSpacing: 0.4)),
               Text('•', style: AppText.mono(12, letterSpacing: 0.4)),
               Text(
                 'licença AGPL-3.0',
