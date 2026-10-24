@@ -70,10 +70,9 @@ describe('LogoMark', () => {
     expect(stages()).toHaveLength(1)
   })
 
-  it('o tema do dia pode ser forçado com ?logo=, e todos rodam sem erro e limpam o palco', async () => {
+  it('todos os temas rodam sem erro e limpam o palco', async () => {
     for (const theme of LOGO_THEMES) {
-      history.replaceState(null, '', `/?logo=${theme}`)
-      const { getByRole, unmount } = render(LogoMark)
+      const { getByRole, unmount } = render(LogoMark, { theme })
       await taps(getByRole('button'), 5)
       expect(stages(), theme).toHaveLength(1)
       await vi.advanceTimersByTimeAsync(6000)

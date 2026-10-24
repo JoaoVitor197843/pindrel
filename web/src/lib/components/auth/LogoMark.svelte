@@ -2,15 +2,17 @@
   import { onDestroy } from 'svelte'
   import { ms } from '../../motion'
   import { playLogoScene, type Playing } from '../../logo/play'
-  import { currentTheme } from '../../logo/season'
+  import { currentTheme, type LogoTheme } from '../../logo/season'
   import { TapTrigger } from '../../logo/trigger'
 
   interface Props {
     /** ISO country code whose own dates apply (see `regionalRules`); none by default. */
     region?: string
+    /** Plays this theme instead of the one of the day (tests). */
+    theme?: LogoTheme
   }
 
-  let { region }: Props = $props()
+  let { region, theme }: Props = $props()
 
   const trigger = new TapTrigger()
   let button: HTMLButtonElement
@@ -25,7 +27,7 @@
     const result = trigger.tap()
     if (result === 'press') press()
     if (result !== 'fire') return
-    playing = playLogoScene(currentTheme(new Date(), undefined, region), button)
+    playing = playLogoScene(theme ?? currentTheme(new Date(), undefined, region), button)
     trigger.hold(playing.duration)
   }
 
