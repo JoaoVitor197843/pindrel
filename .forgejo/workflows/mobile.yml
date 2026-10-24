@@ -9,6 +9,8 @@
 name: mobile
 
 on:
+  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  workflow_call:
   push:
     paths:
       - "mobile/**"

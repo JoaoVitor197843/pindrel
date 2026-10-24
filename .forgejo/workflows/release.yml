@@ -7,8 +7,9 @@
 # - Precisa de dois secrets do repositório (Configurações > Actions > Secrets):
 #     REGISTRY_USER   usuário do Forgejo dono dos pacotes
 #     REGISTRY_TOKEN  token de acesso com escopo write:package
-# - Os testes de cada parte rodam nos workflows backend/web/gateway (em push e PR); a release parte do que
-#   já passou neles. Ela só confere que a imagem compila.
+# - A release só acontece se TODOS os testes passarem: ela chama os mesmos workflows de CI (backend, web, gateway
+#   e mobile, com `uses:`; o backend inclui os testes com banco) e o job `images` depende de todos eles. Se um
+#   falhar nada é publicado, a tag `latest` não muda e o Pi continua na versão que já roda.
 name: release
 
 on:
@@ -20,6 +21,7 @@ on:
       - "gateway/**"
       - "shared/protos/**"
       - "Dockerfile"
+      - ".forgejo/workflows/*.yml"
       - ".forgejo/workflows/release.yml"
   workflow_dispatch:
 
@@ -29,7 +31,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-backend:
+    uses: ./.forgejo/workflows/backend.yml
+  test-web:
+    uses: ./.forgejo/workflows/web.yml
+  test-gateway:
+    uses: ./.forgejo/workflows/gateway.yml
+  test-mobile:
+    uses: ./.forgejo/workflows/mobile.yml
+
   images:
+    needs: [test-backend, test-web, test-gateway, test-mobile]
     runs-on: build
     timeout-minutes: 60
     container:
