@@ -130,7 +130,7 @@ describe('ServerDirectory', () => {
     vi.setSystemTime(12_000)
     await d.refresh()
     mockDiscover([])
-    vi.setSystemTime(20_000) // o prazo recomeçou em 12 s... e aqui só passaram 8 s
+    vi.setSystemTime(20_000) // the deadline restarted at 12 s... and only 8 s have passed here
     await d.refresh()
     expect(d.others.map((s) => s.name)).toEqual(['A'])
     vi.setSystemTime(40_000)
@@ -158,7 +158,7 @@ describe('ServerDirectory', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(5_000)
     expect(fetch).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(10_000) // espera dobrou (10 s)
+    await vi.advanceTimersByTimeAsync(10_000) // the wait doubled (10 s)
     expect(fetch).toHaveBeenCalledTimes(3)
     stop()
     await vi.advanceTimersByTimeAsync(120_000)

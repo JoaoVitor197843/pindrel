@@ -1,17 +1,17 @@
-# CI do backend (Go). Roda só quando o backend, o schema protobuf ou este arquivo mudam.
+# Backend CI (Go). Runs only when the backend, the protobuf schema or this file change.
 #
-# - Um job só, no PC (runner `build`, imagem ci-pc): gofmt, go vet e TODOS os testes, os `TestDB_*` também, num
-#   Postgres descartável (`services:`), com o schema aplicado pelo CLI golang-migrate (`migrate ... up`).
-#   (Antes havia um job no Pi sem banco, ~5 min, que rodava um subconjunto do que este já roda.)
-# - No PC os pacotes rodam em paralelo; o CI do Pi precisava de -p=1 e GOMEMLIMIT por causa da RAM.
+# - A single job, on the PC (`build` runner, ci-pc image): gofmt, go vet and ALL tests, the `TestDB_*` ones too, on a
+#   throwaway Postgres (`services:`), with the schema applied by the golang-migrate CLI (`migrate ... up`).
+#   (There used to be a job on the Pi without a database, ~5 min, which ran a subset of what this one already runs.)
+# - On the PC the packages run in parallel; the Pi's CI needed -p=1 and GOMEMLIMIT because of RAM.
 #
 name: backend
 
 on:
-  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  # also called by release.yml: the image is only published if this workflow passes
   workflow_call:
   push:
-    # na main quem testa é o release.yml (chama este workflow); rodar de novo aqui seria trabalho em dobro
+    # on main release.yml does the testing (it calls this workflow); running again here would be double work
     branches-ignore: [main]
     paths:
       - "backend/**"
@@ -61,7 +61,7 @@ jobs:
           want=$(awk '/^go /{print $2}' go.mod)
           have=$(go env GOVERSION | sed 's/^go//')
           echo "go.mod: $want | imagem: $have"
-          # a imagem precisa ser >= ao go.mod (senão o Go baixaria outro toolchain)
+          # the image must be >= go.mod's version (otherwise Go would download another toolchain)
           [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ]
 
       - name: Dependências

@@ -1,15 +1,15 @@
-# CI do web (Svelte + Vite + Tailwind). Roda só quando o web, o schema protobuf ou este arquivo mudam.
+# Web CI (Svelte + Vite + Tailwind). Runs only when web, the protobuf schema or this file change.
 #
-# - Análise: `yarn check` = svelte-check (Svelte + TypeScript) + tsc da config do Vite.
-# - Testes: vitest em jsdom, sem rede nem servidor. Arquivos de teste vazios (placeholders) são
-#   ignorados até ganharem conteúdo, senão o vitest falha com "No test suite found".
+# - Analysis: `yarn check` = svelte-check (Svelte + TypeScript) + tsc of the Vite config.
+# - Tests: vitest on jsdom, with no network or server. Empty test files (placeholders) are
+#   ignored until they get content, otherwise vitest fails with "No test suite found".
 name: web
 
 on:
-  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  # also called by release.yml: the image is only published if this workflow passes
   workflow_call:
   push:
-    # na main quem testa é o release.yml (chama este workflow); rodar de novo aqui seria trabalho em dobro
+    # on main release.yml does the testing (it calls this workflow); running again here would be double work
     branches-ignore: [main]
     paths:
       - "web/**"
@@ -23,7 +23,7 @@ on:
 
 jobs:
   analyze-and-test:
-    # no PC (runner `build`, imagem ci-pc): ~4x mais rápido que no Pi e sem disputar o único slot dele
+    # on the PC (`build` runner, ci-pc image): ~4x faster than on the Pi and without fighting for its single slot
     runs-on: build
     container:
       image: ci-pc:1

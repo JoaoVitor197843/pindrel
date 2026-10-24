@@ -18,13 +18,13 @@ describe('toast', () => {
     expect(toast.message).toBe('')
   })
 
-  // toques repetidos: o timer antigo não pode apagar a mensagem nova
+  // repeated taps: the old timer must not erase the new message
   it('uma nova mensagem reinicia o tempo e a antiga não a apaga', () => {
     toast.show('primeira')
     vi.advanceTimersByTime(2000)
     toast.show('segunda')
 
-    vi.advanceTimersByTime(2000) // 4 s desde a primeira
+    vi.advanceTimersByTime(2000) // 4 s since the first
     expect(toast.message).toBe('segunda')
     vi.advanceTimersByTime(1000)
     expect(toast.message).toBe('')

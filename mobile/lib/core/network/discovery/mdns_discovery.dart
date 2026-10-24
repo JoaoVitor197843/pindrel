@@ -6,7 +6,7 @@ import 'discovered_server.dart';
 import 'server_discovery.dart';
 import 'server_table.dart';
 
-/// O que uma varredura mDNS devolve para cada servidor.
+/// What an mDNS sweep returns for each server.
 class MdnsFound {
   const MdnsFound({
     required this.name,
@@ -21,11 +21,11 @@ class MdnsFound {
   final List<String> addresses;
 }
 
-/// O pouco que usamos do `multicast_dns`, para poder trocá-lo nos testes.
+/// The little we use of `multicast_dns`, so it can be swapped out in tests.
 abstract interface class MdnsApi {
   Future<void> start();
 
-  /// Uma varredura: pergunta quem anuncia [serviceType] e espera até [timeout].
+  /// One sweep: asks who announces [serviceType] and waits up to [timeout].
   Future<List<MdnsFound>> scan(String serviceType, Duration timeout);
 
   void stop();
@@ -101,16 +101,16 @@ String _withoutLocal(String host) {
   return h;
 }
 
-/// Descoberta por varreduras mDNS feitas pelo próprio app (`multicast_dns`).
-/// É o caminho do Linux, onde o plugin `nsd` não existe. Segue as mesmas regras
-/// do `NsdDiscovery`:
+/// Discovery through mDNS sweeps made by the app itself (`multicast_dns`).
+/// It is the Linux path, where the `nsd` plugin does not exist. It follows the same rules
+/// as `NsdDiscovery`:
 ///
-/// * um servidor que some de uma varredura é só marcado como perdido e segue na
-///   lista por [lostGrace]; se voltar nesse prazo, nada muda (no Wi-Fi uma
-///   resposta perdida é comum e não quer dizer que o servidor foi embora);
-/// * enquanto nada foi achado (ou algum servidor está perdido), o cliente mDNS
-///   é reiniciado a cada [restartWhileEmpty], como o nsd reinicia a busca;
-/// * a tabela tem teto e recusa nomes absurdos ([ServerTable]).
+/// * a server that disappears from a sweep is only marked as lost and stays in the
+///   list for [lostGrace]; if it comes back within that time, nothing changes (on Wi-Fi a
+///   lost reply is common and does not mean the server left);
+/// * while nothing has been found (or some server is lost), the mDNS client
+///   is restarted every [restartWhileEmpty], the way nsd restarts the search;
+/// * the table has a cap and refuses absurd names ([ServerTable]).
 class MdnsDiscovery implements ServerDiscovery {
   MdnsDiscovery({
     MdnsApi? api,

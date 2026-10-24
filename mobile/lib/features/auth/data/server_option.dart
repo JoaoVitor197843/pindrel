@@ -1,6 +1,6 @@
 import '../../../core/network/discovery/discovered_server.dart';
 
-/// Servidor Plany ao qual o app pode se conectar.
+/// Plany server the app can connect to.
 class ServerOption {
   const ServerOption({
     required this.id,
@@ -9,7 +9,7 @@ class ServerOption {
     this.baseUri,
   });
 
-  /// A partir de um servidor achado na rede.
+  /// From a server found on the network.
   factory ServerOption.fromDiscovered(DiscoveredServer server) => ServerOption(
     id: idFor(server.name),
     name: server.name,
@@ -20,14 +20,14 @@ class ServerOption {
   final String id;
   final String name;
 
-  /// Como o endereço aparece na tela (`192.168.1.116:8095`).
+  /// How the address appears on screen (`192.168.1.116:8095`).
   final String address;
 
-  /// Onde a API responde, quando o servidor veio da rede.
+  /// Where the API responds, when the server came from the network.
   final Uri? baseUri;
 
-  /// Identificador estável derivado do nome: minúsculas, sem acentos e só com
-  /// letras, números e hífens.
+  /// Stable identifier derived from the name: lowercase, without accents and only with
+  /// letters, numbers and hyphens.
   static String idFor(String name) {
     const from = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
     const to = 'aaaaaeeeeiiiiooooouuuucn';

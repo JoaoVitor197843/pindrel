@@ -78,7 +78,6 @@ impl<'a> Reader<'a> {
         self.take(n)
     }
 
-    /// Skips a field of an unknown number, by wire type.
     fn skip(&mut self, wire: u64) -> Option<()> {
         match wire {
             0 => self.varint().map(|_| ()),

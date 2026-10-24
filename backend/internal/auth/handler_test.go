@@ -22,11 +22,11 @@ import (
 const (
 	contentTypeProto = "application/x-protobuf"
 	testPassword     = "senha_segura_123"
-	testAccessTTL    = 15 * time.Minute // mesmo valor usado no setupTest
+	testAccessTTL    = 15 * time.Minute // same value used in setupTest
 )
 
-// Corpo truncado de verdade: campo 1 (string) declara 16 bytes, mas só vem 1.
-// Bytes aleatórios nem sempre falham no proto.Unmarshal, esse sempre falha.
+// A really truncated body: field 1 (string) declares 16 bytes, but only 1 comes.
+// Random bytes do not always fail in proto.Unmarshal; this one always does.
 var truncatedProto = []byte{0x0a, 0x10, 0x61}
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,7 @@ func requireStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 	}
 }
 
-// requireError confere o status e o código do ErrorHttp devolvido no corpo.
+// requireError checks the status and the code of the ErrorHttp returned in the body.
 func requireError(t *testing.T, rec *httptest.ResponseRecorder, wantStatus int, wantCode string) {
 	t.Helper()
 	requireStatus(t, rec, wantStatus)
@@ -92,7 +92,7 @@ func uniqueEmail(prefix string) string {
 	return fmt.Sprintf("%s-%d@example.com", prefix, time.Now().UnixNano())
 }
 
-// registerUser cria um usuário pelo handler e agenda a remoção dele no fim do teste.
+// registerUser creates a user through the handler and schedules its removal at the end of the test.
 func registerUser(t *testing.T, h *auth.Handler, repo *db.Queries, prefix string) testUser {
 	t.Helper()
 	email := uniqueEmail(prefix)
@@ -116,7 +116,7 @@ func registerUser(t *testing.T, h *auth.Handler, repo *db.Queries, prefix string
 	return testUser{ID: id, Email: email, Password: testPassword}
 }
 
-// loginUser faz login e devolve o access token e o cookie de refresh.
+// loginUser logs in and returns the access token and the refresh cookie.
 func loginUser(t *testing.T, h *auth.Handler, u testUser) (string, *http.Cookie) {
 	t.Helper()
 
@@ -224,8 +224,8 @@ func TestDB_Handler_Register_ValidationErrors(t *testing.T) {
 	}
 }
 
-// Corpo vazio é um protobuf válido (todos os campos no valor zero),
-// então quem barra é a validação e não o Unmarshal.
+// An empty body is a valid protobuf (all fields at the zero value),
+// so what stops it is the validation, not Unmarshal.
 func TestDB_Handler_Register_EmptyBody(t *testing.T) {
 	handler, _, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -348,7 +348,7 @@ func TestDB_Handler_Logout_Success(t *testing.T) {
 		t.Fatal("expected refresh_token cookie to be cleared")
 	}
 
-	// o mesmo refresh token, já revogado, não pode funcionar de novo
+	// the same refresh token, already revoked, must not work again
 	req2 := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req2.AddCookie(refresh)
 	rec2 := httptest.NewRecorder()
@@ -424,7 +424,7 @@ func TestDB_Handler_Me_Success(t *testing.T) {
 	var got dto.UserSummary
 	decodeBody(t, rec, &got)
 
-	want := &dto.UserSummary{Id: u.ID.String(), Email: u.Email, Username: "meuser"} // registerUser usa prefix + "user"
+	want := &dto.UserSummary{Id: u.ID.String(), Email: u.Email, Username: "meuser"} // registerUser uses prefix + "user"
 	if diff := cmp.Diff(want, &got, protocmp.Transform()); diff != "" {
 		t.Fatalf("unexpected user (-want +got):\n%s", diff)
 	}

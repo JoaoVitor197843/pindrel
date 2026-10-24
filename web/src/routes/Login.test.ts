@@ -64,7 +64,7 @@ describe('Login — layout mobile', () => {
     expect(screen.getByRole('heading', { name: 'Criar nova conta' })).toBeTruthy()
     expect(screen.getByLabelText('Username')).toBeTruthy()
     expect(screen.getByText('Já tem conta?')).toBeTruthy()
-    // o botão primário também vira "Criar conta"; o link do rodapé vira "Entrar"
+    // the primary button also becomes "Criar conta"; the footer link becomes "Entrar"
     expect(screen.getAllByRole('button', { name: 'Criar conta' })).toHaveLength(1)
 
     await click(screen.getByRole('button', { name: 'Entrar' }))
@@ -126,7 +126,7 @@ describe('Login — seletor de servidor', () => {
     const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
     await click(screen.getByRole('menuitemradio', { name: /Escritório/ }))
 
-    // o menu fecha, o botão mostra a troca e o formulário esmaece sem aceitar toques
+    // the menu closes, the button shows the switch and the form fades without accepting taps
     expect(screen.queryByRole('menu')).toBeNull()
     expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Abrindo Escritório…')
     const form = screen.getByRole('heading', { name: 'Bem-vindo de volta' }).closest('.transition-opacity')
@@ -235,7 +235,7 @@ describe('Login — rodapé do desktop e saúde do servidor', () => {
   it('rodapé vermelho e "Desconectado de" quando o servidor cai, e volta ao voltar', async () => {
     viewport.set(1200)
     render(Login)
-    // a consulta inicial responde 'connected': espera ela acabar antes de simular a queda
+    // the initial query answers 'connected': wait for it to finish before simulating the drop
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith('/server/info/', expect.anything()))
     await new Promise((r) => setTimeout(r, 0))
     selection.health = 'disconnected'

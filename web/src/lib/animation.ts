@@ -1,4 +1,4 @@
-/** Curva cúbica de Bézier como no CSS/Flutter: `Cubic(x1, y1, x2, y2)`, de 0..1 em 0..1. */
+/** Cubic Bézier curve as in CSS/Flutter: `Cubic(x1, y1, x2, y2)`, from 0..1 to 0..1. */
 export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
   const ax = 3 * x1 - 3 * x2 + 1
   const bx = 3 * x2 - 6 * x1
@@ -22,6 +22,6 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
   }
 }
 
-/** `Curves.easeIn` e `Curves.easeOut` do Flutter. */
+/** Flutter's `Curves.easeIn` and `Curves.easeOut`. */
 export const easeIn = cubicBezier(0.42, 0, 1, 1)
 export const easeOut = cubicBezier(0, 0, 0.58, 1)

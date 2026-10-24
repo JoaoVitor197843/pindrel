@@ -8,7 +8,7 @@ import 'package:mobile/core/network/discovery/server_table.dart';
 class FakeMdnsApi implements MdnsApi {
   FakeMdnsApi(this.script);
 
-  /// O que cada varredura devolve; a última se repete.
+  /// What each sweep returns; the last one repeats.
   final List<Object> script;
   int scans = 0;
   int stops = 0;
@@ -127,7 +127,7 @@ void main() {
       [found('A')],
       <MdnsFound>[],
       <MdnsFound>[],
-      [found('A')], // voltou: a marca de perdido some
+      [found('A')], // came back: the lost mark goes away
       <MdnsFound>[],
     ]);
     await listen(make(api));

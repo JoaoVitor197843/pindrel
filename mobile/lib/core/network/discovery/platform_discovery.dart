@@ -6,10 +6,10 @@ import 'mdns_discovery.dart';
 import 'nsd_discovery.dart';
 import 'server_discovery.dart';
 
-/// A descoberta certa para o sistema em que o app roda.
+/// The right discovery for the system the app runs on.
 ///
-/// Android, iOS, macOS e Windows usam o serviço nativo (plugin `nsd`); o
-/// Linux, que o plugin não cobre, faz as varreduras mDNS por conta própria.
+/// Android, iOS, macOS and Windows use the native service (`nsd` plugin); Linux,
+/// which the plugin does not cover, does the mDNS sweeps on its own.
 ServerDiscovery createPlatformDiscovery() {
   if (kIsWeb) return const NoDiscovery();
   if (Platform.isLinux) return MdnsDiscovery();

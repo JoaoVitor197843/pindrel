@@ -51,11 +51,11 @@ web/.yarn/install-state.gz
 
 docs/*.md
 
-# Imagens de referência de design (não versionar)
+# Design reference images (do not version)
 docs/
 
 # Rust (gateway)
 gateway/target
 
-# estado local do deploy/update.sh
+# local state of deploy/update.sh
 .deploy-state/

@@ -45,7 +45,7 @@ describe('ServerSelector', () => {
     unmount()
 
     go.mockRestore()
-    render(ServerSelector) // sem onadd: não pode lançar
+    render(ServerSelector) // without onadd: it must not throw
     await fireEvent.click(button())
     await fireEvent.click(screen.getByRole('menuitem', { name: '+ Adicionar servidor...' }))
     expect(screen.queryByRole('menu')).toBeNull()

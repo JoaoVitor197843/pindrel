@@ -14,7 +14,7 @@
   let root: HTMLDivElement | undefined = $state()
 
   const offline = $derived(selection.health === 'disconnected')
-  // o servidor da página, quando não responde, sai de "Disponíveis" e vai para "Desconectados"
+  // the page's server, when it does not respond, leaves "Disponíveis" and goes to "Desconectados"
   const available = $derived(offline ? directory.others : directory.list)
 
   function choose(server: ServerOption) {

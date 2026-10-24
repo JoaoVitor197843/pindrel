@@ -60,11 +60,11 @@ describe('Checkbox — animado', () => {
     const half = t()
     expect(half).toBeGreaterThan(0.1)
     expect(half).toBeLessThan(0.5)
-    expect(path()).toBe('') // ainda na primeira metade: só encolhe e preenche
+    expect(path()).toBe('') // still in the first half: it only shrinks and fills
     expect(Number(body().getAttribute('width'))).toBeLessThan(18)
 
     await vi.advanceTimersByTimeAsync(70)
-    expect(path()).not.toBe('') // a perna curta já aparece
+    expect(path()).not.toBe('') // the short leg already shows
     expect(t()).toBeLessThan(1)
 
     await vi.advanceTimersByTimeAsync(100)
@@ -92,7 +92,7 @@ describe('Checkbox — animado', () => {
       await vi.advanceTimersByTimeAsync(17)
     }
     await vi.advanceTimersByTimeAsync(500)
-    expect(t()).toBe(0) // o último valor foi i=24 (par): desmarcado
+    expect(t()).toBe(0) // the last value was i=24 (even): unchecked
   })
 
   it('desmontar no meio cancela o quadro agendado', async () => {
