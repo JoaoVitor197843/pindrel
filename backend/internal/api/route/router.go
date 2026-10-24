@@ -1,12 +1,12 @@
 package route
 
 import (
-	"net"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"plany/internal/auth"
+	"plany/internal/clientip"
 	"plany/internal/config"
 	"plany/internal/database/db"
 	AuthMiddleware "plany/internal/middleware"
@@ -35,34 +35,22 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
-	if cfg.InAppRateLimit {
-		r.Use(httprate.LimitBy(
-			100,
-			1*time.Minute,
-			func(r *http.Request) (string, error) {
-				ip, _, err := net.SplitHostPort(r.RemoteAddr)
-				if err != nil {
-					ip = r.RemoteAddr
-				}
-				parsedIP := net.ParseIP(ip)
-				if parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsPrivate()) {
-					if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-						ips := strings.Split(xff, ",")
-						clientIP := strings.TrimSpace(ips[0])
-						if clientIP != "" {
-							return clientIP, nil
-						}
-					}
-				}
-				return ip, err
-			}))
+	// who a request belongs to: its connection, or the client a TRUSTED_PROXIES proxy vouches for (never a header
+	// from anyone else: see internal/clientip)
+	clientKey := cfg.ClientKey
+	if clientKey == nil {
+		clientKey = clientip.PeerKey
 	}
-
+	if cfg.InAppRateLimit {
+		r.Use(httprate.LimitBy(100, 1*time.Minute, func(r *http.Request) (string, error) {
+			return clientKey(r), nil
+		}))
+	}
 	// with InAppRateLimit off, the load balancer in front does the rate limiting (keeps the API stateless)
 	loginRL, registerRL := noMiddleware, noMiddleware
 	if cfg.InAppRateLimit {
-		loginRL = AuthMiddleware.RateLimitMiddleware(loginLimiter)
-		registerRL = AuthMiddleware.RateLimitMiddleware(registerLimiter)
+		loginRL = AuthMiddleware.RateLimitMiddleware(loginLimiter, clientKey)
+		registerRL = AuthMiddleware.RateLimitMiddleware(registerLimiter, clientKey)
 	}
 	r.With(loginRL).Post("/auth/login/", h.Login)
 	r.With(registerRL).Post("/auth/register/", h.Register)

@@ -24,5 +24,8 @@ services:
       - GATEWAY_PORT=${PORT:-8080}
       - SERVER_NAME=${SERVER_NAME:-Plany}
       - UPSTREAMS=127.0.0.1:9000-9099
+      # behind a tunnel or proxy on this host (cloudflared, tailscale serve): TRUSTED_PROXIES=127.0.0.1,::1 in .env
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
+      - CLIENT_IP_HEADER=${CLIENT_IP_HEADER:-x-forwarded-for}
     depends_on:
       - plany

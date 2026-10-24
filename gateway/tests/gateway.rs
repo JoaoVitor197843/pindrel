@@ -162,6 +162,9 @@ async fn login_and_register_have_their_own_limit_and_answer_protobuf_429() {
             (e.code.as_str(), e.message.as_str()),
             ("rate_limited", "too many requests, try again later")
         );
+        // login/register earn one request back every 12 s (5 per minute): the client is told how long to wait
+        let wait: u64 = r.header("retry-after").parse().expect("Retry-After in whole seconds");
+        assert!((1..=12).contains(&wait), "{path}: Retry-After {wait}");
     }
     // the limit is only for POST on those two paths
     assert_eq!(get(gw.addr, "/auth/login/").await.status, StatusCode::OK);
@@ -356,5 +359,153 @@ async fn rate_limit_state_is_tracked_per_client() {
     assert_eq!(gw.app.limiters.login.tracked(), 0);
     send(gw.addr, "POST", "/auth/login/", &[], "x").await;
     assert_eq!(gw.app.limiters.login.tracked(), 1);
+    gw.shutdown().await;
+}
+
+// ---- the client behind a trusted proxy ----
+
+use plany_gateway::clientip::{parse_trusted, ClientIp};
+
+/// A gateway that trusts the test client's own address (127.0.0.1) as a proxy, reading `header`.
+async fn behind_proxy(a: &Backend, header: &str) -> plany_gateway::server::Running {
+    let header = header.to_string();
+    gateway_with(&[a], move |c| {
+        c.client_ip = ClientIp::new(parse_trusted("127.0.0.1").unwrap(), &header).unwrap();
+    })
+    .await
+}
+
+async fn login_as(gw: &plany_gateway::server::Running, headers: &[(&str, &str)]) -> StatusCode {
+    send(gw.addr, "POST", "/auth/login/", headers, "x").await.status
+}
+
+#[tokio::test]
+async fn without_a_trusted_proxy_a_client_cannot_pick_its_address() {
+    let a = Backend::start("a").await;
+    let gw = gateway(&[&a]).await;
+    // six different "addresses" from one real client: they all land in the same bucket
+    for i in 1..=5 {
+        let xff = format!("203.0.113.{i}");
+        assert_eq!(login_as(&gw, &[("x-forwarded-for", &xff)]).await, StatusCode::OK);
+    }
+    assert_eq!(
+        login_as(&gw, &[("x-forwarded-for", "203.0.113.99"), ("cf-connecting-ip", "203.0.113.98")]).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn behind_a_trusted_proxy_each_client_has_its_own_limit() {
+    let a = Backend::start("a").await;
+    let gw = behind_proxy(&a, "x-forwarded-for").await;
+    for client in ["198.51.100.1", "198.51.100.2"] {
+        for _ in 0..5 {
+            assert_eq!(login_as(&gw, &[("x-forwarded-for", client)]).await, StatusCode::OK, "{client}");
+        }
+        assert_eq!(
+            login_as(&gw, &[("x-forwarded-for", client)]).await,
+            StatusCode::TOO_MANY_REQUESTS,
+            "{client}"
+        );
+    }
+    // the proxy's own address (no header) is one more client, not everybody
+    assert_eq!(login_as(&gw, &[]).await, StatusCode::OK);
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_forged_left_side_does_not_buy_a_new_bucket() {
+    let a = Backend::start("a").await;
+    let gw = behind_proxy(&a, "x-forwarded-for").await;
+    // the real client is the right-most address (what the proxy appended); the lies on the left change nothing
+    for i in 1..=5 {
+        let xff = format!("10.9.9.{i}, 198.51.100.7");
+        assert_eq!(login_as(&gw, &[("x-forwarded-for", &xff)]).await, StatusCode::OK);
+    }
+    assert_eq!(
+        login_as(&gw, &[("x-forwarded-for", "10.9.9.99, 198.51.100.7")]).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn only_the_configured_header_is_trusted() {
+    let a = Backend::start("a").await;
+    let gw = behind_proxy(&a, "cf-connecting-ip").await;
+    for i in 1..=5 {
+        let lie = format!("203.0.113.{i}");
+        // X-Forwarded-For / Forwarded / X-Real-IP are not the configured header: ignored, the peer is the client
+        let h = [
+            ("x-forwarded-for", lie.as_str()),
+            ("forwarded", "for=203.0.113.9"),
+            ("x-real-ip", "203.0.113.8"),
+        ];
+        assert_eq!(login_as(&gw, &h).await, StatusCode::OK);
+    }
+    assert_eq!(
+        login_as(&gw, &[("x-forwarded-for", "203.0.113.50")]).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    // while the configured one is believed
+    assert_eq!(login_as(&gw, &[("cf-connecting-ip", "198.51.100.5")]).await, StatusCode::OK);
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_replica_sees_the_real_client_and_none_of_the_other_claims() {
+    let a = Backend::start("a").await;
+    let gw = behind_proxy(&a, "x-forwarded-for").await;
+    let r = send(
+        gw.addr,
+        "GET",
+        "/x",
+        &[
+            ("x-forwarded-for", "9.9.9.9, 198.51.100.7"),
+            ("forwarded", "for=9.9.9.9"),
+            ("x-real-ip", "9.9.9.9"),
+            ("cf-connecting-ip", "9.9.9.9"),
+            ("true-client-ip", "9.9.9.9"),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(r.header("x-seen-xff"), "198.51.100.7");
+    assert_eq!(r.header("x-seen-claims"), "", "the API must not see headers that claim an address");
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn garbage_in_the_header_falls_back_to_the_proxy_and_never_breaks_a_request() {
+    let a = Backend::start("a").await;
+    let gw = behind_proxy(&a, "x-forwarded-for").await;
+    for bad in ["", "unknown", "1.2.3.4, _hidden", &"9".repeat(5000), "[::1"] {
+        let r = send(gw.addr, "GET", "/x", &[("x-forwarded-for", bad)], "").await;
+        assert_eq!(r.status, StatusCode::OK, "{bad:.20}");
+        assert_eq!(
+            r.header("x-seen-xff"),
+            "127.0.0.1",
+            "the proxy is the client when the header is useless"
+        );
+    }
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn many_clients_through_one_proxy_do_not_share_the_global_limit() {
+    let a = Backend::start("a").await;
+    let gw = behind_proxy(&a, "x-forwarded-for").await;
+    // 30 different clients, 5 requests each: 150 requests in a second would be far over 20 for one address
+    let mut ok = 0;
+    for c in 0..30 {
+        let client = format!("198.51.100.{}", c + 1);
+        for _ in 0..5 {
+            if send(gw.addr, "GET", "/x", &[("x-forwarded-for", &client)], "").await.status == StatusCode::OK {
+                ok += 1;
+            }
+        }
+    }
+    assert_eq!(ok, 150);
     gw.shutdown().await;
 }
