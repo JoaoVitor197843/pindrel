@@ -27,7 +27,7 @@
   ]
 </script>
 
-<!-- Painel esquerdo (layout largo): marca, slogan, diferenciais e rodapé. -->
+<!-- Left panel (wide layout): brand, tagline, selling points and footer. -->
 <aside class="flex min-h-screen flex-col border-r border-line bg-surface px-12 pt-10 pb-8">
   <div class="flex items-center justify-between gap-2">
     <BrandRow />

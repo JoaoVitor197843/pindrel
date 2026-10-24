@@ -6,10 +6,10 @@ import 'discovered_server.dart';
 import 'server_discovery.dart';
 import 'server_table.dart';
 
-/// O pouco que usamos do plugin `nsd`, para poder trocá-lo nos testes.
+/// The little we use of the `nsd` plugin, so it can be swapped out in tests.
 abstract interface class NsdApi {
-  /// Começa a procurar [serviceType]. [listener] recebe cada serviço achado
-  /// (já resolvido, com endereços) ou perdido. Devolve a sessão, para parar.
+  /// Starts looking for [serviceType]. [listener] receives each service found
+  /// (already resolved, with addresses) or lost. Returns the session, so it can be stopped.
   Future<Object> startDiscovery(
     String serviceType,
     void Function(nsd.ServiceStatus status, nsd.Service service) listener,
@@ -42,14 +42,14 @@ class PluginNsdApi implements NsdApi {
       nsd.stopDiscovery(session as nsd.Discovery);
 }
 
-/// Descoberta pelo serviço nativo de cada sistema (NsdManager no Android,
-/// Bonjour no iOS e macOS, DNS-SD no Windows), via plugin `nsd`.
+/// Discovery through each system's native service (NsdManager on Android,
+/// Bonjour on iOS and macOS, DNS-SD on Windows), via the `nsd` plugin.
 ///
-/// O Wi-Fi perde muitos pacotes multicast e as retentativas do sistema ficam
-/// cada vez mais espaçadas; por isso, enquanto nada foi achado (ou algum
-/// servidor está perdido), a busca é reiniciada a cada [restartWhileEmpty].
-/// Um servidor "perdido" segue na lista por [lostGrace]; se for achado de novo
-/// nesse prazo, nada muda para o usuário (ver [ServerTable]).
+/// Wi-Fi drops many multicast packets and the system's retries get
+/// further and further apart; so, while nothing has been found (or some
+/// server is lost), the search is restarted every [restartWhileEmpty].
+/// A "lost" server stays in the list for [lostGrace]; if it is found again
+/// within that time, nothing changes for the user (see [ServerTable]).
 class NsdDiscovery implements ServerDiscovery {
   NsdDiscovery({
     this.api = const PluginNsdApi(),
@@ -96,7 +96,7 @@ class NsdDiscovery implements ServerDiscovery {
           final server = _toServer(service);
           if (server != null) changed = table.upsert(server);
         case nsd.ServiceStatus.lost:
-          // não sai na hora: pode ser só um anúncio perdido no Wi-Fi
+          // does not leave right away: it may just be an announcement lost on Wi-Fi
           table.markLost(name);
       }
       if (changed) emit();
@@ -123,7 +123,7 @@ class NsdDiscovery implements ServerDiscovery {
       try {
         await api.stopDiscovery(s);
       } catch (_) {
-        // parar uma busca que já caiu não é um erro que o usuário possa tratar
+        // stopping a search that has already dropped is not an error the user can handle
       }
     }
 

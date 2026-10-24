@@ -54,7 +54,7 @@ void main() {
       expect(t.hasLost, isTrue);
       now = now.add(const Duration(seconds: 9));
       expect(t.expire(const Duration(seconds: 10)), isFalse);
-      t.upsert(server('A')); // voltou
+      t.upsert(server('A')); // came back
       expect(t.hasLost, isFalse);
       now = now.add(const Duration(seconds: 60));
       expect(t.expire(const Duration(seconds: 10)), isFalse);

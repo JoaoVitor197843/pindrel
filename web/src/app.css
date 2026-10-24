@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Variante Escura Editorial do Plany. Única fonte de cores/tipografia: use só estes tokens. */
+/* Plany's Editorial Dark Variant. The only source of colors/typography: use only these tokens. */
 @theme {
   --color-bg: #141412;
   --color-surface: #1e1e1b;
@@ -9,12 +9,12 @@
   --color-muted: #9a968e;
   --color-accent: #4a5d44;
   --color-accent-line: #6b8e61;
-  /* vermelho-terra: o que saiu do ar (servidor desconectado) */
+  /* earth red: what went offline (disconnected server) */
   --color-offline: #c4574a;
   --color-cream: #f5f2eb;
   --color-on-cream: #141412;
 
-  /* fontes nativas do sistema, sem webfonts */
+  /* native system fonts, no webfonts */
   --font-sans: system-ui, "Segoe UI", Roboto, sans-serif;
   --font-serif: serif;
   --font-mono: monospace;
@@ -34,7 +34,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Anel da bolinha de status: igual ao do app (1,5 s linear, cresce até 1,9x e some). */
+/* Status dot ring: same as the app's (1.5 s linear, grows to 1.9x and fades out). */
 @keyframes pulse-ring {
   from {
     transform: scale(1);

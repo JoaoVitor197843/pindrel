@@ -1,7 +1,7 @@
-/// Tipo de serviço mDNS que o gateway do Plany anuncia (`_plany._tcp`).
+/// mDNS service type that the Plany gateway announces (`_plany._tcp`).
 const plannyServiceType = '_plany._tcp';
 
-/// Servidor Plany encontrado na rede local.
+/// Plany server found on the local network.
 class DiscoveredServer {
   const DiscoveredServer({
     required this.name,
@@ -10,24 +10,23 @@ class DiscoveredServer {
     required this.port,
   });
 
-  /// Nome do serviço: o `SERVER_NAME` configurado no servidor.
+  /// Service name: the `SERVER_NAME` configured on the server.
   final String name;
 
-  /// Nome mDNS da máquina (sem o `.local`).
+  /// The machine's mDNS name (without the `.local`).
   final String host;
 
-  /// Endereços IPv4 do servidor, os que valem para conectar.
+  /// The server's IPv4 addresses, the ones worth connecting to.
   final List<String> addresses;
 
   final int port;
 
-  /// Onde conectar: o primeiro IPv4 utilizável; sem IP, o nome mDNS da máquina.
+  /// Where to connect: the first usable IPv4; with no IP, the machine's mDNS name.
   String get address {
     if (addresses.isNotEmpty) return addresses.first;
     return host.isEmpty ? '' : '$host.local';
   }
 
-  /// Endereço base da API deste servidor.
   Uri get baseUri => Uri(scheme: 'http', host: address, port: port);
 
   @override
@@ -53,9 +52,9 @@ bool _sameList(List<String> a, List<String> b) {
   return true;
 }
 
-/// Um anúncio mDNS é anônimo: qualquer aparelho da rede pode anunciar qualquer
-/// endereço. Só interessam IPv4 comuns; fora loopback, link-local, "qualquer"
-/// e multicast, que não levam a um servidor da rede.
+/// An mDNS announcement is anonymous: any device on the network can announce any
+/// address. Only ordinary IPv4 matters; loopback, link-local, "any"
+/// and multicast are out, since they do not lead to a server on the network.
 bool isUsableIpv4(String ip) {
   final parts = ip.split('.');
   if (parts.length != 4) return false;
@@ -71,10 +70,10 @@ bool isUsableIpv4(String ip) {
   return true;
 }
 
-/// Quantos endereços de um mesmo servidor interessam; o resto é descartado.
+/// How many addresses of the same server matter; the rest are discarded.
 const maxAddressesPerServer = 8;
 
-/// IPv4 utilizáveis de [ips], sem repetição, em ordem estável e no máximo
+/// Usable IPv4 addresses from [ips], without repeats, in a stable order and at most
 /// [maxAddressesPerServer].
 List<String> usableIpv4(Iterable<String> ips) =>
     ({...ips.where(isUsableIpv4)}.toList()..sort())

@@ -10,23 +10,23 @@ import '../providers/servers_provider.dart';
 import 'pulsing_dot.dart';
 import 'skeleton_bar.dart';
 
-/// Cor e animação da bolinha de cada situação do servidor escolhido.
+/// Color and animation of the dot for each situation of the chosen server.
 Color connectionColor(ServerConnection connection) => switch (connection) {
   ServerConnection.connected => AppColors.accentBorder,
   ServerConnection.disconnected => AppColors.offline,
   ServerConnection.none => AppColors.textMuted,
 };
 
-/// A bolinha é do tamanho de uma letra do texto ao lado.
+/// The dot is the size of a letter of the text beside it.
 double dotDiameterFor(double fontSize) => (fontSize * 0.8).roundToDouble();
 
-/// Seletor de servidor do cabeçalho.
+/// Server selector in the header.
 ///
-/// O botão e o menu acompanham a lista ao vivo (`StreamBuilder`), inclusive com
-/// o menu aberto. O menu lista os disponíveis, destaca o escolhido e, se o
-/// escolhido saiu da rede, mostra-o em "Desconectados"; termina com a opção de
-/// adicionar outro. Ao lado esquerdo do nome, uma bolinha pulsante: verde com o
-/// servidor na rede, vermelha sem ele.
+/// The button and the menu follow the live list (`StreamBuilder`), even with
+/// the menu open. The menu lists the available ones, highlights the chosen one and, if the
+/// chosen one left the network, shows it under "Desconectados"; it ends with the option to
+/// add another. To the left of the name, a pulsing dot: green with the
+/// server on the network, red without it.
 class ServerDropdownSelector extends ConsumerStatefulWidget {
   const ServerDropdownSelector({
     super.key,
@@ -36,10 +36,10 @@ class ServerDropdownSelector extends ConsumerStatefulWidget {
 
   final VoidCallback? onAddServer;
 
-  /// Largura máxima do botão; o nome ganha reticências se não couber.
+  /// Maximum width of the button; the name gets an ellipsis if it does not fit.
   final double maxWidth;
 
-  /// Cabeçalho do celular. O desktop passa uma largura maior.
+  /// Mobile header. Desktop passes a larger width.
   static const defaultMaxWidth = 156.0;
 
   static const addLabel = '+ Adicionar servidor...';
@@ -48,7 +48,7 @@ class ServerDropdownSelector extends ConsumerStatefulWidget {
   static const availableLabel = 'Disponíveis';
   static const disconnectedLabel = 'Desconectados';
 
-  /// Valor interno do item "adicionar", que não é um [ServerOption].
+  /// Internal value of the "add" item, which is not a [ServerOption].
   static const _addValue = Object();
 
   @override
@@ -58,7 +58,7 @@ class ServerDropdownSelector extends ConsumerStatefulWidget {
 
 class _ServerDropdownSelectorState
     extends ConsumerState<ServerDropdownSelector> {
-  /// Menu aberto: a seta do botão gira.
+  /// Menu open: the button's arrow turns.
   bool _open = false;
 
   void _setOpen(bool open) {
@@ -100,8 +100,8 @@ class _ServerDropdownSelectorState
               onAddServer?.call();
             }
           },
-          // Uma única entrada, com o seu próprio StreamBuilder: os itens de um
-          // PopupMenuButton comum são montados só ao abrir.
+          // A single entry, with its own StreamBuilder: the items of an ordinary
+          // PopupMenuButton are only built on open.
           itemBuilder: (_) => [
             _ServerMenuEntry(
               controller: controller,
@@ -192,7 +192,7 @@ class _SelectorButton extends StatelessWidget {
   }
 }
 
-/// O conteúdo inteiro do menu, atualizado ao vivo.
+/// The whole content of the menu, updated live.
 class _ServerMenuEntry extends PopupMenuEntry<Object> {
   const _ServerMenuEntry({required this.controller, required this.addValue});
 
@@ -316,7 +316,7 @@ class _ServerItem extends StatelessWidget {
   final ServerOption server;
   final bool selected;
 
-  /// Falso na seção "Desconectados".
+  /// False in the "Desconectados" section.
   final bool connected;
   final VoidCallback? onTap;
 
@@ -376,7 +376,7 @@ class _ServerItem extends StatelessWidget {
   }
 }
 
-/// Dois itens fantasma enquanto a primeira resposta da busca não chega.
+/// Two ghost items while the search's first answer has not arrived.
 class _ServersSkeleton extends StatelessWidget {
   const _ServersSkeleton();
 

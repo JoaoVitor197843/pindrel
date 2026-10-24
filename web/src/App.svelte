@@ -2,5 +2,5 @@
   import Login from './routes/Login.svelte'
 </script>
 
-<!-- Ainda não há router: `/` e `/login` (as únicas rotas liberadas em isWebRoute) abrem o Login. -->
+<!-- There is no router yet: `/` and `/login` (the only routes allowed in isWebRoute) open the Login. -->
 <Login />

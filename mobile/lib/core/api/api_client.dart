@@ -1,16 +1,16 @@
 import 'package:http/http.dart' as http;
 import 'package:protobuf/protobuf.dart';
 
-/// Nomes dos cookies que o backend envia.
+/// Names of the cookies the backend sends.
 ///
-/// O access token não é cookie: vem no corpo da resposta e volta no header
-/// `Authorization: Bearer`. Se o backend passar a enviar outros cookies, basta
-/// registrá-los aqui; o [ApiClient] já guarda e reenvia qualquer cookie.
+/// The access token is not a cookie: it comes in the response body and goes back in the
+/// `Authorization: Bearer` header. If the backend starts sending other cookies, just
+/// register them here; [ApiClient] already stores and resends any cookie.
 abstract final class CookieNames {
   static const refreshToken = 'refresh_token';
 }
 
-/// Armazena cookies por nome (nome -> valor).
+/// Stores cookies by name (name -> value).
 abstract interface class CookieStore {
   Future<Map<String, String>> readAll();
   Future<void> write(String name, String value);
@@ -34,7 +34,7 @@ class MemoryCookieStore implements CookieStore {
   }
 }
 
-/// Um cookie lido de um header `Set-Cookie`.
+/// A cookie read from a `Set-Cookie` header.
 class SetCookie {
   const SetCookie({required this.name, required this.value, this.maxAge});
 
@@ -42,16 +42,16 @@ class SetCookie {
   final String value;
   final int? maxAge;
 
-  /// O servidor limpa um cookie enviando valor vazio e/ou `Max-Age` <= 0
-  /// (é o que o logout do backend faz).
+  /// The server clears a cookie by sending an empty value and/or `Max-Age` <= 0
+  /// (which is what the backend's logout does).
   bool get isRemoval => value.isEmpty || (maxAge != null && maxAge! <= 0);
 }
 
-/// Lê os cookies de um valor de `Set-Cookie`.
+/// Reads the cookies from a `Set-Cookie` value.
 ///
-/// O `package:http` junta vários `Set-Cookie` em uma única string separada por
-/// vírgula, e `Expires` também contém vírgula (`Wed, 21 Oct ...`). Por isso só
-/// se separa em vírgulas seguidas de um novo `nome=`.
+/// `package:http` joins several `Set-Cookie` headers into a single comma-separated string,
+/// and `Expires` also contains a comma (`Wed, 21 Oct ...`). That is why we only
+/// split on commas followed by a new `name=`.
 List<SetCookie> parseSetCookies(String? header) {
   if (header == null || header.isEmpty) return const [];
 
@@ -105,7 +105,7 @@ class ApiClient {
     return response;
   }
 
-  /// Header `Cookie` com todos os cookies guardados (vazio se não houver).
+  /// `Cookie` header with all the stored cookies (empty if there are none).
   Future<Map<String, String>> _cookieHeader() async {
     final stored = await cookies.readAll();
     if (stored.isEmpty) return const {};

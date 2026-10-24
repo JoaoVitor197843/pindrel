@@ -5,13 +5,13 @@ import { toast } from './toast.svelte'
 export interface ServerOption {
   id: string
   name: string
-  /** Como aparece na tela (`192.168.0.20:8095`). */
+  /** How it appears on screen (`192.168.0.20:8095`). */
   address: string
-  /** Origem do servidor, para onde o navegador vai ao escolhê-lo. */
+  /** The server's origin, where the browser goes when it is chosen. */
   url: string
 }
 
-// A página que está aberta é sempre a do servidor embutido, e ele é sempre o padrão.
+// The open page is always the embedded server's, and it is always the default.
 export const embedded: ServerOption = {
   id: 'embedded',
   name: 'Embutido',
@@ -27,7 +27,7 @@ const POLL_FOUND_MS = 15_000
 const POLL_EMPTY_MS = 5_000
 const POLL_MAX_MS = 60_000
 
-/** Um anúncio é anônimo: só interessam IPv4 comuns (nada de loopback, link-local, multicast). */
+/** An announcement is anonymous: only ordinary IPv4 matters (no loopback, link-local, multicast). */
 export function isUsableIpv4(ip: string): boolean {
   const parts = ip.split('.')
   if (parts.length !== 4) return false
@@ -42,7 +42,7 @@ export function isUsableIpv4(ip: string): boolean {
   return !(first === 169 && second === 254)
 }
 
-/** Identificador estável derivado do nome (minúsculas, sem acentos, só letras, números e hífens). */
+/** Stable identifier derived from the name (lowercase, no accents, only letters, numbers and hyphens). */
 export function idFor(name: string): string {
   const slug = name
     .toLowerCase()
@@ -53,7 +53,7 @@ export function idFor(name: string): string {
   return slug || 'servidor'
 }
 
-/** O servidor achado na rede como opção, ou null se o anúncio não presta. */
+/** The server found on the network as an option, or null if the announcement is no good. */
 export function toOption(server: DiscoveredServer): ServerOption | null {
   if (!server.name || server.name.length > MAX_NAME_LENGTH) return null
   if (!Number.isInteger(server.port) || server.port <= 0 || server.port > 65535) return null
@@ -65,20 +65,20 @@ export function toOption(server: DiscoveredServer): ServerOption | null {
 }
 
 /**
- * Os outros servidores da rede, como o gateway os entrega. O navegador não tem mDNS: a lista vem de
- * `GET /server/discover/`, consultada de tempos em tempos. Um servidor que some de uma resposta não sai
- * na hora (no Wi-Fi um anúncio perdido é comum): fica `LOST_GRACE_MS` e só então é descartado.
+ * The other servers on the network, as the gateway delivers them. The browser has no mDNS: the list comes from
+ * `GET /server/discover/`, polled from time to time. A server that disappears from an answer does not leave
+ * right away (on Wi-Fi a lost announcement is common): it stays `LOST_GRACE_MS` and only then is dropped.
  */
 export class ServerDirectory {
-  /** Os outros servidores (sem o embutido), ordenados por nome. */
+  /** The other servers (without the embedded one), sorted by name. */
   others = $state<ServerOption[]>([])
-  /** Se a primeira consulta já terminou, com resposta ou erro. */
+  /** Whether the first query has finished, with an answer or an error. */
   loaded = $state(false)
 
   #lostSince = new Map<string, number>()
   #emptyStreak = 0
 
-  /** O embutido primeiro, depois os outros. */
+  /** The embedded one first, then the others. */
   get list(): ServerOption[] {
     return [embedded, ...this.others]
   }
@@ -87,7 +87,7 @@ export class ServerDirectory {
     try {
       this.#merge(await fetchDiscoveredServers(signal))
     } catch {
-      // sem resposta não dá para dizer que alguém saiu: a lista fica como está
+      // with no answer we cannot say anyone left: the list stays as it is
     } finally {
       this.loaded = true
     }
@@ -120,8 +120,8 @@ export class ServerDirectory {
   }
 
   /**
-   * Consulta de tempos em tempos até o cancelamento: logo e depressa enquanto não há outros servidores
-   * (com espera cada vez maior se o gateway não existe), devagar quando há. Aba escondida não consulta.
+   * Polls from time to time until cancelled: soon and fast while there are no other servers
+   * (backing off more and more if the gateway does not exist), slowly when there are. A hidden tab does not poll.
    */
   start(): () => void {
     const controller = new AbortController()
@@ -143,7 +143,7 @@ export class ServerDirectory {
 
 export const directory = new ServerDirectory()
 
-/** Isolado para os testes trocarem: sair da página não dá para fazer no jsdom. */
+/** Isolated so tests can swap it: leaving the page cannot be done in jsdom. */
 export const navigation = {
   go: (url: string) => window.location.assign(url),
 }
@@ -152,15 +152,15 @@ const PROBE_TIMEOUT_MS = 3000
 const HEALTH_TIMEOUT_MS = 3000
 const HEALTH_POLL_MS = 10_000
 const HEALTH_RETRY_MS = 3000
-/** Uma falha solta não derruba o status (um pacote perdido); duas seguidas sim. */
+/** A single failure does not bring the status down (one lost packet); two in a row do. */
 const HEALTH_FAILURES = 2
 
 export type Health = 'connected' | 'disconnected'
 
 /**
- * O servidor responde? Como é de outra origem, a resposta não pode ser lida (sem CORS): só se sabe se
- * houve resposta ou erro de rede, que é o que basta. Página https para servidor http: o navegador bloqueia
- * a consulta (conteúdo misto) mas não a navegação, então não há o que testar.
+ * Does the server respond? Since it is another origin, the response cannot be read (no CORS): all we know is whether
+ * there was a response or a network error, which is all that is needed. https page to http server: the browser blocks
+ * the query (mixed content) but not the navigation, so there is nothing to test.
  */
 export async function probe(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
   if (window.location.protocol === 'https:' && url.startsWith('http:')) return true
@@ -177,25 +177,25 @@ export async function probe(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<
 }
 
 /**
- * A página sempre é a do servidor embutido; escolher outro servidor não troca um estado local, leva o
- * navegador até a página dele (mesma origem, sem CORS nem cookies cruzados). `connecting` marca a transição.
+ * The page is always the embedded server's; choosing another server does not change a local state, it takes the
+ * browser to that server's page (same origin, no CORS or crossed cookies). `connecting` marks the transition.
  */
 class ServerSelection {
   readonly selected = embedded
   connecting = $state<ServerOption | null>(null)
-  /** Se o servidor desta página responde: `disconnected` depois de falhas seguidas, volta ao primeiro sucesso. */
+  /** Whether this page's server responds: `disconnected` after consecutive failures, back to connected on the first success. */
   health = $state<Health>('connected')
 
   #failures = 0
 
   constructor() {
-    // voltar pelo histórico pode restaurar esta página como estava, no meio da transição
+    // going back through history can restore this page as it was, in the middle of the transition
     window.addEventListener('pageshow', (e) => {
       if (e.persisted) this.connecting = null
     })
   }
 
-  /** Pergunta ao servidor da própria página (mesma origem, a resposta pode ser lida). */
+  /** Asks the page's own server (same origin, so the response can be read). */
   async check(signal?: AbortSignal): Promise<void> {
     const timeout = new AbortController()
     const timer = setTimeout(() => timeout.abort(), HEALTH_TIMEOUT_MS)
@@ -203,7 +203,7 @@ class ServerSelection {
     signal?.addEventListener('abort', onAbort)
     let up = false
     try {
-      // qualquer resposta que não seja erro do servidor prova que há alguém: 404 e 429 contam
+      // any response that is not a server error proves someone is there: 404 and 429 count
       up = (await fetch('/server/info/', { cache: 'no-store', signal: timeout.signal })).status < 500
     } catch {
       up = false
@@ -218,8 +218,8 @@ class ServerSelection {
   }
 
   /**
-   * Confere o servidor da página de tempos em tempos (mais depressa depois de uma falha), ao voltar a rede e
-   * ao reabrir a aba. Aba escondida não consulta. Devolve a função que para.
+   * Checks the page's server from time to time (faster after a failure), when the network comes back and
+   * when the tab is reopened. A hidden tab does not poll. Returns the function that stops it.
    */
   watchHealth(): () => void {
     const controller = new AbortController()

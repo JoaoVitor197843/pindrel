@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
-/// Bolinha de status com um anel que pulsa. Com a opção de acessibilidade
-/// "reduzir movimento" ligada (ou com [pulsing] falso), fica parada.
+/// Status dot with a pulsing ring. With the "reduce motion" accessibility option
+/// on (or with [pulsing] false), it stands still.
 ///
-/// O anel cresce além do [diameter] sem ocupar espaço: quem usa deixa uma folga
-/// até o texto ao lado.
+/// The ring grows beyond the [diameter] without taking up space: whoever uses it leaves a gap
+/// to the text beside it.
 class PulsingDot extends StatefulWidget {
   const PulsingDot({
     super.key,
@@ -15,7 +15,7 @@ class PulsingDot extends StatefulWidget {
 
   final Color color;
 
-  /// Diâmetro da bolinha, em geral o de uma letra do texto ao lado.
+  /// Diameter of the dot, usually that of a letter of the text beside it.
   final double diameter;
 
   final bool pulsing;

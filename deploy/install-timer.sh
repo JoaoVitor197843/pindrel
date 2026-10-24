@@ -1,8 +1,8 @@
 #!/bin/sh
-# Instala o timer do systemd que roda deploy/update.sh a cada 5 minutos.
-#   sudo sh deploy/install-timer.sh            instala e liga (roda o update como o usuário que chamou o sudo)
-#   sh deploy/install-timer.sh --print         só mostra as units, sem instalar
-# O usuário precisa estar no grupo `docker` e ter feito `docker login` no registry (ver deploy/README.md).
+# Installs the systemd timer that runs deploy/update.sh every 5 minutes.
+#   sudo sh deploy/install-timer.sh            installs and enables (runs the update as the user who called sudo)
+#   sh deploy/install-timer.sh --print         only prints the units, without installing
+# The user must be in the `docker` group and have done `docker login` on the registry (see deploy/README.md).
 set -eu
 dir=$(cd "$(dirname "$0")/.." && pwd)
 user=${SUDO_USER:-$(id -un)}
@@ -19,7 +19,7 @@ Type=oneshot
 User=$user
 WorkingDirectory=$dir
 ExecStart=$dir/deploy/update.sh
-# o timer dispara de novo em 5 min; um update travado não pode ficar para sempre
+# the timer fires again in 5 min; a stuck update cannot hang around forever
 TimeoutStartSec=15min
 UNIT
 }

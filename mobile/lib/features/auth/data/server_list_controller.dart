@@ -7,15 +7,15 @@ import '../../../core/network/server_probe.dart';
 import 'server_list_state.dart';
 import 'server_option.dart';
 
-/// Junta a descoberta de servidores com a escolha do usuário e entrega o
-/// resultado como um [Stream] de [ServerListState], que a tela consome com
+/// Joins server discovery with the user's choice and delivers the
+/// result as a [Stream] of [ServerListState], which the screen consumes with
 /// `StreamBuilder`.
 ///
-/// A descoberta é assinada uma só vez, aqui; quem quiser acompanhar a lista
-/// (botão, menu aberto, rodapé) assina [stream], que aceita vários ouvintes.
+/// Discovery is subscribed to only once, here; whoever wants to follow the list
+/// (button, open menu, footer) subscribes to [stream], which accepts many listeners.
 ///
-/// O servidor escolhido não some quando sai da rede: fica escolhido e passa a
-/// contar como desconectado, e volta a conectado se for anunciado de novo.
+/// The chosen server does not vanish when it leaves the network: it stays chosen and counts
+/// as disconnected, and goes back to connected if announced again.
 class ServerListController {
   ServerListController({
     required ServerDiscovery discovery,
@@ -27,7 +27,7 @@ class ServerListController {
 
   final Random _random;
 
-  /// Testa o servidor antes de escolhê-lo; sem ela a escolha é imediata.
+  /// Tests the server before choosing it; without it the choice is immediate.
   final ServerProbe? probe;
   ServerOption? _connecting;
   bool _loaded = false;
@@ -40,15 +40,15 @@ class ServerListController {
   Object? _error;
   ServerListState _current = const ServerListState();
 
-  /// O estado de agora (para o `initialData` do `StreamBuilder`).
+  /// The current state (for the `StreamBuilder`'s `initialData`).
   ServerListState get current => _current;
 
-  /// Emite o estado novo a cada mudança.
+  /// Emits the new state on every change.
   Stream<ServerListState> get stream => _out.stream;
 
-  /// O usuário escolheu [server] (um disponível, ou o desconectado que já era o
-  /// escolhido). Um servidor novo é testado antes ([ServerListState.connecting]
-  /// enquanto espera); se não responde, a escolha anterior fica e devolve falso.
+  /// The user chose [server] (an available one, or the disconnected one that was already
+  /// chosen). A new server is tested first ([ServerListState.connecting]
+  /// while it waits); if it does not respond, the previous choice stays and this returns false.
   Future<bool> select(ServerOption server) async {
     final probe = this.probe;
     final uri = server.baseUri;
@@ -83,7 +83,7 @@ class ServerListController {
       }
     } else {
       final index = _available.indexOf(selected);
-      // com o endereço mais novo, se mudou
+      // with the newest address, if it changed
       if (index >= 0) _selected = _available[index];
     }
     _publish();
@@ -108,7 +108,6 @@ class ServerListController {
     if (!_out.isClosed) _out.add(_current);
   }
 
-  /// Para a busca e fecha o stream.
   Future<void> dispose() async {
     await _subscription.cancel();
     await _out.close();

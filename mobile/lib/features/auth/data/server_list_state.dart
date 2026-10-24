@@ -1,19 +1,19 @@
 import 'server_option.dart';
 
-/// Situação do servidor escolhido em relação à rede.
+/// Situation of the chosen server relative to the network.
 enum ServerConnection {
-  /// Nenhum servidor escolhido ainda (nada foi achado).
+  /// No server chosen yet (nothing was found).
   none,
 
-  /// O servidor escolhido está sendo anunciado na rede agora.
+  /// The chosen server is being announced on the network right now.
   connected,
 
-  /// O servidor escolhido saiu da rede. Continua escolhido até o usuário
-  /// trocar ou ele voltar.
+  /// The chosen server left the network. It stays chosen until the user
+  /// switches or it comes back.
   disconnected,
 }
 
-/// O que a tela de login mostra sobre os servidores, de uma vez só.
+/// What the login screen shows about the servers, all at once.
 class ServerListState {
   const ServerListState({
     this.available = const [],
@@ -24,21 +24,21 @@ class ServerListState {
     this.loaded = false,
   });
 
-  /// Os servidores que a rede anuncia agora.
+  /// The servers the network announces right now.
   final List<ServerOption> available;
 
-  /// O servidor escolhido (sorteado ou pelo usuário), esteja ele na rede ou não.
+  /// The chosen server (drawn at random or picked by the user), whether or not it is on the network.
   final ServerOption? selected;
 
   final bool selectedConnected;
 
-  /// Por que a busca falhou (por exemplo, sem permissão de rede), se falhou.
+  /// Why the search failed (for example, no network permission), if it did.
   final Object? searchError;
 
-  /// O servidor que está sendo testado antes de ser escolhido, se houver.
+  /// The server being tested before it is chosen, if any.
   final ServerOption? connecting;
 
-  /// Se a busca já respondeu pelo menos uma vez (com lista ou com erro).
+  /// Whether the search has answered at least once (with a list or with an error).
   final bool loaded;
 
   ServerConnection get connection {
@@ -48,8 +48,8 @@ class ServerListState {
         : ServerConnection.disconnected;
   }
 
-  /// Os servidores que já não estão na rede mas ainda interessam: o escolhido
-  /// que saiu. Quem não está escolhido some da lista ao sair.
+  /// The servers that are no longer on the network but still matter: the chosen one
+  /// that left. Anyone not chosen disappears from the list when leaving.
   List<ServerOption> get disconnected =>
       connection == ServerConnection.disconnected ? [selected!] : const [];
 }

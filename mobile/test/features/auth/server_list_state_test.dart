@@ -32,7 +32,7 @@ void main() {
     },
   );
 
-  // selectedConnected sem selected é um estado incoerente: não pode quebrar
+  // selectedConnected without selected is an incoherent state: it must not break
   test('"conectado" sem servidor escolhido não quebra e vale como nenhum', () {
     const state = ServerListState(selectedConnected: true);
     expect(state.connection, ServerConnection.none);
