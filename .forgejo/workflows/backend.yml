@@ -1,10 +1,10 @@
 # CI do backend (Go). Roda só quando o backend, o schema protobuf ou este arquivo mudam.
 #
-# - Não roda os testes que precisam de Postgres/servidor (todos os `TestDB_*`): no runner não há banco
-#   nem backend/.env. Rode-os localmente. O teste internal/testnaming garante que todo teste que usa o banco
-#   tenha esse prefixo.
-# - Limites de RAM para caber no Raspberry Pi (jobs rodam com capacity 1 e no máx. ~1,5 GB):
-#   GOMEMLIMIT baixo, -p=1 (um pacote por vez) e CGO desligado (sem gcc, sem -race).
+# - Um job só, no PC (runner `build`, imagem ci-pc): gofmt, go vet e TODOS os testes, os `TestDB_*` também, num
+#   Postgres descartável (`services:`), com o schema aplicado por `go run ./cmd/migrate`, o mesmo código da API.
+#   (Antes havia um job no Pi sem banco, ~5 min, que rodava um subconjunto do que este já roda.)
+# - No PC os pacotes rodam em paralelo; o CI do Pi precisava de -p=1 e GOMEMLIMIT por causa da RAM.
+#
 name: backend
 
 on:
@@ -26,49 +26,7 @@ on:
       - ".forgejo/workflows/backend.yml"
 
 jobs:
-  analyze-and-test:
-    runs-on: ci
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: backend
-    env:
-      CGO_ENABLED: "0"
-      GOMEMLIMIT: 640MiB
-      GOFLAGS: -p=1
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Versão do Go compatível com o go.mod
-        run: |
-          want=$(awk '/^go /{print $2}' go.mod)
-          have=$(go env GOVERSION | sed 's/^go//')
-          echo "go.mod: $want | runner: $have"
-          # o runner precisa ser >= ao go.mod (senão o Go baixaria outro toolchain)
-          [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ]
-
-      - name: Dependências
-        run: go mod download
-
-      - name: Análise — gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then echo "Arquivos sem gofmt:"; echo "$unformatted"; exit 1; fi
-
-      - name: Análise — go vet
-        run: go vet ./...
-
-      - name: Testes (sem os que dependem de banco)
-        run: go test ./... -skip '^TestDB_'
-
-      - name: Pico de memória do job
-        if: always()
-        run: |
-          echo "pico: $(( $(cat /sys/fs/cgroup/memory.peak 2>/dev/null || echo 0) / 1048576 )) MiB"
-
-  # TODOS os testes, os `TestDB_*` também: num Postgres descartável, no PC (o runner `ci` do Pi não tem banco).
-  # O schema vem das migrations embutidas, aplicadas pelo mesmo código que a API usa ao iniciar.
-  database-tests:
+  test:
     runs-on: build
     timeout-minutes: 30
     container:
@@ -85,7 +43,6 @@ jobs:
         working-directory: backend
     env:
       CGO_ENABLED: "0"
-      GOFLAGS: -p=1
       PORT: "8080"
       DB_HOST: postgres
       DB_PORT: "5432"
@@ -98,6 +55,25 @@ jobs:
       JWT_REFRESH_EXPIRY: 720h
     steps:
       - uses: actions/checkout@v4
+
+      - name: Versão do Go compatível com o go.mod
+        run: |
+          want=$(awk '/^go /{print $2}' go.mod)
+          have=$(go env GOVERSION | sed 's/^go//')
+          echo "go.mod: $want | imagem: $have"
+          # a imagem precisa ser >= ao go.mod (senão o Go baixaria outro toolchain)
+          [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ]
+
+      - name: Dependências
+        run: go mod download
+
+      - name: Análise — gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then echo "Arquivos sem gofmt:"; echo "$unformatted"; exit 1; fi
+
+      - name: Análise — go vet
+        run: go vet ./...
 
       - name: Esperar o Postgres
         shell: bash

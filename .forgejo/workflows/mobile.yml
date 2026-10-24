@@ -1,11 +1,11 @@
 # CI do mobile (Flutter). Roda só quando o mobile, o schema protobuf ou este arquivo mudam.
 #
-# - Usa o label `ci-flutter` (imagem ci-flutter:1, ver .forgejo/images/ci-flutter.Dockerfile).
+# - Usa o label `flutter` (runner do PC, imagem ci-flutter:1 de lá; o Pi, de 1 slot, levava ~6 min). O label
+#   `ci-flutter` do Pi (ver .forgejo/images/ci-flutter.Dockerfile) continua existindo como alternativa.
 # - Análise: `flutter analyze` (Dart, flutter_lints).
 # - Testes: não roda o teste de integração que chama o servidor Go ("Testa a chamada de api para o go");
 #   arquivos de teste vazios (placeholders) são ignorados até ganharem conteúdo, senão o
 #   flutter test falha ao carregá-los.
-# - RAM: um teste por vez (--concurrency=1) para caber no Raspberry Pi.
 name: mobile
 
 on:
@@ -26,7 +26,7 @@ on:
 
 jobs:
   analyze-and-test:
-    runs-on: ci-flutter
+    runs-on: flutter
     timeout-minutes: 30
     defaults:
       run:
@@ -54,7 +54,7 @@ jobs:
         run: |
           files=$(find test -name '*_test.dart' -size +0)
           if [ -z "$files" ]; then echo "nenhum teste com conteúdo"; exit 0; fi
-          flutter test --concurrency=1 $files --name '^(?!Testa a chamada de api para o go)'
+          flutter test $files --name '^(?!Testa a chamada de api para o go)'
 
       - name: Pico de memória do job
         if: always()

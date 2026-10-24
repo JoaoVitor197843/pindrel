@@ -3,7 +3,6 @@
 # - Análise: `yarn check` = svelte-check (Svelte + TypeScript) + tsc da config do Vite.
 # - Testes: vitest em jsdom, sem rede nem servidor. Arquivos de teste vazios (placeholders) são
 #   ignorados até ganharem conteúdo, senão o vitest falha com "No test suite found".
-# - RAM: heap do Node limitado para caber no Raspberry Pi.
 name: web
 
 on:
@@ -24,13 +23,15 @@ on:
 
 jobs:
   analyze-and-test:
-    runs-on: ci
+    # no PC (runner `build`, imagem ci-pc): ~4x mais rápido que no Pi e sem disputar o único slot dele
+    runs-on: build
+    container:
+      image: ci-pc:1
     timeout-minutes: 20
     defaults:
       run:
         working-directory: web
     env:
-      NODE_OPTIONS: --max-old-space-size=512
       CI: "true"
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +46,7 @@ jobs:
         run: |
           files=$(find src -name '*.test.ts' -size +0)
           if [ -z "$files" ]; then echo "nenhum teste com conteúdo"; exit 0; fi
-          yarn vitest run --no-file-parallelism $files
+          yarn vitest run $files
 
       - name: Pico de memória do job
         if: always()
