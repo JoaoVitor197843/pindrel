@@ -4,4 +4,8 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Só no build de debug: os servidores Plany da rede local falam http (sem TLS), que o Android
+         bloqueia por padrão. O release continua sem isso até haver uma decisão para a LAN. -->
+    <application android:usesCleartextTraffic="true" />
 </manifest>
