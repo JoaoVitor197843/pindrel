@@ -324,4 +324,79 @@ void main() {
       expect(c.current.searchError, isNull);
     });
   });
+
+  group('teste de conexão ao escolher', () {
+    ServerListController makeProbed(Future<bool> Function(Uri) probe) {
+      discovery = FakeDiscovery(sampleServers);
+      controller = ServerListController(
+        discovery: discovery,
+        random: FixedRandom(0),
+        probe: probe,
+      );
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
+    test('responde: escolhe, e connecting aparece enquanto espera', () async {
+      final gate = Completer<bool>();
+      Uri? asked;
+      makeProbed((uri) {
+        asked = uri;
+        return gate.future;
+      });
+      await flush();
+      final other = controller.current.available.last;
+      final result = controller.select(other);
+      expect(controller.current.connecting, other);
+      expect(controller.current.selected, isNot(other));
+      gate.complete(true);
+      expect(await result, isTrue);
+      expect(asked, other.baseUri);
+      expect(controller.current.connecting, isNull);
+      expect(controller.current.selected, other);
+    });
+
+    test('não responde: a escolha anterior fica', () async {
+      makeProbed((_) async => false);
+      await flush();
+      final before = controller.current.selected;
+      expect(await controller.select(controller.current.available.last), isFalse);
+      expect(controller.current.selected, before);
+      expect(controller.current.connecting, isNull);
+    });
+
+    test('a consulta que lança conta como falha', () async {
+      makeProbed((_) async => throw StateError('boom'));
+      await flush();
+      expect(await controller.select(controller.current.available.last), isFalse);
+      expect(controller.current.connecting, isNull);
+    });
+
+    test('toques repetidos enquanto conecta não disparam outra consulta', () async {
+      final gate = Completer<bool>();
+      var calls = 0;
+      makeProbed((_) {
+        calls++;
+        return gate.future;
+      });
+      await flush();
+      final other = controller.current.available.last;
+      final first = controller.select(other);
+      expect(await controller.select(other), isFalse);
+      gate.complete(true);
+      await first;
+      expect(calls, 1);
+    });
+
+    test('o já escolhido não é testado de novo', () async {
+      var calls = 0;
+      makeProbed((_) async {
+        calls++;
+        return true;
+      });
+      await flush();
+      expect(await controller.select(controller.current.selected!), isTrue);
+      expect(calls, 0);
+    });
+  });
 }

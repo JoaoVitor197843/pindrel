@@ -149,6 +149,13 @@ export const navigation = {
 }
 
 const PROBE_TIMEOUT_MS = 3000
+const HEALTH_TIMEOUT_MS = 3000
+const HEALTH_POLL_MS = 10_000
+const HEALTH_RETRY_MS = 3000
+/** Uma falha solta não derruba o status (um pacote perdido); duas seguidas sim. */
+const HEALTH_FAILURES = 2
+
+export type Health = 'connected' | 'disconnected'
 
 /**
  * O servidor responde? Como é de outra origem, a resposta não pode ser lida (sem CORS): só se sabe se
@@ -176,12 +183,70 @@ export async function probe(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<
 class ServerSelection {
   readonly selected = embedded
   connecting = $state<ServerOption | null>(null)
+  /** Se o servidor desta página responde: `disconnected` depois de falhas seguidas, volta ao primeiro sucesso. */
+  health = $state<Health>('connected')
+
+  #failures = 0
 
   constructor() {
     // voltar pelo histórico pode restaurar esta página como estava, no meio da transição
     window.addEventListener('pageshow', (e) => {
       if (e.persisted) this.connecting = null
     })
+  }
+
+  /** Pergunta ao servidor da própria página (mesma origem, a resposta pode ser lida). */
+  async check(signal?: AbortSignal): Promise<void> {
+    const timeout = new AbortController()
+    const timer = setTimeout(() => timeout.abort(), HEALTH_TIMEOUT_MS)
+    const onAbort = () => timeout.abort()
+    signal?.addEventListener('abort', onAbort)
+    let up = false
+    try {
+      // qualquer resposta que não seja erro do servidor prova que há alguém: 404 e 429 contam
+      up = (await fetch('/server/info/', { cache: 'no-store', signal: timeout.signal })).status < 500
+    } catch {
+      up = false
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+    }
+    if (signal?.aborted) return
+    this.#failures = up ? 0 : this.#failures + 1
+    if (up) this.health = 'connected'
+    else if (this.#failures >= HEALTH_FAILURES) this.health = 'disconnected'
+  }
+
+  /**
+   * Confere o servidor da página de tempos em tempos (mais depressa depois de uma falha), ao voltar a rede e
+   * ao reabrir a aba. Aba escondida não consulta. Devolve a função que para.
+   */
+  watchHealth(): () => void {
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let running = false
+    const tick = async () => {
+      if (running) return
+      running = true
+      clearTimeout(timer)
+      try {
+        if (!document.hidden) await this.check(controller.signal)
+      } finally {
+        running = false
+      }
+      if (controller.signal.aborted) return
+      timer = setTimeout(tick, this.#failures ? HEALTH_RETRY_MS : HEALTH_POLL_MS)
+    }
+    const wake = () => void tick()
+    window.addEventListener('online', wake)
+    document.addEventListener('visibilitychange', wake)
+    void tick()
+    return () => {
+      controller.abort()
+      clearTimeout(timer)
+      window.removeEventListener('online', wake)
+      document.removeEventListener('visibilitychange', wake)
+    }
   }
 
   async open(server: ServerOption): Promise<void> {
