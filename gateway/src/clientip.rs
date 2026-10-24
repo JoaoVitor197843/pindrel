@@ -68,6 +68,11 @@ impl ClientIp {
         self.trusted.iter().any(|net| net.contains(&ip))
     }
 
+    /// Whether `peer` is one of the declared proxies, i.e. the request may come from anywhere (a tunnel).
+    pub fn is_proxy(&self, peer: IpAddr) -> bool {
+        self.is_trusted(peer.to_canonical())
+    }
+
     /// The client address of a request that arrived from `peer`.
     pub fn resolve(&self, peer: IpAddr, headers: &HeaderMap) -> IpAddr {
         let peer = peer.to_canonical(); // ::ffff:127.0.0.1 is 127.0.0.1
