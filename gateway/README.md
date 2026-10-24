@@ -47,6 +47,20 @@ Um IPv6 conta pelo **prefixo /64** (quem tem a faixa inteira não burla o limite
 
 Toda resposta 429 traz `Retry-After` (segundos inteiros, arredondados para cima, de 1 a 3600): o tempo até o balde ter uma requisição de volta.
 
+### Atrás de um proxy (Cloudflare Tunnel, `tailscale serve`...)
+
+Sem configuração o cliente é quem abriu a conexão, e qualquer `X-Forwarded-For` que ele mande é descartado (o gateway é a borda). Atrás de um túnel todo mundo chegaria de `127.0.0.1` e compartilharia **um** balde. Com `TRUSTED_PROXIES` o gateway passa a acreditar no cabeçalho `CLIENT_IP_HEADER`, mas só quando a conexão veio de um desses proxies:
+
+| Situação | Configuração |
+| --- | --- |
+| `cloudflared` no mesmo host | `TRUSTED_PROXIES=127.0.0.1,::1` e `CLIENT_IP_HEADER=cf-connecting-ip` (o Cloudflare sempre sobrescreve esse cabeçalho: o cliente não o forja) |
+| `tailscale serve` / outro proxy comum | `TRUSTED_PROXIES=127.0.0.1,::1` (usa `x-forwarded-for`) |
+| Balanceador em outra máquina | `TRUSTED_PROXIES=10.0.0.5` (ou a faixa) |
+
+Regras: só o cabeçalho configurado é lido (um `Forwarded` ou `X-Real-IP` mandado pelo cliente não vale); várias linhas do mesmo cabeçalho são uma lista, lida **da direita para a esquerda** (o que o cliente escreveu à esquerda nunca é usado); cabeçalho inválido, com bytes que não são texto ou maior que 2 KiB é ignorado inteiro e o cliente passa a ser o próprio proxy (limite mais apertado, nunca mais frouxo). O cliente real vale para os três limites, para o prefixo /64 do IPv6 e para o `X-Forwarded-For` que a API recebe; `Forwarded`, `X-Real-IP`, `CF-Connecting-IP` e `True-Client-IP` não chegam à API.
+
+Com `127.0.0.1` na lista, qualquer processo local que fale com o gateway pela loopback pode escolher o próprio endereço: use uma faixa menor se isso importar.
+
 ### Proteções
 
 Timeout de 10 s para ler os cabeçalhos (derruba conexão lenta ou que nunca termina), 10 s para o corpo e 30 s para a réplica responder; teto de conexões abertas (`MAX_CONNECTIONS`); corpo limitado; encerramento gracioso (termina as requisições em andamento, até 5 s).
@@ -83,6 +97,8 @@ Tudo por variáveis de ambiente.
 | `PROBE_INTERVAL_SECS` | `3` | De quanto em quanto tempo testa as réplicas |
 | `MAX_CONNECTIONS` | `1024` | Conexões abertas ao mesmo tempo |
 | `MAX_BODY_BYTES` | `1048576` | Tamanho máximo do corpo de uma requisição |
+| `TRUSTED_PROXIES` | vazio | Proxies em que se confia para dizer quem é o cliente (`127.0.0.1,10.0.0.0/8`); vazio = o cliente é quem conectou |
+| `CLIENT_IP_HEADER` | `x-forwarded-for` | O único cabeçalho lido (só quando quem conectou está em `TRUSTED_PROXIES`): `x-forwarded-for`, `forwarded` (RFC 7239) ou um de endereço único como `cf-connecting-ip` |
 
 Todos os erros de configuração são mostrados de uma vez, e o gateway não sobe com valor inválido. Os timeouts (10 s, 10 s, 30 s) são fixos no código.
 

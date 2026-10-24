@@ -1,7 +1,10 @@
 //! Configuration from environment variables. Every problem is reported at once, like backend/internal/config.
 use std::{net::SocketAddr, time::Duration};
 
-use crate::pool::parse_targets;
+use crate::{
+    clientip::{self, ClientIp},
+    pool::parse_targets,
+};
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -21,6 +24,8 @@ pub struct Config {
     pub known_file: Option<std::path::PathBuf>,
     pub max_connections: usize,
     pub rate_limit: bool,
+    /// Who counts as the client behind a trusted proxy (`TRUSTED_PROXIES`, `CLIENT_IP_HEADER`); by default the peer.
+    pub client_ip: ClientIp,
     pub max_body: usize,
     pub header_timeout: Duration,
     pub body_timeout: Duration,
@@ -42,6 +47,7 @@ impl Config {
             known_file: None,
             max_connections: 1024,
             rate_limit: true,
+            client_ip: ClientIp::direct(),
             max_body: 1 << 20,
             header_timeout: Duration::from_secs(10),
             body_timeout: Duration::from_secs(10),
@@ -93,6 +99,16 @@ impl Config {
                 Vec::new()
             }),
         };
+        let trusted = get("TRUSTED_PROXIES").map_or(Vec::new(), |spec| {
+            clientip::parse_trusted(&spec).unwrap_or_else(|e| {
+                errs.push(format!("TRUSTED_PROXIES: {e}"));
+                Vec::new()
+            })
+        });
+        let client_ip = ClientIp::new(trusted, &get("CLIENT_IP_HEADER").unwrap_or_else(|| "x-forwarded-for".into())).unwrap_or_else(|e| {
+            errs.push(format!("CLIENT_IP_HEADER: {e}"));
+            ClientIp::direct()
+        });
         if !errs.is_empty() {
             return Err(errs);
         }
@@ -110,6 +126,7 @@ impl Config {
             known_file: get("KNOWN_SERVERS_FILE").map(std::path::PathBuf::from),
             max_connections,
             rate_limit,
+            client_ip,
             max_body,
             ..Self::new(Vec::new())
         })
@@ -163,6 +180,34 @@ mod tests {
         let errs = load(&[("GATEWAY_PORT", "0"), ("MDNS_ENABLED", "maybe"), ("MAX_CONNECTIONS", "x")]).unwrap_err();
         assert_eq!(errs.len(), 4, "{errs:?}"); // port, mdns flag, max connections, missing upstreams
         assert!(errs.iter().any(|e| e.starts_with("UPSTREAMS")));
+    }
+
+    #[test]
+    fn no_trusted_proxy_by_default_and_the_header_is_x_forwarded_for_when_there_is_one() {
+        let c = load(&[("UPSTREAMS", "127.0.0.1:1")]).unwrap();
+        assert!(c.client_ip.is_direct());
+        let c = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TRUSTED_PROXIES", "127.0.0.1, 10.0.0.0/8")]).unwrap();
+        assert!(!c.client_ip.is_direct());
+        let c = load(&[
+            ("UPSTREAMS", "127.0.0.1:1"),
+            ("TRUSTED_PROXIES", "::1"),
+            ("CLIENT_IP_HEADER", "CF-Connecting-IP"),
+        ])
+        .unwrap();
+        assert!(!c.client_ip.is_direct());
+    }
+
+    #[test]
+    fn bad_proxy_settings_are_reported_with_the_rest() {
+        let errs = load(&[
+            ("TRUSTED_PROXIES", "127.0.0.1, banana"),
+            ("CLIENT_IP_HEADER", "not a header"),
+            ("GATEWAY_PORT", "0"),
+        ])
+        .unwrap_err();
+        assert_eq!(errs.len(), 4, "{errs:?}"); // port, proxies, header, missing upstreams
+        assert!(errs.iter().any(|e| e.starts_with("TRUSTED_PROXIES")));
+        assert!(errs.iter().any(|e| e.starts_with("CLIENT_IP_HEADER")));
     }
 
     #[test]
