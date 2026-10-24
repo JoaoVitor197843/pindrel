@@ -4,7 +4,7 @@ import 'dart:math';
 import 'package:mobile/core/network/discovery/discovered_server.dart';
 import 'package:mobile/core/network/discovery/server_discovery.dart';
 
-/// Uma descoberta controlada pelo teste: começa com [initial] e [emit] troca a lista.
+/// A discovery controlled by the test: starts with [initial] and [emit] swaps the list.
 class FakeDiscovery implements ServerDiscovery {
   FakeDiscovery([List<DiscoveredServer> initial = const []])
     : _current = initial;
@@ -18,7 +18,7 @@ class FakeDiscovery implements ServerDiscovery {
     _updates.add(servers);
   }
 
-  /// A busca falha, como acontece sem permissão de rede.
+  /// The search fails, as happens without network permission.
   void fail(Object error) => _updates.addError(error);
 
   @override
@@ -36,7 +36,7 @@ class FakeDiscovery implements ServerDiscovery {
   });
 }
 
-/// Sorteio previsível: sempre devolve [value] (limitado ao máximo pedido).
+/// Predictable draw: always returns [value] (capped at the requested maximum).
 class FixedRandom implements Random {
   FixedRandom(this.value);
 
@@ -60,7 +60,7 @@ DiscoveredServer server(
 }) =>
     DiscoveredServer(name: name, host: host, addresses: addresses, port: port);
 
-/// Os três servidores que a tela de login mostrava antes da descoberta real.
+/// The three servers the login screen showed before the real discovery.
 final sampleServers = [
   server('Casa', host: 'plany.casa'),
   server('Escritório', addresses: ['192.168.0.20']),

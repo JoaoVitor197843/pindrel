@@ -4,8 +4,8 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'recovery_key_sheet.dart';
 
-/// Formulário de login / cadastro, compartilhado pelos layouts mobile e
-/// desktop. Alterna entre os dois modos no próprio widget.
+/// Login / sign-up form, shared by the mobile and desktop layouts.
+/// Switches between the two modes inside the widget itself.
 class AuthForm extends StatefulWidget {
   const AuthForm({
     super.key,
@@ -13,10 +13,10 @@ class AuthForm extends StatefulWidget {
     this.showSubtitle = false,
   });
 
-  /// Chamado ao tocar em "Continuar offline neste dispositivo".
+  /// Called when tapping "Continuar offline neste dispositivo".
   final VoidCallback? onContinueOffline;
 
-  /// Mostra a linha de apoio sob o título (layout desktop).
+  /// Shows the supporting line under the title (desktop layout).
   final bool showSubtitle;
 
   @override
@@ -26,9 +26,9 @@ class AuthForm extends StatefulWidget {
 class _AuthFormState extends State<AuthForm> {
   bool _register = false;
 
-  /// Conta as trocas login/cadastro: cada uma dá chaves novas aos textos que
-  /// fazem fade. Com a mesma chave de volta (A, B, A) o AnimatedSwitcher teria
-  /// duas filhas iguais ao mesmo tempo.
+  /// Counts the login/sign-up switches: each one gives new keys to the texts that
+  /// fade. With the same key coming back (A, B, A) the AnimatedSwitcher would have
+  /// two identical children at the same time.
   int _switches = 0;
   bool _obscure = true;
   bool _keepSignedIn = true;
@@ -66,7 +66,7 @@ class _AuthFormState extends State<AuthForm> {
           ),
         ],
         const SizedBox(height: 24),
-        // O campo de username entra abrindo espaço e saindo o fecha.
+        // The username field comes in by opening space, and going out closes it.
         _Swap(
           resize: true,
           child: _register
@@ -173,7 +173,7 @@ class _AuthFormState extends State<AuthForm> {
               borderRadius: BorderRadius.circular(AppTheme.radius),
             ),
           ),
-          // A integração com a API de auth ainda não existe.
+          // The auth API integration does not exist yet.
           onPressed: () {},
           child: Text(_register ? 'Criar conta' : 'Entrar'),
         ),
@@ -269,8 +269,8 @@ class _OrDivider extends StatelessWidget {
   }
 }
 
-/// Troca [child] (pela `key`) com um fade de 200 ms; com [resize] a altura
-/// também anima. Com "reduzir movimento" a troca é seca.
+/// Switches [child] (by its `key`) with a 200 ms fade; with [resize] the height
+/// also animates. With "reduce motion" the switch is abrupt.
 class _Swap extends StatelessWidget {
   const _Swap({required this.child, this.resize = false});
 

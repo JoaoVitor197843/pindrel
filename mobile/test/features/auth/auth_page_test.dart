@@ -15,12 +15,12 @@ import 'package:mobile/features/auth/presentation/providers/servers_provider.dar
 
 import '../../support/discovery_fakes.dart';
 
-/// Abre o app com uma descoberta falsa (por padrão, os [sampleServers]) e um
-/// sorteio fixo, que escolhe o primeiro servidor da lista.
+/// Opens the app with a fake discovery (by default, the [sampleServers]) and a
+/// fixed draw, which picks the first server in the list.
 ///
-/// Por padrão liga "reduzir movimento", que deixa a bolinha parada: com ela
-/// pulsando para sempre, `pumpAndSettle` nunca assentaria. Os testes da
-/// animação passam `reduceMotion: false`.
+/// By default it turns on "reduce motion", which keeps the dot still: with it
+/// pulsing forever, `pumpAndSettle` would never settle. The animation tests
+/// pass `reduceMotion: false`.
 Future<FakeDiscovery> pumpApp(
   WidgetTester tester, {
   Widget? home,
@@ -47,7 +47,7 @@ Future<FakeDiscovery> pumpApp(
       child: home == null ? const PlanyApp() : MaterialApp(home: home),
     ),
   );
-  await tester.pump(); // entrega a primeira lista da descoberta
+  await tester.pump(); // delivers the discovery's first list
   return fake;
 }
 
@@ -59,7 +59,7 @@ BoxDecoration itemDecoration(WidgetTester tester, String id) =>
     tester.widget<Container>(find.byKey(ValueKey('server-item-$id'))).decoration
         as BoxDecoration;
 
-/// Uma busca que ainda não respondeu nada.
+/// A search that has not answered anything yet.
 class _SilentDiscovery implements ServerDiscovery {
   final controller = StreamController<List<DiscoveredServer>>();
 
@@ -112,7 +112,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(turns(), 0.5);
 
-      await tester.tapAt(const Offset(5, 700)); // fora do menu
+      await tester.tapAt(const Offset(5, 700)); // outside the menu
       await tester.pumpAndSettle();
       expect(turns(), 0);
     });
@@ -183,7 +183,6 @@ void main() {
     await tester.tap(find.text('Escritório'));
     await tester.pumpAndSettle();
 
-    // O botão do cabeçalho passa a mostrar o novo servidor.
     expect(find.text('ESCRITÓRIO'), findsOneWidget);
 
     await tester.tap(find.byTooltip('Selecionar servidor'));
@@ -262,7 +261,7 @@ void main() {
     expect(find.text('Bem-vindo de volta'), findsNothing);
     expect(find.byKey(const Key('username-field')), findsOneWidget);
     expect(find.text('Já tem conta? '), findsOneWidget);
-    // Botão primário também passa a "Criar conta"; o link vira "Entrar".
+    // The primary button also becomes "Criar conta"; the link becomes "Entrar".
     expect(find.text('Criar conta'), findsOneWidget);
 
     await tester.tap(find.text('Entrar'));
@@ -401,7 +400,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Procurando servidores na rede...'), findsOneWidget);
       expect(find.byIcon(Icons.check), findsNothing);
-      // adicionar um servidor à mão continua possível
+      // adding a server by hand is still possible
       expect(find.text('+ Adicionar servidor...'), findsOneWidget);
     });
 
@@ -493,7 +492,7 @@ void main() {
       await pumpApp(tester);
 
       final dotBox = find.byKey(const ValueKey('server-status-dot'));
-      // texto de 11 pt: a bolinha tem ~80% disso, perto da altura de uma letra
+      // 11 pt text: the dot is ~80% of that, close to the height of a letter
       expect(tester.getSize(dotBox), const Size(9, 9));
       expect(dotDiameterFor(11), 9);
       final gap =
@@ -566,7 +565,7 @@ void main() {
         final escritorio = find.byKey(const ValueKey('server-item-escritorio'));
         final nuvem = find.byKey(const ValueKey('server-item-nuvem'));
         expect(casa, findsOneWidget);
-        // ordem de cima para baixo: disponíveis, rótulo, desconectados
+        // top to bottom order: available, label, disconnected
         expect(
           tester.getTopLeft(escritorio).dy,
           lessThan(tester.getTopLeft(nuvem).dy),
@@ -579,7 +578,7 @@ void main() {
           tester.getTopLeft(find.text('DESCONECTADOS')).dy,
           lessThan(tester.getTopLeft(casa).dy),
         );
-        // o desconectado continua marcado como o escolhido, em vermelho
+        // the disconnected one is still marked as chosen, in red
         expect(
           find.descendant(of: casa, matching: find.byIcon(Icons.check)),
           findsOneWidget,
@@ -627,7 +626,7 @@ void main() {
 
       discovery.emit(
         sampleServers.sublist(0, 2),
-      ); // sai a Nuvem, que não era a escolhida
+      ); // Nuvem leaves, which was not the chosen one
       await tester.pumpAndSettle();
 
       expect(find.byKey(const ValueKey('server-item-nuvem')), findsNothing);
@@ -726,7 +725,7 @@ void main() {
       await tester.pump();
       expect(find.text('ABRINDO ESCRITÓRIO…'), findsOneWidget);
 
-      // um segundo toque (menu reaberto) não dispara nova consulta nem erro
+      // a second tap (menu reopened) triggers no new query nor error
       await openMenu(tester);
       await tester.tap(find.byKey(const ValueKey('server-item-nuvem')));
       await tester.pumpAndSettle();
@@ -799,7 +798,7 @@ void main() {
         );
         expect(find.textContaining('Rodando em'), findsNothing);
         expect(footerDot(tester).color, AppColors.offline);
-        // o botão do cabeçalho também
+        // the header button too
         expect(
           tester
               .widget<PulsingDot>(
@@ -826,7 +825,7 @@ void main() {
         expect(
           tester.getSize(dotBox),
           const Size(10, 10),
-        ); // ~80% de um texto de 12 pt
+        ); // ~80% of a 12 pt text
         final gap =
             tester
                 .getTopLeft(find.text('→ Rodando em: plany.casa.local:8080'))

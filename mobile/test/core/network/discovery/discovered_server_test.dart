@@ -60,10 +60,10 @@ void main() {
         '255.255.255.255',
         'fe80::1', // IPv6
         '::1',
-        '192.168.1', // incompleto
+        '192.168.1', // incomplete
         '192.168.1.256',
         '192.168.1.-1',
-        '192.168.01.5', // zero à esquerda é ambíguo
+        '192.168.01.5', // leading zero is ambiguous
         'a.b.c.d',
         '',
         '1.2.3.4.5',

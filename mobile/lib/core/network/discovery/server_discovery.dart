@@ -1,15 +1,15 @@
 import 'discovered_server.dart';
 
-/// Procura servidores Plany na rede local.
+/// Looks for Plany servers on the local network.
 abstract interface class ServerDiscovery {
-  /// Emite a lista completa dos servidores conhecidos a cada mudança (a
-  /// primeira, vazia, já na assinatura). A busca começa ao assinar e termina ao
-  /// cancelar. Um erro (por exemplo, sem permissão de rede) sai como erro do
-  /// stream.
+  /// Emits the complete list of known servers on every change (the
+  /// first one, empty, right on subscription). The search starts on subscribe and ends on
+  /// cancel. An error (for example, no network permission) comes out as a stream
+  /// error.
   Stream<List<DiscoveredServer>> watch();
 }
 
-/// Para plataformas sem mDNS (web): nunca acha nada.
+/// For platforms without mDNS (web): never finds anything.
 class NoDiscovery implements ServerDiscovery {
   const NoDiscovery();
 

@@ -9,7 +9,7 @@
   let { onaddserver }: Props = $props()
 </script>
 
-<!-- Cabeçalho escuro (layout estreito): marca, seletor de servidor e slogan. -->
+<!-- Dark header (narrow layout): brand, server selector and tagline. -->
 <header class="rounded-b-[32px] border-b border-line bg-surface px-6 pt-4 pb-7">
   <div class="flex items-center justify-between gap-2">
     <BrandRow />

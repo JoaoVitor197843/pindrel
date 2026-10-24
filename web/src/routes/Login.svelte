@@ -15,15 +15,15 @@
 
   let { oncontinueoffline }: Props = $props()
 
-  // Mesmo ponto de quebra (840) da AuthPage do mobile.
+  // Same breakpoint (840) as the mobile AuthPage.
   const desktop = new MediaQuery('min-width: 840px')
 
-  // consulta o gateway enquanto a tela de login existe
+  // polls the gateway while the login screen exists
   $effect(() => directory.start())
-  // e o servidor desta página, para a bolinha e o rodapé
+  // and this page's server, for the dot and the footer
   $effect(() => selection.watchHealth())
 
-  // durante a troca de servidor o formulário esmaece e não aceita toques
+  // during the server switch the form fades and does not accept taps
   const fade = 'transition-opacity duration-300 motion-reduce:transition-none'
 
   const addServer = () => toast.show('Adicionar servidor chega em breve.')

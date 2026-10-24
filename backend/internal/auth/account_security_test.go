@@ -23,8 +23,8 @@ func median(d []time.Duration) time.Duration {
 	return d[len(d)/2]
 }
 
-// Enumeração por tempo: "e-mail inexistente" não pode ser bem mais rápido que "senha errada".
-// Sem o hash falso, o primeiro caso pula o Argon2 e responde em ~1 ms contra dezenas de ms.
+// Timing enumeration: "nonexistent e-mail" must not be much faster than "wrong password".
+// Without the dummy hash, the first case skips Argon2 and answers in ~1 ms against tens of ms.
 func TestDB_Service_Login_TimingDoesNotRevealUnknownEmail(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -50,7 +50,7 @@ func TestDB_Service_Login_TimingDoesNotRevealUnknownEmail(t *testing.T) {
 		}
 		return median(ds)
 	}
-	measure(email) // aquece conexão do pool e a memória
+	measure(email) // warms up the pool connection and the memory
 	wrong := measure(email)
 	unknown := measure(uniqueEmail("ninguem"))
 
@@ -59,7 +59,7 @@ func TestDB_Service_Login_TimingDoesNotRevealUnknownEmail(t *testing.T) {
 	}
 }
 
-// Maiúsculas/minúsculas: o e-mail é a mesma conta (CITEXT); o login funciona em qualquer caixa.
+// Upper/lower case: the e-mail is the same account (CITEXT); login works in any case.
 func TestDB_Service_Email_IsCaseInsensitive(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -81,8 +81,8 @@ func TestDB_Service_Email_IsCaseInsensitive(t *testing.T) {
 	}
 }
 
-// Decisão registrada: username é só nome de exibição, não identifica a conta nem é único.
-// Se isso mudar (por exemplo @menções), a migration precisa de um índice único sobre a forma normalizada.
+// Recorded decision: username is only a display name, it neither identifies the account nor is unique.
+// If that changes (for example @mentions), the migration needs a unique index on the normalized form.
 func TestDB_Service_Username_IsDisplayNameOnly(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -97,8 +97,8 @@ func TestDB_Service_Username_IsDisplayNameOnly(t *testing.T) {
 	}
 }
 
-// Concorrência: N cadastros do mesmo e-mail ao mesmo tempo. Exatamente um vence; os outros
-// recebem ErrEmailAlreadyExists (409), nunca um erro cru do banco (500).
+// Concurrency: N sign-ups of the same e-mail at the same time. Exactly one wins; the others
+// get ErrEmailAlreadyExists (409), never a raw database error (500).
 func TestDB_Service_Register_ConcurrentSameEmail(t *testing.T) {
 	_, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -138,7 +138,7 @@ func TestDB_Service_Register_ConcurrentSameEmail(t *testing.T) {
 	}
 }
 
-// O mesmo pelo handler: o perdedor da corrida responde 409 email_already_exists.
+// The same through the handler: the loser of the race answers 409 email_already_exists.
 func TestDB_Handler_Register_ConcurrentSameEmail_Returns409(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -189,7 +189,7 @@ func deleteUserByEmail(t *testing.T, repo *db.Queries, email, _ string) {
 	}
 }
 
-// Logout de ponta a ponta: depois dele, nem o access nem o refresh antigos valem.
+// End-to-end logout: after it, neither the old access nor the old refresh token is valid.
 func TestDB_Handler_Logout_InvalidatesAccessAndRefresh(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -203,21 +203,21 @@ func TestDB_Handler_Logout_InvalidatesAccessAndRefresh(t *testing.T) {
 	h.Logout(rec, req)
 	requireStatus(t, rec, http.StatusNoContent)
 
-	// refresh token revogado não gera novo access token
+	// a revoked refresh token does not generate a new access token
 	req = rawRequest(http.MethodPost, "/auth/refresh/", nil)
 	req.AddCookie(refresh)
 	rec = httptest.NewRecorder()
 	h.Refresh(rec, req)
 	requireStatus(t, rec, http.StatusUnauthorized)
 
-	// access token revogado não abre /auth/me
+	// a revoked access token does not open /auth/me
 	req = rawRequest(http.MethodGet, "/auth/me/", nil)
 	req.Header.Set("Authorization", "Bearer "+access)
 	rec = httptest.NewRecorder()
 	h.Me(rec, req)
 	requireStatus(t, rec, http.StatusUnauthorized)
 
-	// sair duas vezes (toque repetido) não vira 500
+	// logging out twice (repeated tap) does not become a 500
 	req = rawRequest(http.MethodPost, "/auth/logout/", nil)
 	req.Header.Set("Authorization", "Bearer "+access)
 	req.AddCookie(refresh)
@@ -228,8 +228,8 @@ func TestDB_Handler_Logout_InvalidatesAccessAndRefresh(t *testing.T) {
 	}
 }
 
-// Um refresh token não serve como access token e vice-versa não vira sessão nova depois do logout.
-// (Hoje os dois são o mesmo tipo de token; este teste documenta o que é garantido: a revogação vale.)
+// A refresh token does not work as an access token, and vice versa, and does not become a new session after logout.
+// (Today both are the same kind of token; this test documents what is guaranteed: revocation holds).
 func TestDB_Handler_Login_TwoSessionsAreIndependent(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -246,10 +246,10 @@ func TestDB_Handler_Login_TwoSessionsAreIndependent(t *testing.T) {
 	req.AddCookie(refreshB)
 	rec := httptest.NewRecorder()
 	h.Refresh(rec, req)
-	requireStatus(t, rec, http.StatusOK) // sair de um aparelho não derruba o outro
+	requireStatus(t, rec, http.StatusOK) // logging out of one device does not bring down the other
 }
 
-// Unicode no username: invisíveis, controle e formas diferentes do mesmo texto.
+// Unicode in the username: invisible characters, control characters and different forms of the same text.
 func TestValidateRegister_UnicodeUsernames(t *testing.T) {
 	bad := map[string]string{
 		"espaço de largura zero": "​​​",
@@ -278,7 +278,7 @@ func TestValidateRegister_UnicodeUsernames(t *testing.T) {
 	}
 }
 
-// O limite de 3..32 conta caracteres (runes), não bytes: "李雷李" tem 3 caracteres e 9 bytes.
+// The 3..32 limit counts characters (runes), not bytes: "李雷李" has 3 characters and 9 bytes.
 func TestValidateRegister_UsernameLengthCountsCharacters(t *testing.T) {
 	ok := func(u string) bool {
 		return validator.ValidateRegister(&dto.RegisterInput{Email: "a@b.com", Username: u, Password: "senha_valida_123"}) == nil
@@ -297,8 +297,8 @@ func TestValidateRegister_UsernameLengthCountsCharacters(t *testing.T) {
 	}
 }
 
-// Normalização: "é" composto (U+00E9) e "e"+acento (U+0065 U+0301) são o mesmo nome e
-// precisam ser gravados da mesma forma (NFC).
+// Normalization: composed "é" (U+00E9) and "e"+accent (U+0065 U+0301) are the same name and
+// must be stored the same way (NFC).
 func TestValidator_NormalizeUsername(t *testing.T) {
 	composed, decomposed := "José", "José"
 	if validator.NormalizeUsername(composed) != validator.NormalizeUsername(decomposed) {
@@ -310,7 +310,7 @@ func TestValidator_NormalizeUsername(t *testing.T) {
 	if got := validator.NormalizeUsername(decomposed); got != composed {
 		t.Errorf("esperado NFC, veio %+q", got)
 	}
-	// uma decomposição gigante não pode explodir
+	// a giant decomposition must not blow up
 	if got := validator.NormalizeUsername(strings.Repeat("é", 10000)); len(got) == 0 {
 		t.Error("normalizou para vazio")
 	}
@@ -331,8 +331,8 @@ func TestDB_Service_Register_StoresNormalizedUsername(t *testing.T) {
 	}
 }
 
-// Mensagem do registro: a decisão (aceitável num servidor pessoal) é revelar "e-mail já cadastrado" com 409.
-// O login, por outro lado, nunca distingue conta inexistente de senha errada.
+// Sign-up message: the decision (acceptable on a personal server) is to reveal "e-mail já cadastrado" with 409.
+// Login, on the other hand, never tells a nonexistent account from a wrong password.
 func TestDB_Handler_Login_SameAnswerForUnknownEmailAndWrongPassword(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()

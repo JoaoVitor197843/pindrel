@@ -7,8 +7,8 @@
 
   let { onclose }: Props = $props()
 
-  // Teclado virtual: o que ele cobre da janela vira folga embaixo, para o campo e o botão subirem junto
-  // (o `viewInsets.bottom` do app). Sem `visualViewport` (ou sem teclado) a folga é zero.
+  // Virtual keyboard: what it covers of the window becomes space at the bottom, so the field and the button rise together
+  // (the app's `viewInsets.bottom`). Without `visualViewport` (or without a keyboard) the gap is zero.
   let keyboard = $state(0)
 
   $effect(() => {

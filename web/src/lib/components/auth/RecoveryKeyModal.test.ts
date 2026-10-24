@@ -50,7 +50,7 @@ describe('RecoveryKeyModal', () => {
       setViewport(target)
       return target
     }
-    // não usa vi.unstubAllGlobals: ele também desfaz o fetch falso do setup
+    // does not use vi.unstubAllGlobals: it also undoes the setup's fake fetch
     const setViewport = (value: unknown) => Object.defineProperty(window, 'visualViewport', { value, configurable: true })
     afterEach(() => setViewport(undefined))
     const gap = () => screen.getByTestId('recovery-overlay').style.paddingBottom

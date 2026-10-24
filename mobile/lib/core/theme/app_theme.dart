@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'app_colors.dart';
 
-/// Estilos de texto nativos (sem pacotes de fonte): serifa para títulos,
-/// monoespaçada para badges e ações.
+/// Native text styles (no font packages): serif for titles,
+/// monospace for badges and actions.
 abstract final class AppText {
   static TextStyle serif(
     double size, {

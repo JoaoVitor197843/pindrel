@@ -8,7 +8,7 @@ export const found = (name: string, ip = '192.168.0.20', port = 8095): Discovere
   port,
 })
 
-/** Faz `GET /server/discover/` responder [servers] em protobuf; o resto (sondagem) responde 200. */
+/** Makes `GET /server/discover/` answer [servers] in protobuf; the rest (probe) answers 200. */
 export function mockDiscover(servers: DiscoveredServer[] | 'error' | 'missing') {
   vi.mocked(fetch).mockImplementation(async (input) => {
     if (String(input) !== '/server/discover/') return new Response(null, { status: 200 })

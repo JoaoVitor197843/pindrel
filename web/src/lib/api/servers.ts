@@ -2,8 +2,8 @@ import { DiscoveredServers, type DiscoveredServer } from '../../types/shared/pro
 import { ApiError, getProto } from './client'
 
 /**
- * Servidores Plany que o gateway achou na rede (`GET /server/discover/`). Sem gateway
- * (deploy simples) o endpoint não existe: 404 vale por "nenhum outro servidor".
+ * Plany servers the gateway found on the network (`GET /server/discover/`). Without a gateway
+ * (simple deploy) the endpoint does not exist: 404 stands for "no other server".
  */
 export async function fetchDiscoveredServers(signal?: AbortSignal): Promise<DiscoveredServer[]> {
   try {

@@ -158,7 +158,7 @@ void main() {
   });
 }
 
-// ---- uso descuidado / conexão ruim ----
+// ---- careless use / bad connection ----
 void stressTests() {
   test('erro de rede propaga e não mexe nos cookies guardados', () async {
     final store = MemoryCookieStore();

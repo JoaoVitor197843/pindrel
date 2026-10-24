@@ -1,4 +1,3 @@
-<!-- Marca `P`, nome e tag SELF-HOSTED. -->
 <div class="flex min-w-0 items-center gap-2.5">
   <div class="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent font-serif text-xl">P</div>
   <span class="font-serif text-2xl">Plany</span>
