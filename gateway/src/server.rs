@@ -107,7 +107,7 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
         let mut tick = time::interval_at(time::Instant::now() + Duration::from_secs(600), Duration::from_secs(600));
         loop {
             tokio::select! {
-                _ = tick.tick() => a.limiters.prune(Duration::from_secs(1800)),
+                _ = tick.tick() => a.limiters.prune(),
                 _ = stop.changed() => return,
             }
         }
