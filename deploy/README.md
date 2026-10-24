@@ -18,11 +18,21 @@ push na main ─▶ Forgejo Actions (runner do PC) ─▶ imagens amd64+arm64 no
 | `deploy/install-timer.sh` | Pi | instala o timer do systemd que roda o `update.sh` |
 | `database.Migrate` (API) | contêiner | aplica as migrations que vão dentro do binário ao iniciar |
 
-## Rollback
+## Atualização sem parar (rolling) e rollback
 
-`update.sh` guarda o id da imagem que roda. Se a nova não ficar `healthy` em `WAIT_TIMEOUT` (120 s), ele
-aponta a tag de volta para a imagem de antes, recria os contêineres e **anota o par de imagens que falhou**
-(`.deploy-state/failed`): a mesma versão não é tentada outra vez, só uma nova publicada depois.
+A API roda em réplicas, e `update.sh` as troca **uma por vez**: sobe uma réplica nova ao lado das antigas, espera
+ficar `healthy` e só então para uma antiga; repete até não sobrar nenhuma antiga. As antigas seguem servindo o
+tempo todo (o gateway repete numa outra réplica uma conexão que falhou, e vê as novas em até 3 s).
+
+- Se a imagem nova **não** ficar saudável, nenhuma réplica antiga foi tocada: a nova é removida, o par de imagens
+  que falhou fica anotado (`.deploy-state/failed`) e a mesma versão não é tentada outra vez, só uma publicada depois.
+  Se a falha vier no meio da troca, as réplicas novas são trocadas de volta pelas antigas do mesmo jeito.
+- O **gateway** é um contêiner só (rede do host, uma porta): recriá-lo é o único corte, de cerca de meio segundo,
+  e só acontece quando a imagem dele mudou.
+- Medido no Pi (2 réplicas, 20 requisições por segundo durante a troca): nenhuma falha na troca da API; só a
+  recriação do gateway deu ~0,45 s de "conexão recusada".
+- A nova réplica sobe, e aplica as migrations, **enquanto as antigas ainda servem**: toda migration precisa ser
+  compatível com o código da versão anterior (ver abaixo).
 
 **Limite do rollback: o banco.** As migrations só andam para frente. Uma migration que apaga ou renomeia
 coluna deixa o código antigo sem chão. Escreva-as em duas etapas (primeiro adiciona e passa a usar, depois
