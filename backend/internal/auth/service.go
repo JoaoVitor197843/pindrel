@@ -20,7 +20,6 @@ var (
 	ErrUserNotFound         = errors.New("user not found")
 )
 
-// pgUniqueViolation is the Postgres error code for a UNIQUE constraint violation.
 const pgUniqueViolation = "23505"
 
 // dummyHash is verified when the e-mail does not exist so that login takes the same time (one

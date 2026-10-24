@@ -1,15 +1,15 @@
-# CI do gateway (Rust). Roda só quando o gateway, o schema protobuf ou este arquivo mudam.
+# Gateway CI (Rust). Runs only when the gateway, the protobuf schema or this file change.
 #
-# - Os testes de mDNS precisam de multicast; onde ele não existe eles avisam e passam.
-# - Limites de RAM para caber no Raspberry Pi (jobs rodam com capacity 1 e no máx. ~1,5 GB):
-#   um job de compilação por vez e testes com o perfil de desenvolvimento (sem LTO).
+# - The mDNS tests need multicast; where it does not exist they warn and pass.
+# - RAM limits to fit the Raspberry Pi (jobs run with capacity 1 and at most ~1.5 GB):
+#   one compile job at a time and tests with the development profile (no LTO).
 name: gateway
 
 on:
-  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  # also called by release.yml: the image is only published if this workflow passes
   workflow_call:
   push:
-    # na main quem testa é o release.yml (chama este workflow); rodar de novo aqui seria trabalho em dobro
+    # on main release.yml does the testing (it calls this workflow); running again here would be double work
     branches-ignore: [main]
     paths:
       - "gateway/**"
@@ -23,7 +23,7 @@ on:
 
 jobs:
   analyze-and-test:
-    # sem Rust no runner `ci` (o Pi): roda no PC, na imagem ci-pc (.forgejo/images/ci-pc.Dockerfile)
+    # no Rust on the `ci` runner (the Pi): runs on the PC, in the ci-pc image (.forgejo/images/ci-pc.Dockerfile)
     runs-on: build
     container:
       image: ci-pc:1

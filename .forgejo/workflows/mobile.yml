@@ -1,18 +1,18 @@
-# CI do mobile (Flutter). Roda só quando o mobile, o schema protobuf ou este arquivo mudam.
+# Mobile CI (Flutter). Runs only when mobile, the protobuf schema or this file change.
 #
-# - Usa o label `flutter` (runner do PC, imagem ci-flutter:1 de lá; o Pi, de 1 slot, levava ~6 min). O label
-#   `ci-flutter` do Pi (ver .forgejo/images/ci-flutter.Dockerfile) continua existindo como alternativa.
-# - Análise: `flutter analyze` (Dart, flutter_lints).
-# - Testes: não roda o teste de integração que chama o servidor Go ("Testa a chamada de api para o go");
-#   arquivos de teste vazios (placeholders) são ignorados até ganharem conteúdo, senão o
-#   flutter test falha ao carregá-los.
+# - Uses the `flutter` label (PC runner, ci-flutter:1 image there; the Pi, with 1 slot, took ~6 min). The Pi's
+#   `ci-flutter` label (see .forgejo/images/ci-flutter.Dockerfile) still exists as an alternative.
+# - Analysis: `flutter analyze` (Dart, flutter_lints).
+# - Tests: does not run the integration test that calls the Go server ("Testa a chamada de api para o go");
+#   empty test files (placeholders) are ignored until they get content, otherwise
+#   flutter test fails to load them.
 name: mobile
 
 on:
-  # chamado também pelo release.yml: a imagem só é publicada se este workflow passar
+  # also called by release.yml: the image is only published if this workflow passes
   workflow_call:
   push:
-    # na main quem testa é o release.yml (chama este workflow); rodar de novo aqui seria trabalho em dobro
+    # on main release.yml does the testing (it calls this workflow); running again here would be double work
     branches-ignore: [main]
     paths:
       - "mobile/**"

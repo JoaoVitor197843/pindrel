@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, vi } from 'vitest'
 
-// jsdom não implementa matchMedia; este stub avalia `min-width` contra `viewport.width`.
+// jsdom does not implement matchMedia; this stub evaluates `min-width` against `viewport.width`.
 export const viewport = {
   width: 450,
   listeners: new Set<() => void>(),
@@ -41,7 +41,7 @@ window.matchMedia = (query: string) => {
 
 afterEach(() => viewport.set(450))
 
-// Sem servidor por trás: o gateway "não existe" (404) a menos que o teste troque o fetch.
+// No server behind it: the gateway "does not exist" (404) unless the test swaps fetch.
 const noGateway = async () => new Response(null, { status: 404 })
 vi.stubGlobal('fetch', vi.fn(noGateway))
 beforeEach(() => {

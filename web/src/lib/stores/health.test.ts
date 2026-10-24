@@ -6,7 +6,7 @@ const down = () => vi.mocked(fetch).mockImplementation(async () => Promise.rejec
 
 beforeEach(() => {
   selection.health = 'connected'
-  // zera a contagem de falhas de testes anteriores
+  // resets the failure count left by earlier tests
   answer(200)
 })
 
@@ -29,7 +29,7 @@ describe('selection.check', () => {
     expect(selection.health).toBe('connected')
     down()
     await selection.check()
-    expect(selection.health).toBe('connected') // recomeçou do zero
+    expect(selection.health).toBe('connected') // started over from zero
   })
 
   it.each([200, 404, 429])('resposta %i prova que o servidor está lá', async (status) => {
@@ -89,7 +89,7 @@ describe('selection.watchHealth', () => {
     down()
     await vi.advanceTimersByTimeAsync(1)
     expect(fetch).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(3_000) // depois de falhar: 3 s
+    await vi.advanceTimersByTimeAsync(3_000) // after failing: 3 s
     expect(fetch).toHaveBeenCalledTimes(3)
     expect(selection.health).toBe('disconnected')
     answer(200)
@@ -128,7 +128,7 @@ describe('selection.watchHealth', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(fetch).toHaveBeenCalledTimes(1)
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(fetch).toHaveBeenCalledTimes(2) // um só ciclo continua, não vinte
+    expect(fetch).toHaveBeenCalledTimes(2) // a single cycle goes on, not twenty
     stop()
   })
 })

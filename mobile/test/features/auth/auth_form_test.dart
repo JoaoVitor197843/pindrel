@@ -93,7 +93,7 @@ void main() {
     await tester.tap(find.byType(Checkbox));
     await tester.pump();
     expect(checked(), isFalse);
-    await tester.tap(find.text('Manter conectado')); // o texto também alterna
+    await tester.tap(find.text('Manter conectado')); // the text toggles it too
     await tester.pump();
     expect(checked(), isTrue);
   });

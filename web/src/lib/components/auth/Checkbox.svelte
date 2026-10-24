@@ -9,10 +9,10 @@
 
   let { checked }: Props = $props()
 
-  // O Checkbox do Material, refeito: 18 px, 200 ms, `easeIn` ao marcar e `easeOut` ao desmarcar. Uma posição
-  // `t` de 0 a 1 guia tudo: até 0,5 a caixa encolhe 1 px por lado e o preenchimento aparece (nos primeiros
-  // 25%); depois ela volta ao tamanho e o "certo" é traçado, primeiro a perna curta e depois a longa.
-  // Desmarcar toca o mesmo caminho ao contrário, a partir de onde estiver.
+  // Material's Checkbox, rebuilt: 18 px, 200 ms, `easeIn` when checking and `easeOut` when unchecking. A position
+  // `t` from 0 to 1 drives everything: up to 0.5 the box shrinks 1 px per side and the fill appears (in the first
+  // 25%); then it grows back and the check is drawn, short leg first and then the long one.
+  // Unchecking plays the same path backwards, from wherever it is.
   const SIZE = 18
   const DURATION_MS = 200
   const START = [SIZE * 0.15, SIZE * 0.45]
@@ -21,7 +21,7 @@
 
   const initial = untrack(() => (checked ? 1 : 0))
   let t = $state(initial)
-  // o valor linear (antes da curva): é dele que a animação parte se for interrompida
+  // the linear value (before the curve): an interrupted animation starts from it
   let controller = initial
   let frame = 0
 

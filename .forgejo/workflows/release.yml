@@ -1,15 +1,15 @@
-# Release: em push na main, monta as imagens do Plany (API + web embutido) e do gateway para amd64 e arm64
-# e as publica no registry do Forgejo. O Raspberry Pi as puxa sozinho (deploy/update.sh, timer do systemd).
+# Release: on push to main, builds Plany's images (API + embedded web) and the gateway for amd64 and arm64
+# and publishes them to the Forgejo registry. The Raspberry Pi pulls them by itself (deploy/update.sh, systemd timer).
 #
-# - Roda no runner do PC (label `build`): é ele quem tem o Docker do host, RAM e CPU. O Pi não compila nada.
-# - Não há emulação: os Dockerfiles compilam para arm64 com compilação cruzada (Go e Rust no estágio da máquina
-#   de build; o estágio final não tem RUN).
-# - Precisa de dois secrets do repositório (Configurações > Actions > Secrets):
-#     REGISTRY_USER   usuário do Forgejo dono dos pacotes
-#     REGISTRY_TOKEN  token de acesso com escopo write:package
-# - A release só acontece se TODOS os testes passarem: ela chama os mesmos workflows de CI (backend, web, gateway
-#   e mobile, com `uses:`; o backend inclui os testes com banco) e o job `images` depende de todos eles. Se um
-#   falhar nada é publicado, a tag `latest` não muda e o Pi continua na versão que já roda.
+# - Runs on the PC's runner (label `build`): it has the host's Docker, RAM and CPU. The Pi compiles nothing.
+# - There is no emulation: the Dockerfiles cross-compile to arm64 (Go and Rust in the build machine's
+#   stage; the final stage has no RUN).
+# - Needs two repository secrets (Settings > Actions > Secrets):
+#     REGISTRY_USER   Forgejo user that owns the packages
+#     REGISTRY_TOKEN  access token with write:package scope
+# - The release only happens if ALL tests pass: it calls the same CI workflows (backend, web, gateway
+#   and mobile, with `uses:`; the backend includes the tests with a database) and the `images` job depends on all of them. If one
+#   fails nothing is published, the `latest` tag does not change and the Pi stays on the version it already runs.
 name: release
 
 on:
@@ -25,7 +25,7 @@ on:
       - ".forgejo/workflows/release.yml"
   workflow_dispatch:
 
-# duas releases ao mesmo tempo disputariam a tag `latest`
+# two releases at the same time would fight over the `latest` tag
 concurrency:
   group: release
   cancel-in-progress: false
@@ -40,8 +40,8 @@ jobs:
   test-mobile:
     uses: ./.forgejo/workflows/mobile.yml
 
-  # Compila as imagens (sem publicar) ENQUANTO os testes rodam: o cache do buildkit fica quente e o job `images`,
-  # que só começa depois dos testes, só empurra camadas prontas. Se um teste falhar, o trabalho é descartado.
+  # Builds the images (without publishing) WHILE the tests run: the buildkit cache gets warm and the `images` job,
+  # which only starts after the tests, just pushes ready layers. If a test fails, the work is discarded.
   prebuild:
     runs-on: build
     timeout-minutes: 60
@@ -85,8 +85,8 @@ jobs:
           [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_TOKEN" ] || { echo "faltam os secrets REGISTRY_USER e REGISTRY_TOKEN"; exit 1; }
           echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
 
-      # contêiner do buildkit na rede do host: resolve o registry como o resto do PC; o estado (cache do cargo,
-      # do go e do yarn) fica no builder e serve às próximas releases
+      # buildkit container on the host network: resolves the registry like the rest of the PC; the state (cargo, go
+      # and yarn cache) stays in the builder and serves the next releases
       - name: Builder multi-arch
         run: |
           docker buildx inspect release >/dev/null 2>&1 \
@@ -97,7 +97,7 @@ jobs:
       - name: Imagens (amd64 + arm64)
         run: |
           sha=$(git rev-parse --short=12 HEAD)
-          build() { # build <nome> <contexto> <dockerfile>
+          build() { # build <name> <context> <dockerfile>
             docker buildx build --platform linux/amd64,linux/arm64 --push \
               -t "$REGISTRY/$OWNER/$1:$sha" -t "$REGISTRY/$OWNER/$1:latest" \
               -f "$3" "$2"

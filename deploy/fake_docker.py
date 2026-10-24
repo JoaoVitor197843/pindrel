@@ -31,7 +31,7 @@ def healthy_serving():
 
 def new_container(svc, image):
     world["seq"] += 1
-    # um contêiner novo só fica saudável se a imagem não é doente e a falha "tardia" não chegou
+    # a new container only becomes healthy if the image is not sick and the "late" failure has not arrived
     bad = image in world["bad"]
     created = world.setdefault("created", 0) + 1
     world["created"] = created
@@ -87,10 +87,10 @@ if args[0] == "compose":
                         new_container(svc, image)
                 else:
                     for c in have:
-                        if c["image"] != image:  # recria no lugar, derrubando a antiga primeiro
+                        if c["image"] != image:  # recreates in place, taking the old one down first
                             world["containers"].remove(c)
                             new_container(svc, image)
-            # --wait: falha se sobrar qualquer contêiner do serviço que não esteja saudável
+            # --wait: fails if any container of the service is left that is not healthy
             if any(c["health"] != "healthy" for c in containers(svc)):
                 failed = True
         save()
@@ -115,7 +115,7 @@ elif args[0] in ("stop", "rm"):
     for i in ids:
         remaining = [c for c in healthy_serving() if c["id"] != i]
         with open(os.path.join(S, "serving"), "a") as f:
-            f.write("%d\n" % len(remaining))  # quantas réplicas saudáveis restam ao tirar esta
+            f.write("%d\n" % len(remaining))  # how many healthy replicas remain when this one is removed
     if args[0] == "rm":
         world["containers"] = [c for c in world["containers"] if c["id"] not in ids]
         save()

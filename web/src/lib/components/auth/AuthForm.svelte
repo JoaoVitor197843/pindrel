@@ -6,7 +6,7 @@
   import RecoveryKeyModal from './RecoveryKeyModal.svelte'
 
   interface Props {
-    /** Mostra a linha de apoio sob o título (layout largo). */
+    /** Shows the supporting line under the title (wide layout). */
     showSubtitle?: boolean
     oncontinueoffline?: () => void
   }
@@ -27,14 +27,14 @@
   }
 
   function submit(event: SubmitEvent) {
-    // A integração com a API de auth ainda não existe.
+    // The auth API integration does not exist yet.
     event.preventDefault()
   }
 </script>
 
 <div class="flex flex-col gap-5">
   <div>
-    <!-- o texto novo aparece com fade (o antigo é trocado na hora, sem os dois empilhados) -->
+    <!-- the new text appears with a fade (the old one is swapped at once, without both stacked) -->
     {#key register}
       <h1 class="font-serif text-3xl" in:fade={{ duration: ms(200) }}>
         {register ? 'Criar nova conta' : 'Bem-vindo de volta'}

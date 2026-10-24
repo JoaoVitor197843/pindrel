@@ -11,15 +11,15 @@ import '../widgets/auth_header.dart';
 import '../widgets/pulsing_dot.dart';
 import '../widgets/server_dropdown_selector.dart';
 
-/// Tela de login / cadastro com layout adaptativo: cabeçalho + formulário em
-/// telas estreitas, painel institucional + formulário lado a lado em largas.
+/// Login / sign-up screen with an adaptive layout: header + form on
+/// narrow screens, institutional panel + form side by side on wide ones.
 class AuthPage extends StatelessWidget {
   const AuthPage({super.key, this.onContinueOffline});
 
-  /// Largura mínima (em dp) para usar o layout desktop.
+  /// Minimum width (in dp) to use the desktop layout.
   static const desktopBreakpoint = 840.0;
 
-  /// Chamado ao tocar em "Continuar offline neste dispositivo".
+  /// Called when tapping "Continuar offline neste dispositivo".
   final VoidCallback? onContinueOffline;
 
   static void _showAddServerSoon(BuildContext context) {
@@ -127,7 +127,7 @@ class _DesktopLayout extends StatelessWidget {
   }
 }
 
-/// Rodapé do desktop: o endereço do servidor escolhido e se ele está na rede.
+/// Desktop footer: the chosen server's address and whether it is on the network.
 class _ServerFooter extends ConsumerWidget {
   const _ServerFooter();
 

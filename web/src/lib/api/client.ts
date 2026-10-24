@@ -1,4 +1,4 @@
-/** Resposta maior que isso não é de um servidor Plany: é descartada sem decodificar. */
+/** A response bigger than this is not from a Plany server: it is discarded without decoding. */
 const MAX_BODY_BYTES = 64 * 1024
 
 export class ApiError extends Error {
@@ -15,7 +15,7 @@ interface GetOptions {
   timeoutMs?: number
 }
 
-/** GET de um endpoint protobuf do servidor embutido (caminho relativo, na raiz). */
+/** GET of a protobuf endpoint of the embedded server (relative path, at the root). */
 export async function getProto<T>(
   path: string,
   decode: (bytes: Uint8Array) => T,

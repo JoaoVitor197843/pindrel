@@ -142,7 +142,7 @@ func TestDB_Pool_AcquireWithCancelledContext_FailsWithoutLeaking(t *testing.T) {
 	pool := smallPool(t, 2)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // already cancelled before the call
+	cancel()
 
 	start := time.Now()
 	_, err := pool.Acquire(ctx)

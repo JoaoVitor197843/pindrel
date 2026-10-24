@@ -9,7 +9,7 @@ import 'package:mobile/features/auth/data/server_option.dart';
 
 import '../../support/discovery_fakes.dart';
 
-/// Uma descoberta que também pode falhar.
+/// A discovery that can also fail.
 class ErrorDiscovery implements ServerDiscovery {
   final controller = StreamController<List<DiscoveredServer>>();
 
@@ -286,7 +286,7 @@ void main() {
         discovery.emit([
           sampleServers[0],
           sampleServers[2],
-        ]); // sai o Escritório
+        ]); // Escritório leaves
         await flush();
         expect(controller.current.available.map((o) => o.name), [
           'Casa',

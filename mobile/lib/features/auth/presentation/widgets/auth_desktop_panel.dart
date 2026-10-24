@@ -4,9 +4,9 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'auth_header.dart';
 
-/// Painel esquerdo do layout desktop: marca, slogan, diferenciais e rodapé.
+/// Left panel of the desktop layout: brand, tagline, selling points and footer.
 class AuthDesktopPanel extends StatelessWidget {
-  /// No desktop há espaço: o nome do servidor e a bolinha cabem sem reticências.
+  /// On desktop there is room: the server name and the dot fit without ellipsis.
   static const desktopSelectorMaxWidth = 260.0;
 
   const AuthDesktopPanel({super.key, this.onAddServer});

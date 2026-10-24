@@ -11,7 +11,7 @@ describe('AuthForm — uso descuidado', () => {
     render(AuthForm)
     const toggle = () => screen.getByRole('button', { name: /MOSTRAR|OCULTAR/ })
     for (let i = 0; i < 7; i++) await click(toggle())
-    expect(password().type).toBe('text') // 7 toques = ímpar
+    expect(password().type).toBe('text') // 7 taps = odd
 
     await click(toggle())
     expect(password().type).toBe('password')
@@ -51,7 +51,7 @@ describe('AuthForm — uso descuidado', () => {
     const form = document.querySelector('form')!
     for (let i = 0; i < 3; i++) {
       const notCancelled = await fireEvent.submit(form)
-      expect(notCancelled).toBe(false) // preventDefault foi chamado
+      expect(notCancelled).toBe(false) // preventDefault was called
     }
     await click(screen.getByRole('button', { name: 'Entrar' }))
     expect(screen.getByRole('heading', { name: 'Bem-vindo de volta' })).toBeTruthy()
@@ -70,7 +70,7 @@ describe('AuthForm — uso descuidado', () => {
     render(AuthForm)
     const open = screen.getByRole('button', { name: 'Chave de recuperação' })
     await click(open)
-    // o botão fica atrás do modal, mas um segundo clique direto não pode duplicar
+    // the button sits behind the modal, but a second direct click must not duplicate
     await click(open)
     expect(screen.getAllByRole('dialog')).toHaveLength(1)
   })

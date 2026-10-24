@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
 
-/// Barra fantasma de carregamento: a cor da borda, com a opacidade indo e
-/// voltando (1,5 s, como o esqueleto da web). Com "reduzir movimento" fica
-/// parada.
+/// Ghost loading bar: the border color, with the opacity going back
+/// and forth (1.5 s, like the web skeleton). With "reduce motion" it stands
+/// still.
 class SkeletonBar extends StatefulWidget {
   const SkeletonBar({super.key, required this.height, this.width});
 
   final double height;
 
-  /// Sem largura, ocupa a que houver.
+  /// Without a width, it takes whatever there is.
   final double? width;
 
   @override
@@ -45,7 +45,7 @@ class _SkeletonBarState extends State<SkeletonBar>
   @override
   Widget build(BuildContext context) {
     return FadeTransition(
-      // 1.0 -> 0.45 e de volta
+      // 1.0 -> 0.45 and back
       opacity: Tween<double>(begin: 1, end: 0.45).animate(_controller),
       child: Container(
         width: widget.width,

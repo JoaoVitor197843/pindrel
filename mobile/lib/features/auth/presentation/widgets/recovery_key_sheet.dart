@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 
-/// Modal simples de recuperação por código (chave de recuperação).
+/// Simple recovery modal by code (recovery key).
 class RecoveryKeySheet extends StatelessWidget {
   const RecoveryKeySheet({super.key});
 

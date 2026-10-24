@@ -1,11 +1,11 @@
-# node_modules e cache (web)
+# node_modules and cache (web)
 **/node_modules
 web/.yarn/cache
 web/.yarn/install-state.gz
 web/dist
 web/.vscode
 
-# Segredos e variáveis locais (nunca entram na imagem)
+# Secrets and local variables (never enter the image)
 .env
 .envrc
 web/.env
@@ -19,11 +19,11 @@ backend/bin
 backend/server
 **/*_test.go
 
-# Testes do web (não entram no build)
+# Web tests (not part of the build)
 web/src/**/*.test.ts
 web/coverage
 
-# Fora do build da imagem
+# Outside the image build
 mobile/
 shared/
 docs/
@@ -34,7 +34,7 @@ Dockerfile
 .github
 .forgejo
 
-# Geral
+# General
 .git
 .gitignore
 *.md

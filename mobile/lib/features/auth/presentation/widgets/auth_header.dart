@@ -4,7 +4,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import 'server_dropdown_selector.dart';
 
-/// Cabeçalho escuro com marca, tag SELF-HOSTED, seletor de servidor e slogan.
+/// Dark header with brand, SELF-HOSTED tag, server selector and tagline.
 class AuthHeader extends StatelessWidget {
   const AuthHeader({super.key, this.onAddServer});
 
@@ -52,9 +52,9 @@ class AuthHeader extends StatelessWidget {
   }
 }
 
-/// A marca à esquerda e o seletor de servidor à direita. A marca tem prioridade:
-/// o botão do servidor fica com o espaço que sobra (até [maxSelectorWidth]), e
-/// o nome dentro dele ganha reticências se não couber.
+/// The brand on the left and the server selector on the right. The brand has priority:
+/// the server button gets the space that is left (up to [maxSelectorWidth]), and
+/// the name inside it gets an ellipsis if it does not fit.
 class AuthBrandAndServerRow extends StatelessWidget {
   const AuthBrandAndServerRow({
     super.key,
@@ -67,11 +67,11 @@ class AuthBrandAndServerRow extends StatelessWidget {
 
   static const gap = 8.0;
 
-  /// Menor largura útil do botão (bolinha, um pedaço do nome e a seta).
+  /// Smallest useful width of the button (dot, a piece of the name and the arrow).
   static const minSelectorWidth = 96.0;
 
-  /// Largura do botão numa linha de [rowWidth]: o que sobra depois da marca,
-  /// entre [minSelectorWidth] e [maxSelectorWidth].
+  /// Width of the button in a row of [rowWidth]: what is left after the brand,
+  /// between [minSelectorWidth] and [maxSelectorWidth].
   static double selectorWidthFor(double rowWidth, double maxSelectorWidth) =>
       (rowWidth - gap - AuthBrandRow.minWidth)
           .clamp(minSelectorWidth, maxSelectorWidth)
@@ -99,11 +99,10 @@ class AuthBrandAndServerRow extends StatelessWidget {
   }
 }
 
-/// Marca `P`, nome e tag SELF-HOSTED.
 class AuthBrandRow extends StatelessWidget {
   const AuthBrandRow({super.key});
 
-  /// Largura da marca e do nome, sem a tag (que encolhe com reticências).
+  /// Width of the brand and the name, without the tag (which shrinks with an ellipsis).
   static const minWidth = 132.0;
 
   @override
