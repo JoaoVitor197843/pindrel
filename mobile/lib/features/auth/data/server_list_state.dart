@@ -20,6 +20,8 @@ class ServerListState {
     this.selected,
     this.selectedConnected = false,
     this.searchError,
+    this.connecting,
+    this.loaded = false,
   });
 
   /// Os servidores que a rede anuncia agora.
@@ -32,6 +34,12 @@ class ServerListState {
 
   /// Por que a busca falhou (por exemplo, sem permissão de rede), se falhou.
   final Object? searchError;
+
+  /// O servidor que está sendo testado antes de ser escolhido, se houver.
+  final ServerOption? connecting;
+
+  /// Se a busca já respondeu pelo menos uma vez (com lista ou com erro).
+  final bool loaded;
 
   ServerConnection get connection {
     if (selected == null) return ServerConnection.none;
