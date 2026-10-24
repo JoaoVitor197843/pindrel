@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/app.dart';
+import 'package:mobile/core/network/discovery/discovered_server.dart';
+import 'package:mobile/core/network/discovery/server_discovery.dart';
+import 'package:mobile/core/network/server_probe.dart';
 import 'package:mobile/core/theme/app_colors.dart';
 import 'package:mobile/features/auth/presentation/widgets/pulsing_dot.dart';
 import 'package:mobile/features/auth/presentation/widgets/server_dropdown_selector.dart';
@@ -22,6 +27,8 @@ Future<FakeDiscovery> pumpApp(
   double width = 450,
   FakeDiscovery? discovery,
   bool reduceMotion = true,
+  ServerProbe? probe,
+  ServerDiscovery? silent,
 }) async {
   final fake = discovery ?? FakeDiscovery(sampleServers);
   tester.view.physicalSize = Size(width * 2, 1800);
@@ -33,8 +40,9 @@ Future<FakeDiscovery> pumpApp(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        serverDiscoveryProvider.overrideWithValue(fake),
+        serverDiscoveryProvider.overrideWithValue(silent ?? fake),
         randomProvider.overrideWithValue(FixedRandom(0)),
+        serverProbeProvider.overrideWithValue(probe ?? (_) async => true),
       ],
       child: home == null ? const PlanyApp() : MaterialApp(home: home),
     ),
@@ -51,7 +59,93 @@ BoxDecoration itemDecoration(WidgetTester tester, String id) =>
     tester.widget<Container>(find.byKey(ValueKey('server-item-$id'))).decoration
         as BoxDecoration;
 
+/// Uma busca que ainda não respondeu nada.
+class _SilentDiscovery implements ServerDiscovery {
+  final controller = StreamController<List<DiscoveredServer>>();
+
+  @override
+  Stream<List<DiscoveredServer>> watch() => controller.stream;
+}
+
 void main() {
+  group('animações e esqueleto', () {
+    testWidgets('esqueleto no menu até a primeira resposta da busca', (
+      tester,
+    ) async {
+      final silent = _SilentDiscovery();
+      addTearDown(silent.controller.close);
+      await pumpApp(tester, silent: silent);
+      await tester.tap(find.byTooltip('Selecionar servidor'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('servers-skeleton')), findsOneWidget);
+      expect(find.text(ServerDropdownSelector.searchingLabel), findsNothing);
+
+      silent.controller.add(const []);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('servers-skeleton')), findsNothing);
+      expect(find.text(ServerDropdownSelector.searchingLabel), findsOneWidget);
+    });
+
+    testWidgets('um erro na busca também tira o esqueleto', (tester) async {
+      final silent = _SilentDiscovery();
+      addTearDown(silent.controller.close);
+      await pumpApp(tester, silent: silent);
+      silent.controller.addError(StateError('sem rede'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Selecionar servidor'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('servers-skeleton')), findsNothing);
+      expect(find.text(ServerDropdownSelector.searchFailedLabel), findsOneWidget);
+    });
+
+    testWidgets('a seta do botão gira com o menu aberto e volta ao fechar', (
+      tester,
+    ) async {
+      await pumpApp(tester);
+      double turns() => tester
+          .widget<AnimatedRotation>(find.byKey(const ValueKey('server-chevron')))
+          .turns;
+      expect(turns(), 0);
+
+      await tester.tap(find.byTooltip('Selecionar servidor'));
+      await tester.pumpAndSettle();
+      expect(turns(), 0.5);
+
+      await tester.tapAt(const Offset(5, 700)); // fora do menu
+      await tester.pumpAndSettle();
+      expect(turns(), 0);
+    });
+
+    testWidgets('trocar login/cadastro faz fade: por um instante os dois textos existem', (
+      tester,
+    ) async {
+      await pumpApp(tester, reduceMotion: false);
+      await tester.tap(find.text('Criar conta'));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Bem-vindo de volta'), findsOneWidget);
+      expect(find.text('Criar nova conta'), findsOneWidget);
+
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('Bem-vindo de volta'), findsNothing);
+      expect(find.byKey(const Key('username-field')), findsOneWidget);
+    });
+
+    testWidgets('trocar muitas vezes seguidas termina no modo certo', (
+      tester,
+    ) async {
+      await pumpApp(tester, reduceMotion: false);
+      for (var i = 0; i < 5; i++) {
+        await tester.tap(find.byKey(const ValueKey('toggle-mode')));
+        await tester.pump(const Duration(milliseconds: 30));
+      }
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Criar nova conta'), findsOneWidget);
+      expect(find.text('Bem-vindo de volta'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  });
+
   testWidgets('app abre na AuthPage com o modo de login', (tester) async {
     await pumpApp(tester);
 
@@ -606,6 +700,41 @@ void main() {
       expect(find.text('DESCONECTADOS'), findsNothing, reason: 'menu fechado');
       expect(find.text('CASA'), findsOneWidget);
       expect(dot(tester, 'server-status-dot').color, AppColors.offline);
+    });
+
+    testWidgets('servidor que não responde: avisa e a escolha fica', (
+      tester,
+    ) async {
+      await pumpApp(tester, probe: (_) async => false);
+      await openMenu(tester);
+
+      await tester.tap(find.byKey(const ValueKey('server-item-escritorio')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Escritório não respondeu.'), findsOneWidget);
+      expect(find.text('CASA'), findsOneWidget);
+    });
+
+    testWidgets('enquanto testa, o botão diz "Abrindo" e o menu não aceita toques', (
+      tester,
+    ) async {
+      final gate = Completer<bool>();
+      await pumpApp(tester, probe: (_) => gate.future);
+      await openMenu(tester);
+
+      await tester.tap(find.byKey(const ValueKey('server-item-escritorio')));
+      await tester.pump();
+      expect(find.text('ABRINDO ESCRITÓRIO…'), findsOneWidget);
+
+      // um segundo toque (menu reaberto) não dispara nova consulta nem erro
+      await openMenu(tester);
+      await tester.tap(find.byKey(const ValueKey('server-item-nuvem')));
+      await tester.pumpAndSettle();
+      expect(find.text('ABRINDO ESCRITÓRIO…'), findsOneWidget);
+
+      gate.complete(true);
+      await tester.pumpAndSettle();
+      expect(find.text('ESCRITÓRIO'), findsOneWidget);
     });
 
     testWidgets('a busca que falha é avisada no menu', (tester) async {
