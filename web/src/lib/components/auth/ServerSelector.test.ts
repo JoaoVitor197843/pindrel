@@ -8,6 +8,7 @@ const button = () => screen.getByRole('button', { name: 'Selecionar servidor' })
 
 beforeEach(async () => {
   selection.connecting = null
+  selection.health = 'connected'
   directory.others = []
   mockDiscover([found('Escritório')])
   await directory.refresh()
@@ -112,5 +113,57 @@ describe('ServerSelector', () => {
     directory.loaded = false
     expect(await screen.findByTestId('servers-skeleton')).toBeTruthy()
     directory.loaded = true
+  })
+})
+
+describe('ServerSelector — servidor da página fora do ar', () => {
+  it('bolinha vermelha; o embutido vai para "Desconectados" e sai de "Disponíveis"', async () => {
+    selection.health = 'disconnected'
+    render(ServerSelector)
+    expect(screen.getByTestId('status-dot').dataset.tone).toBe('offline')
+    await fireEvent.click(button())
+    expect(screen.getByText('Disponíveis')).toBeTruthy()
+    expect(screen.getByText('Desconectados')).toBeTruthy()
+    const radios = screen.getAllByRole('menuitemradio')
+    expect(radios).toHaveLength(2)
+    expect(radios[0].textContent).toContain('Escritório')
+    expect(radios[1].dataset.offline).toBe('true')
+  })
+
+  it('tocar no desconectado não faz nada (nem navega)', async () => {
+    const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
+    selection.health = 'disconnected'
+    render(ServerSelector)
+    await fireEvent.click(button())
+    await fireEvent.click(screen.getAllByRole('menuitemradio')[1])
+    expect(go).not.toHaveBeenCalled()
+    go.mockRestore()
+  })
+
+  it('o menu ao vivo: volta a conectado e a seção some', async () => {
+    selection.health = 'disconnected'
+    render(ServerSelector)
+    await fireEvent.click(button())
+    selection.health = 'connected'
+    await Promise.resolve()
+    await vi.waitFor(() => expect(screen.getAllByRole('menuitemradio')).toHaveLength(2))
+    expect((screen.getAllByRole('menuitemradio')[0] as HTMLElement).dataset.offline).toBeUndefined()
+    expect(screen.queryByText('Desconectados')).toBeNull()
+    expect(screen.queryByText('Disponíveis')).toBeNull()
+  })
+})
+
+describe('ServerSelector — seta', () => {
+  it('gira com o menu aberto e volta ao fechar (também por Escape)', async () => {
+    render(ServerSelector)
+    const turned = () => screen.getByTestId('chevron').getAttribute('class')!.includes('rotate-180')
+    expect(turned()).toBe(false)
+    await fireEvent.click(button())
+    expect(turned()).toBe(true)
+    await fireEvent.keyDown(window, { key: 'Escape' })
+    expect(turned()).toBe(false)
+    await fireEvent.click(button())
+    await fireEvent.click(button())
+    expect(turned()).toBe(false)
   })
 })

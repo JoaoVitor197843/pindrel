@@ -94,3 +94,16 @@ describe('AuthForm — uso descuidado', () => {
     }
   })
 })
+
+describe('AuthForm — troca de modo animada', () => {
+  it('toques em rajada em "Criar conta"/"Entrar" terminam no modo certo, sem duplicar nada', async () => {
+    render(AuthForm, { showSubtitle: true })
+    const link = () => screen.getAllByRole('button').find((b) => b.className.includes('font-bold')) as HTMLElement
+    for (let i = 0; i < 7; i++) await click(link())
+    await vi.waitFor(() => {
+      expect(screen.getAllByRole('heading')).toHaveLength(1)
+      expect(screen.getByRole('heading').textContent?.trim()).toBe('Criar nova conta')
+      expect(screen.getAllByLabelText('Username')).toHaveLength(1)
+    })
+  })
+})

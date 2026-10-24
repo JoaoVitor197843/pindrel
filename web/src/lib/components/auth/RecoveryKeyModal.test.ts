@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import RecoveryKeyModal from './RecoveryKeyModal.svelte'
 
 describe('RecoveryKeyModal', () => {
@@ -40,5 +40,63 @@ describe('RecoveryKeyModal', () => {
       await fireEvent.input(input, { target: { value: v } })
       expect(input.value).toBe(v)
     }
+  })
+
+  describe('teclado virtual', () => {
+    function fakeViewport(height: number, offsetTop = 0) {
+      const target = new EventTarget() as EventTarget & { height: number; offsetTop: number }
+      target.height = height
+      target.offsetTop = offsetTop
+      setViewport(target)
+      return target
+    }
+    // não usa vi.unstubAllGlobals: ele também desfaz o fetch falso do setup
+    const setViewport = (value: unknown) => Object.defineProperty(window, 'visualViewport', { value, configurable: true })
+    afterEach(() => setViewport(undefined))
+    const gap = () => screen.getByTestId('recovery-overlay').style.paddingBottom
+
+    it('sem visualViewport não há folga e nada quebra', () => {
+      setViewport(null)
+      render(RecoveryKeyModal, { onclose: vi.fn() })
+      expect(gap()).toBe('0px')
+    })
+
+    it('a folga embaixo acompanha a altura do teclado e some ao fechá-lo', async () => {
+      const viewport = fakeViewport(window.innerHeight)
+      render(RecoveryKeyModal, { onclose: vi.fn() })
+      expect(gap()).toBe('0px')
+
+      viewport.height = window.innerHeight - 300
+      viewport.dispatchEvent(new Event('resize'))
+      await vi.waitFor(() => expect(gap()).toBe('300px'))
+
+      viewport.height = window.innerHeight
+      viewport.dispatchEvent(new Event('resize'))
+      await vi.waitFor(() => expect(gap()).toBe('0px'))
+    })
+
+    it('a página rolada pelo navegador (offsetTop) não conta como teclado', async () => {
+      const viewport = fakeViewport(window.innerHeight - 300, 300)
+      render(RecoveryKeyModal, { onclose: vi.fn() })
+      expect(gap()).toBe('0px')
+      viewport.offsetTop = 100
+      viewport.dispatchEvent(new Event('scroll'))
+      await vi.waitFor(() => expect(gap()).toBe('200px'))
+    })
+
+    it('valores absurdos (viewport maior que a janela) não dão folga negativa', () => {
+      fakeViewport(window.innerHeight + 5000)
+      render(RecoveryKeyModal, { onclose: vi.fn() })
+      expect(gap()).toBe('0px')
+    })
+
+    it('desmontar solta os ouvintes', () => {
+      const viewport = fakeViewport(window.innerHeight)
+      const remove = vi.spyOn(viewport, 'removeEventListener')
+      const { unmount } = render(RecoveryKeyModal, { onclose: vi.fn() })
+      unmount()
+      expect(remove).toHaveBeenCalledWith('resize', expect.any(Function))
+      expect(remove).toHaveBeenCalledWith('scroll', expect.any(Function))
+    })
   })
 })
