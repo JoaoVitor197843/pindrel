@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import 'logo_mark.dart';
 import 'server_dropdown_selector.dart';
 
 /// Dark header with brand, SELF-HOSTED tag, server selector and tagline.
@@ -109,30 +110,12 @@ class AuthBrandRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const _BrandMark(),
+        const LogoMark(),
         const SizedBox(width: 10),
         Text('Plany', style: AppText.serif(24)),
         const SizedBox(width: 10),
         const Flexible(child: _Tag('SELF-HOSTED')),
       ],
-    );
-  }
-}
-
-class _BrandMark extends StatelessWidget {
-  const _BrandMark();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 36,
-      height: 36,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        color: AppColors.accent,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text('P', style: AppText.serif(20)),
     );
   }
 }
