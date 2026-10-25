@@ -1,6 +1,7 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity'
   import AuthForm from '../lib/components/auth/AuthForm.svelte'
+  import ConfirmServerModal from '../lib/components/auth/ConfirmServerModal.svelte'
   import AuthHeader from '../lib/components/auth/AuthHeader.svelte'
   import DesktopPanel from '../lib/components/auth/DesktopPanel.svelte'
   import { directory, selection } from '../lib/stores/servers.svelte'
@@ -59,6 +60,14 @@
     </div>
   {/if}
 </main>
+
+{#if selection.pendingChange}
+  <ConfirmServerModal
+    name={selection.pendingChange.name}
+    onconfirm={() => selection.confirmChange()}
+    oncancel={() => selection.cancelChange()}
+  />
+{/if}
 
 {#if toast.message}
   <div
