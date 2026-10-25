@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/network/discovery/discovered_server.dart';
@@ -36,6 +38,7 @@ class FakeNsdApi implements NsdApi {
     String? host,
     int? port = 8080,
     List<String> ips = const [],
+    Map<String, Uint8List?>? txt,
   }) => listener!(
     nsd.ServiceStatus.found,
     nsd.Service(
@@ -44,6 +47,7 @@ class FakeNsdApi implements NsdApi {
       host: host,
       port: port,
       addresses: [for (final ip in ips) InternetAddress(ip)],
+      txt: txt,
     ),
   );
 
@@ -82,6 +86,49 @@ void main() {
   });
 
   tearDown(() => sub.cancel());
+
+  test(
+    'o id do registro TXT chega ao servidor; id estranho é ignorado',
+    () async {
+      await listen();
+      api.found(
+        'Casa',
+        host: 'casa.local.',
+        ips: ['192.168.1.5'],
+        txt: {'id': Uint8List.fromList(utf8.encode('abc123'))},
+      );
+      api.found(
+        'Falso',
+        host: 'falso.local.',
+        ips: ['192.168.1.6'],
+        txt: {'id': Uint8List.fromList(utf8.encode('<script>'))},
+      );
+      api.found('Velho', host: 'velho.local.', ips: ['192.168.1.7']);
+      await settle();
+      final byName = {for (final s in emitted.last) s.name: s.id};
+      expect(byName, {'Casa': 'abc123', 'Falso': '', 'Velho': ''});
+    },
+  );
+
+  test(
+    'o mesmo servidor anunciando outro id é uma mudança que chega à lista',
+    () async {
+      await listen();
+      api.found(
+        'Casa',
+        ips: ['192.168.1.5'],
+        txt: {'id': Uint8List.fromList(utf8.encode('aaa'))},
+      );
+      await settle();
+      api.found(
+        'Casa',
+        ips: ['192.168.1.5'],
+        txt: {'id': Uint8List.fromList(utf8.encode('bbb'))},
+      );
+      await settle();
+      expect(emitted.last.single.id, 'bbb');
+    },
+  );
 
   test('procura _plany._tcp e já emite a lista vazia', () async {
     await listen();
@@ -161,27 +208,29 @@ void main() {
     api.lost('Alfa');
     api.lost('Inexistente');
     await settle();
-    expect(
-      emitted.last.map((s) => s.name),
-      ['Alfa', 'Zeta'],
-      reason: 'perdido não sai na hora',
-    );
+    expect(emitted.last.map((s) => s.name), [
+      'Alfa',
+      'Zeta',
+    ], reason: 'perdido não sai na hora');
     await Future<void>.delayed(const Duration(milliseconds: 80));
     expect(emitted.last.map((s) => s.name), ['Zeta']);
   });
 
-  test('um "perdido" falso, achado de novo no prazo, não muda a lista', () async {
-    await listen(grace: const Duration(milliseconds: 60));
-    api.found('A', host: 'a.local', ips: ['10.0.0.1']);
-    await settle();
-    final count = emitted.length;
-    api.lost('A');
-    await settle();
-    api.found('A', host: 'a.local', ips: ['10.0.0.1']);
-    await Future<void>.delayed(const Duration(milliseconds: 120));
-    expect(emitted.length, count, reason: 'nenhuma emissão nova');
-    expect(emitted.last.single.name, 'A');
-  });
+  test(
+    'um "perdido" falso, achado de novo no prazo, não muda a lista',
+    () async {
+      await listen(grace: const Duration(milliseconds: 60));
+      api.found('A', host: 'a.local', ips: ['10.0.0.1']);
+      await settle();
+      final count = emitted.length;
+      api.lost('A');
+      await settle();
+      api.found('A', host: 'a.local', ips: ['10.0.0.1']);
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      expect(emitted.length, count, reason: 'nenhuma emissão nova');
+      expect(emitted.last.single.name, 'A');
+    },
+  );
 
   test('com um servidor perdido, reinicia a busca para achá-lo', () async {
     await listen(
