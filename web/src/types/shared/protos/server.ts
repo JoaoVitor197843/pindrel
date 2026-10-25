@@ -20,6 +20,11 @@ export interface DiscoveredServer {
   host: string;
   addresses: string[];
   port: number;
+  /**
+   * Random id the server generated once and keeps (empty: an older server). Lets a client notice that "Casa" is no
+   * longer the same server it opened before.
+   */
+  id: string;
 }
 
 export interface DiscoveredServers {
@@ -116,7 +121,7 @@ export const ServerInfo: MessageFns<ServerInfo> = {
 };
 
 function createBaseDiscoveredServer(): DiscoveredServer {
-  return { name: "", host: "", addresses: [], port: 0 };
+  return { name: "", host: "", addresses: [], port: 0, id: "" };
 }
 
 export const DiscoveredServer: MessageFns<DiscoveredServer> = {
@@ -132,6 +137,9 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
     }
     if (message.port !== 0) {
       writer.uint32(32).int32(message.port);
+    }
+    if (message.id !== "") {
+      writer.uint32(42).string(message.id);
     }
     return writer;
   },
@@ -181,6 +189,14 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
             message.port = reader.int32();
             continue;
           }
+          case 5: {
+            if (tag !== 42) {
+              break;
+            }
+
+            message.id = reader.string();
+            continue;
+          }
         }
         if ((tag & 7) === 4 || tag === 0) {
           break;
@@ -201,6 +217,7 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
         ? object.addresses.map((e: any) => globalThis.String(e))
         : [],
       port: isSet(object.port) ? globalThis.Number(object.port) : 0,
+      id: isSet(object.id) ? globalThis.String(object.id) : "",
     };
   },
 
@@ -218,6 +235,9 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
     if (message.port !== 0) {
       obj.port = Math.round(message.port);
     }
+    if (message.id !== "") {
+      obj.id = message.id;
+    }
     return obj;
   },
 
@@ -230,6 +250,7 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
     message.host = object.host ?? "";
     message.addresses = object.addresses?.map((e) => e) || [];
     message.port = object.port ?? 0;
+    message.id = object.id ?? "";
     return message;
   },
 };
