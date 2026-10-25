@@ -7,7 +7,7 @@ use std::{
     collections::HashMap,
     net::{IpAddr, Ipv6Addr},
     num::NonZeroU32,
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -146,6 +146,60 @@ impl<C: Clock> Limiter<C> {
     }
 }
 
+/// Open connections per client. The request limits count requests, not connections: without this one address
+/// can hold every connection permit with sockets that stay open, and nobody else gets in.
+pub struct ConnLimit {
+    per_client: usize,
+    open: Mutex<HashMap<IpAddr, usize>>,
+}
+
+/// One open connection of a client; the slot is given back when it is dropped.
+pub struct ConnGuard {
+    limit: Arc<ConnLimit>,
+    client: IpAddr,
+}
+
+impl ConnLimit {
+    pub fn new(per_client: usize) -> Arc<Self> {
+        Arc::new(Self {
+            per_client,
+            open: Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// `None` if this client already has `per_client` connections open. The table only holds clients that have a
+    /// connection open, so it is bounded by the total connection limit.
+    pub fn acquire(self: &Arc<Self>, ip: IpAddr) -> Option<ConnGuard> {
+        let client = key(ip);
+        let mut open = self.open.lock().unwrap();
+        let n = open.entry(client).or_insert(0);
+        if *n >= self.per_client {
+            return None;
+        }
+        *n += 1;
+        Some(ConnGuard {
+            limit: self.clone(),
+            client,
+        })
+    }
+
+    pub fn clients(&self) -> usize {
+        self.open.lock().unwrap().len()
+    }
+}
+
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        let mut open = self.limit.open.lock().unwrap();
+        if let Some(n) = open.get_mut(&self.client) {
+            *n -= 1;
+            if *n == 0 {
+                open.remove(&self.client);
+            }
+        }
+    }
+}
+
 /// The three limits applied at the entry point (same numbers the Go middleware used).
 pub struct Limiters {
     pub login: Limiter,
@@ -278,6 +332,27 @@ mod tests {
         clock.advance(Duration::from_secs(2)); // every old client is back to a full bucket (plus governor's slack)
         assert!(l.allow(ip("203.0.113.200")), "the new client gets in");
         assert!(l.tracked() <= cap);
+    }
+
+    #[test]
+    fn a_client_cannot_hold_more_connections_than_its_share_and_gives_them_back() {
+        let l = ConnLimit::new(2);
+        let (a, b) = (l.acquire(ip("10.0.0.1")).unwrap(), l.acquire(ip("10.0.0.1")).unwrap());
+        assert!(l.acquire(ip("10.0.0.1")).is_none());
+        assert!(l.acquire(ip("10.0.0.2")).is_some(), "another client is not affected");
+        drop(a);
+        let c = l.acquire(ip("10.0.0.1")).expect("a slot came back");
+        assert!(l.acquire(ip("10.0.0.1")).is_none());
+        drop((b, c));
+        assert_eq!(l.clients(), 0, "a client with nothing open takes no memory");
+    }
+
+    #[test]
+    fn connections_of_an_ipv6_prefix_share_the_slots() {
+        let l = ConnLimit::new(1);
+        let _g = l.acquire(ip("2001:db8:1:2::1")).unwrap();
+        assert!(l.acquire(ip("2001:db8:1:2::ffff")).is_none());
+        assert!(l.acquire(ip("2001:db8:1:3::1")).is_some());
     }
 
     #[test]

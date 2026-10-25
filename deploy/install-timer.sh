@@ -6,6 +6,7 @@
 set -eu
 dir=$(cd "$(dirname "$0")/.." && pwd)
 user=${SUDO_USER:-$(id -un)}
+home=$(getent passwd "$user" | cut -d: -f6)
 
 service() {
   cat <<UNIT
@@ -21,6 +22,27 @@ WorkingDirectory=$dir
 ExecStart=$dir/deploy/update.sh
 # the timer fires again in 1 min (flock keeps the runs apart); a stuck update cannot hang around forever
 TimeoutStartSec=15min
+# The user is in the docker group, which is root on this machine, so this cannot confine docker itself; it limits
+# what a bug or a hostile registry response can reach through the script: no new privileges, a read-only system
+# (only this directory and the docker client's own config can be written), no kernel knobs, only unix and ip sockets.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=$dir -$home/.docker
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+UMask=0077
 UNIT
 }
 

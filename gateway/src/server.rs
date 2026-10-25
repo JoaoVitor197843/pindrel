@@ -17,7 +17,8 @@ use crate::{
     config::Config,
     discovery::{self, Lan, Registry},
     handler::{handle, App},
-    known,
+    identity, known,
+    limiter::ConnLimit,
 };
 
 pub struct Running {
@@ -55,12 +56,14 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
     let addr = listener.local_addr()?;
     let lan = discovery::lan_ip();
     let own_ips = lan.map(|i| vec![i.to_string()]).unwrap_or_default();
-    let registry = Arc::new(Registry::new(addr.port(), own_ips));
+    let id = identity::load_or_create(cfg.server_id_file.as_deref());
+    let registry = Arc::new(Registry::new(addr.port(), own_ips).with_lan(local_net).with_id(id.clone()));
 
     let mut mdns = None;
     if cfg.mdns {
         match discovery::start(
             &cfg.server_name,
+            &id,
             addr.port(),
             lan,
             &cfg.mdns_interfaces,
@@ -130,6 +133,7 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
 async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Receiver<bool>, closed: oneshot::Sender<()>) {
     let permits = Arc::new(Semaphore::new(app.cfg.max_connections));
     let graceful = GracefulShutdown::new();
+    let per_ip = ConnLimit::new(app.cfg.max_connections_per_ip);
     loop {
         // a permit per open connection bounds the memory a flood of connections can take
         let permit = tokio::select! {
@@ -140,6 +144,15 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
             r = listener.accept() => match r { Ok(c) => c, Err(_) => continue },
             _ = stop.changed() => break,
         };
+        // a declared proxy (a tunnel) carries many clients over its own connections: those are limited per request
+        let slot = if app.cfg.client_ip.is_proxy(peer.ip()) {
+            None
+        } else {
+            match per_ip.acquire(peer.ip()) {
+                Some(g) => Some(g),
+                None => continue, // this client already holds its share: closed without reading anything
+            }
+        };
         let _ = stream.set_nodelay(true);
         let app2 = app.clone();
         let conn = hyper::server::conn::http1::Builder::new()
@@ -149,7 +162,7 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
         let conn = graceful.watch(conn);
         tokio::spawn(async move {
             let _ = conn.await;
-            drop(permit);
+            drop((permit, slot));
         });
     }
     drop(listener); // nobody can connect any more, even while the open requests finish

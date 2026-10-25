@@ -41,6 +41,8 @@ pub struct DiscoveredServer {
     pub addresses: Vec<String>,
     #[prost(int32, tag = "4")]
     pub port: i32,
+    #[prost(string, tag = "5")]
+    pub id: String,
 }
 #[derive(Clone, PartialEq, Message)]
 pub struct DiscoveredServers {
@@ -182,7 +184,8 @@ pub async fn gateway_with(backends: &[&Backend], tweak: impl FnOnce(&mut Config)
     cfg.mdns = false;
     cfg.probe_interval = Duration::from_secs(3600);
     tweak(&mut cfg);
-    server::start(cfg).await.expect("gateway starts")
+    // no local network: the tests announce made-up addresses that the real LAN filter would drop
+    server::start_with(cfg, None).await.expect("gateway starts")
 }
 
 pub type Http = Client<HttpConnector, Full<Bytes>>;
