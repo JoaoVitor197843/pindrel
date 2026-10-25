@@ -1,7 +1,8 @@
 import { vi } from 'vitest'
 import { DiscoveredServers, type DiscoveredServer } from '../types/shared/protos/server'
 
-export const found = (name: string, ip = '192.168.0.20', port = 8095): DiscoveredServer => ({
+export const found = (name: string, ip = '192.168.0.20', port = 8095, id = ''): DiscoveredServer => ({
+  id,
   name,
   host: `${name.toLowerCase()}-host`,
   addresses: [ip],

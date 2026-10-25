@@ -15,4 +15,4 @@ RUN ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack 
  && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && corepack enable && corepack prepare yarn@4.18.1 --activate \
  && go install -tags postgres github.com/golang-migrate/migrate/v4/cmd/migrate@v4.20.1 \
- && rustup component add clippy rustfmt && yarn --version && go version && node --version && cargo clippy --version && rustfmt --version && migrate -version
+ && rustup component add clippy rustfmt && cargo install cargo-audit cargo-deny cargo-fuzz --locked && rustup toolchain install nightly --profile minimal && yarn --version && go version && node --version && cargo audit --version && cargo deny --version && cargo +nightly fuzz --help >/dev/null && cargo clippy --version && rustfmt --version && migrate -version

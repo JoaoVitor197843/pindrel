@@ -39,7 +39,7 @@ func TestGatewayGolden_DiscoveredServers(t *testing.T) {
 	var got dto.DiscoveredServers
 	golden(t, "discovered.bin", &got)
 	want := &dto.DiscoveredServers{Servers: []*dto.DiscoveredServer{
-		{Name: "Casa do João", Host: "casa", Addresses: []string{"192.168.1.10", "10.0.0.5"}, Port: 8080},
+		{Name: "Casa do João", Host: "casa", Addresses: []string{"192.168.1.10", "10.0.0.5"}, Port: 8080, Id: "0123456789abcdef0123456789abcdef"},
 		{Name: "Servidor", Host: "srv", Addresses: []string{"192.168.1.20"}, Port: 39215},
 	}}
 	if diff := cmp.Diff(want, &got, protocmp.Transform()); diff != "" {

@@ -2,7 +2,7 @@
 //! They mirror shared/protos: `ErrorHttp` (auth.proto) and `DiscoveredServers` (server.proto).
 //! tests/golden/*.bin pin the bytes, and backend/internal/api/golden_test.go decodes the same
 //! files with the generated Go code, so a drift from the .proto files fails a test.
-use crate::discovery::Server;
+use crate::discovery::{valid_id, Server};
 
 fn varint(mut n: usize, out: &mut Vec<u8>) {
     while n >= 128 {
@@ -27,7 +27,7 @@ pub fn error_http(code: &str, message: &str) -> Vec<u8> {
 }
 
 /// DiscoveredServers { repeated DiscoveredServer servers = 1 }
-/// DiscoveredServer { name = 1; host = 2; repeated addresses = 3; int32 port = 4 }
+/// DiscoveredServer { name = 1; host = 2; repeated addresses = 3; int32 port = 4; id = 5 }
 pub fn discovered_servers(list: &[Server]) -> Vec<u8> {
     let mut out = Vec::new();
     for s in list {
@@ -39,6 +39,9 @@ pub fn discovered_servers(list: &[Server]) -> Vec<u8> {
         }
         e.push(0x20);
         varint(s.port as usize, &mut e);
+        if !s.id.is_empty() {
+            field(0x2a, s.id.as_bytes(), &mut e);
+        }
         field(0x0a, &e, &mut out);
     }
     out
@@ -98,7 +101,7 @@ fn text(b: &[u8]) -> Option<String> {
 
 fn server(b: &[u8]) -> Option<Server> {
     let mut r = Reader(b);
-    let (mut name, mut host, mut ips, mut port) = (String::new(), String::new(), Vec::new(), 0u16);
+    let (mut name, mut host, mut id, mut ips, mut port) = (String::new(), String::new(), String::new(), Vec::new(), 0u16);
     while !r.0.is_empty() {
         let tag = r.varint()?;
         match (tag >> 3, tag & 7) {
@@ -111,10 +114,17 @@ fn server(b: &[u8]) -> Option<Server> {
                 ips.push(text(r.bytes()?)?);
             }
             (4, 0) => port = u16::try_from(r.varint()?).ok()?,
+            (5, 2) => id = text(r.bytes()?)?,
             (_, wire) => r.skip(wire)?,
         }
     }
-    (!name.is_empty() && port != 0).then_some(Server { name, host, ips, port })
+    (!name.is_empty() && port != 0).then_some(Server {
+        name,
+        host,
+        id: if valid_id(&id) { id } else { String::new() },
+        ips,
+        port,
+    })
 }
 
 /// Reads a `DiscoveredServers` message (what `discovered_servers` writes, also the format of the
@@ -160,6 +170,8 @@ mod tests {
         addresses: Vec<String>,
         #[prost(int32, tag = "4")]
         port: i32,
+        #[prost(string, tag = "5")]
+        id: String,
     }
     #[derive(Clone, PartialEq, Message)]
     struct DiscoveredServers {
@@ -171,6 +183,7 @@ mod tests {
         Server {
             name: name.into(),
             host: "casa".into(),
+            id: String::new(),
             ips: vec!["192.168.1.10".into(), "10.0.0.5".into()],
             port,
         }
@@ -213,12 +226,14 @@ mod tests {
             Server {
                 name: "Casa do João".into(),
                 host: "casa".into(),
+                id: "0123456789abcdef0123456789abcdef".into(),
                 ips: vec!["192.168.1.10".into(), "10.0.0.5".into()],
                 port: 8080,
             },
             Server {
                 name: "Servidor".into(),
                 host: "srv".into(),
+                id: String::new(),
                 ips: vec!["192.168.1.20".into()],
                 port: 39215,
             },
@@ -239,10 +254,31 @@ mod tests {
         let got = parse_discovered_servers(&raw).unwrap();
         assert_eq!(got.len(), 2);
         assert_eq!((got[0].name.as_str(), got[0].port, got[0].ips.len()), ("Casa do João", 8080, 2));
+        assert_eq!(got[0].id, "0123456789abcdef0123456789abcdef");
+        assert_eq!(got[1].id, "", "an older server announces no id");
         assert_eq!(
             (got[1].name.as_str(), got[1].host.as_str(), got[1].port),
             ("Servidor", "srv", 39215)
         );
+    }
+
+    #[test]
+    fn the_id_roundtrips_and_an_unusable_one_is_dropped_not_trusted() {
+        let mut s = server("A", 80);
+        s.id = "00ff-AA".into();
+        let got = DiscoveredServers::decode(discovered_servers(&[s.clone()]).as_slice()).unwrap();
+        assert_eq!(got.servers[0].id, "00ff-AA");
+        assert_eq!(parse_discovered_servers(&discovered_servers(&[s])).unwrap()[0].id, "00ff-AA");
+        for bad in ["has space", "semi;colon", "ü", &"a".repeat(65)] {
+            let mut e = Vec::new();
+            field(0x0a, b"N", &mut e);
+            e.extend_from_slice(&[0x20, 0x50]);
+            field(0x2a, bad.as_bytes(), &mut e);
+            let mut b = Vec::new();
+            field(0x0a, &e, &mut b);
+            let got = parse_discovered_servers(&b);
+            assert_eq!(got.map(|v| v[0].id.clone()), Some(String::new()), "{bad:?}");
+        }
     }
 
     #[test]

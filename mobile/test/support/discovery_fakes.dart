@@ -57,8 +57,14 @@ DiscoveredServer server(
   String host = '',
   List<String> addresses = const [],
   int port = 8080,
-}) =>
-    DiscoveredServer(name: name, host: host, addresses: addresses, port: port);
+  String id = '',
+}) => DiscoveredServer(
+  name: name,
+  host: host,
+  addresses: addresses,
+  port: port,
+  id: id,
+);
 
 /// The three servers the login screen showed before the real discovery.
 final sampleServers = [

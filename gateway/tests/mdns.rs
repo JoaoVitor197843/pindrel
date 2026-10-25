@@ -113,6 +113,23 @@ impl Decode for DiscoveredServers {
 }
 
 #[tokio::test]
+async fn the_id_travels_in_the_announcement_and_reaches_the_list() {
+    let be = Backend::start("a").await;
+    let (a, b) = (with_mdns("plany-test-id-a", &be).await, with_mdns("plany-test-id-b", &be).await);
+    if !eventually("A sees B", || names(&a).contains(&"plany-test-id-b".to_string())).await {
+        eprintln!("(no multicast here: skipping)");
+        return;
+    }
+    let seen = a.app.registry.list().into_iter().find(|s| s.name == "plany-test-id-b").unwrap();
+    assert_eq!(seen.id, b.app.registry.id());
+    assert_ne!(seen.id, a.app.registry.id());
+    let over_http = DiscoveredServers::decode_body(&get(a.addr, "/server/discover/").await.body);
+    assert!(over_http.iter().any(|s| s.name == "plany-test-id-b" && s.id == b.app.registry.id()));
+    a.shutdown().await;
+    b.shutdown().await;
+}
+
+#[tokio::test]
 async fn the_search_is_restarted_periodically_and_events_keep_flowing_after_each_restart() {
     let be = Backend::start("a").await;
     // aggressive refresh: every restart replaces the receiver, so this proves nothing is lost in the swap

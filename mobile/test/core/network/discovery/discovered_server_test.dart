@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/network/discovery/discovered_server.dart';
 
@@ -83,6 +86,69 @@ void main() {
         ]),
         ['10.0.0.2', '192.168.1.9'],
       );
+    });
+  });
+
+  group('id do servidor', () {
+    test('só texto curto e simples é um id', () {
+      for (final ok in [
+        'a',
+        '0123456789abcdef0123456789abcdef',
+        'Casa-2025',
+        'x' * 64,
+      ]) {
+        expect(isValidServerId(ok), isTrue, reason: ok);
+      }
+      for (final bad in [
+        '',
+        ' ',
+        'a b',
+        'a/b',
+        'a\nb',
+        'ü',
+        'x' * 65,
+        'a;b',
+        '<b>',
+      ]) {
+        expect(isValidServerId(bad), isFalse, reason: bad);
+      }
+    });
+
+    Uint8List bytes(String s) => Uint8List.fromList(utf8.encode(s));
+
+    test('do TXT do nsd: o id válido passa, o resto vira vazio', () {
+      expect(
+        serverIdFromTxt({'id': bytes('abc-1'), 'name': bytes('Casa')}),
+        'abc-1',
+      );
+      expect(serverIdFromTxt(null), '');
+      expect(serverIdFromTxt({}), '');
+      expect(serverIdFromTxt({'id': null}), '');
+      expect(serverIdFromTxt({'id': bytes('com espaço')}), '');
+      expect(serverIdFromTxt({'id': bytes('x' * 5000)}), '');
+      expect(
+        serverIdFromTxt({
+          'id': Uint8List.fromList([0xff, 0xfe, 0x41]),
+        }),
+        '',
+      );
+    });
+
+    test('do TXT do multicast_dns: procura a linha id= e valida', () {
+      expect(serverIdFromTxtText('name=Casa\nid=abc123'), 'abc123');
+      expect(serverIdFromTxtText('id=abc'), 'abc');
+      expect(serverIdFromTxtText('name=Casa'), '');
+      expect(serverIdFromTxtText(''), '');
+      expect(serverIdFromTxtText('id='), '');
+      expect(serverIdFromTxtText('xid=abc'), '');
+      expect(serverIdFromTxtText('id=a b'), '');
+      expect(serverIdFromTxtText('id=${'a' * 100_000}'), '');
+    });
+
+    test('o id entra na igualdade: outro id é outro servidor', () {
+      expect(server('A', id: 'x'), server('A', id: 'x'));
+      expect(server('A', id: 'x'), isNot(server('A', id: 'y')));
+      expect(server('A', id: 'x'), isNot(server('A')));
     });
   });
 }

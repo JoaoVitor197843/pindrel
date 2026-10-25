@@ -11,6 +11,7 @@ import 'package:mobile/core/theme/app_colors.dart';
 import 'package:mobile/features/auth/presentation/widgets/pulsing_dot.dart';
 import 'package:mobile/features/auth/presentation/widgets/server_dropdown_selector.dart';
 import 'package:mobile/features/auth/presentation/pages/auth_page.dart';
+import 'package:mobile/features/auth/data/server_trust.dart';
 import 'package:mobile/features/auth/presentation/providers/servers_provider.dart';
 
 import '../../support/discovery_fakes.dart';
@@ -29,6 +30,7 @@ Future<FakeDiscovery> pumpApp(
   bool reduceMotion = true,
   ServerProbe? probe,
   ServerDiscovery? silent,
+  ServerTrust? trust,
 }) async {
   final fake = discovery ?? FakeDiscovery(sampleServers);
   tester.view.physicalSize = Size(width * 2, 1800);
@@ -40,6 +42,9 @@ Future<FakeDiscovery> pumpApp(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        serverTrustProvider.overrideWithValue(
+          trust ?? ServerTrust(MemoryKeyValueStore()),
+        ),
         serverDiscoveryProvider.overrideWithValue(silent ?? fake),
         randomProvider.overrideWithValue(FixedRandom(0)),
         serverProbeProvider.overrideWithValue(probe ?? (_) async => true),
@@ -96,7 +101,10 @@ void main() {
       await tester.tap(find.byTooltip('Selecionar servidor'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('servers-skeleton')), findsNothing);
-      expect(find.text(ServerDropdownSelector.searchFailedLabel), findsOneWidget);
+      expect(
+        find.text(ServerDropdownSelector.searchFailedLabel),
+        findsOneWidget,
+      );
     });
 
     testWidgets('a seta do botão gira com o menu aberto e volta ao fechar', (
@@ -104,7 +112,9 @@ void main() {
     ) async {
       await pumpApp(tester);
       double turns() => tester
-          .widget<AnimatedRotation>(find.byKey(const ValueKey('server-chevron')))
+          .widget<AnimatedRotation>(
+            find.byKey(const ValueKey('server-chevron')),
+          )
           .turns;
       expect(turns(), 0);
 
@@ -117,19 +127,20 @@ void main() {
       expect(turns(), 0);
     });
 
-    testWidgets('trocar login/cadastro faz fade: por um instante os dois textos existem', (
-      tester,
-    ) async {
-      await pumpApp(tester, reduceMotion: false);
-      await tester.tap(find.text('Criar conta'));
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(find.text('Bem-vindo de volta'), findsOneWidget);
-      expect(find.text('Criar nova conta'), findsOneWidget);
+    testWidgets(
+      'trocar login/cadastro faz fade: por um instante os dois textos existem',
+      (tester) async {
+        await pumpApp(tester, reduceMotion: false);
+        await tester.tap(find.text('Criar conta'));
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(find.text('Bem-vindo de volta'), findsOneWidget);
+        expect(find.text('Criar nova conta'), findsOneWidget);
 
-      await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('Bem-vindo de volta'), findsNothing);
-      expect(find.byKey(const Key('username-field')), findsOneWidget);
-    });
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('Bem-vindo de volta'), findsNothing);
+        expect(find.byKey(const Key('username-field')), findsOneWidget);
+      },
+    );
 
     testWidgets('trocar muitas vezes seguidas termina no modo certo', (
       tester,
@@ -460,6 +471,92 @@ void main() {
     });
   });
 
+  group('servidor com outra identidade', () {
+    Future<FakeDiscovery> pumpWithChangedOffice(
+      WidgetTester tester, {
+      ServerProbe? probe,
+    }) async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      await trust.load();
+      await trust.remember('Escritório', 'aaa');
+      final discovery = await pumpApp(
+        tester,
+        trust: trust,
+        probe: probe,
+        discovery: FakeDiscovery([
+          server('Casa', addresses: ['10.0.0.1']),
+          server('Escritório', addresses: ['10.0.0.2'], id: 'bbb'),
+        ]),
+      );
+      await tester.pumpAndSettle();
+      return discovery;
+    }
+
+    Future<void> chooseOffice(WidgetTester tester) async {
+      await tester.tap(find.byTooltip('Selecionar servidor'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Escritório'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('pergunta antes, avisa do risco e não troca a escolha', (
+      tester,
+    ) async {
+      await pumpWithChangedOffice(tester);
+      await chooseOffice(tester);
+      expect(find.text('Este servidor mudou'), findsOneWidget);
+      expect(find.textContaining('“Escritório”'), findsOneWidget);
+      expect(find.textContaining('senha'), findsOneWidget);
+      expect(
+        find.text('CASA'),
+        findsOneWidget,
+        reason: 'ainda no servidor de antes',
+      );
+    });
+
+    testWidgets('Cancelar fecha a pergunta e fica onde estava', (tester) async {
+      await pumpWithChangedOffice(tester);
+      await chooseOffice(tester);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Este servidor mudou'), findsNothing);
+      expect(find.text('CASA'), findsOneWidget);
+      expect(find.text('ESCRITÓRIO'), findsNothing);
+    });
+
+    testWidgets('Continuar mesmo assim segue para o servidor', (tester) async {
+      await pumpWithChangedOffice(tester);
+      await chooseOffice(tester);
+      await tester.tap(find.text('Continuar mesmo assim'));
+      await tester.pumpAndSettle();
+      expect(find.text('Este servidor mudou'), findsNothing);
+      expect(find.text('ESCRITÓRIO'), findsOneWidget);
+    });
+
+    testWidgets(
+      'continuar com um servidor que não responde avisa e mantém a escolha',
+      (tester) async {
+        await pumpWithChangedOffice(tester, probe: (_) async => false);
+        await chooseOffice(tester);
+        await tester.tap(find.text('Continuar mesmo assim'));
+        await tester.pumpAndSettle();
+        expect(find.text('Escritório não respondeu.'), findsOneWidget);
+        expect(find.text('CASA'), findsOneWidget);
+      },
+    );
+
+    testWidgets('perguntar de novo depois de cancelar funciona', (
+      tester,
+    ) async {
+      await pumpWithChangedOffice(tester);
+      await chooseOffice(tester);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      await chooseOffice(tester);
+      expect(find.text('Este servidor mudou'), findsOneWidget);
+    });
+  });
+
   group('lista ao vivo e servidor desconectado', () {
     PulsingDot dot(WidgetTester tester, String key) =>
         tester.widget<PulsingDot>(find.byKey(ValueKey(key)));
@@ -714,27 +811,28 @@ void main() {
       expect(find.text('CASA'), findsOneWidget);
     });
 
-    testWidgets('enquanto testa, o botão diz "Abrindo" e o menu não aceita toques', (
-      tester,
-    ) async {
-      final gate = Completer<bool>();
-      await pumpApp(tester, probe: (_) => gate.future);
-      await openMenu(tester);
+    testWidgets(
+      'enquanto testa, o botão diz "Abrindo" e o menu não aceita toques',
+      (tester) async {
+        final gate = Completer<bool>();
+        await pumpApp(tester, probe: (_) => gate.future);
+        await openMenu(tester);
 
-      await tester.tap(find.byKey(const ValueKey('server-item-escritorio')));
-      await tester.pump();
-      expect(find.text('ABRINDO ESCRITÓRIO…'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('server-item-escritorio')));
+        await tester.pump();
+        expect(find.text('ABRINDO ESCRITÓRIO…'), findsOneWidget);
 
-      // a second tap (menu reopened) triggers no new query nor error
-      await openMenu(tester);
-      await tester.tap(find.byKey(const ValueKey('server-item-nuvem')));
-      await tester.pumpAndSettle();
-      expect(find.text('ABRINDO ESCRITÓRIO…'), findsOneWidget);
+        // a second tap (menu reopened) triggers no new query nor error
+        await openMenu(tester);
+        await tester.tap(find.byKey(const ValueKey('server-item-nuvem')));
+        await tester.pumpAndSettle();
+        expect(find.text('ABRINDO ESCRITÓRIO…'), findsOneWidget);
 
-      gate.complete(true);
-      await tester.pumpAndSettle();
-      expect(find.text('ESCRITÓRIO'), findsOneWidget);
-    });
+        gate.complete(true);
+        await tester.pumpAndSettle();
+        expect(find.text('ESCRITÓRIO'), findsOneWidget);
+      },
+    );
 
     testWidgets('a busca que falha é avisada no menu', (tester) async {
       final failing = FakeDiscovery();

@@ -6,6 +6,7 @@ import 'package:mobile/core/network/discovery/server_discovery.dart';
 import 'package:mobile/features/auth/data/server_list_controller.dart';
 import 'package:mobile/features/auth/data/server_list_state.dart';
 import 'package:mobile/features/auth/data/server_option.dart';
+import 'package:mobile/features/auth/data/server_trust.dart';
 
 import '../../support/discovery_fakes.dart';
 
@@ -360,7 +361,10 @@ void main() {
       makeProbed((_) async => false);
       await flush();
       final before = controller.current.selected;
-      expect(await controller.select(controller.current.available.last), isFalse);
+      expect(
+        await controller.select(controller.current.available.last),
+        isFalse,
+      );
       expect(controller.current.selected, before);
       expect(controller.current.connecting, isNull);
     });
@@ -368,25 +372,31 @@ void main() {
     test('a consulta que lança conta como falha', () async {
       makeProbed((_) async => throw StateError('boom'));
       await flush();
-      expect(await controller.select(controller.current.available.last), isFalse);
+      expect(
+        await controller.select(controller.current.available.last),
+        isFalse,
+      );
       expect(controller.current.connecting, isNull);
     });
 
-    test('toques repetidos enquanto conecta não disparam outra consulta', () async {
-      final gate = Completer<bool>();
-      var calls = 0;
-      makeProbed((_) {
-        calls++;
-        return gate.future;
-      });
-      await flush();
-      final other = controller.current.available.last;
-      final first = controller.select(other);
-      expect(await controller.select(other), isFalse);
-      gate.complete(true);
-      await first;
-      expect(calls, 1);
-    });
+    test(
+      'toques repetidos enquanto conecta não disparam outra consulta',
+      () async {
+        final gate = Completer<bool>();
+        var calls = 0;
+        makeProbed((_) {
+          calls++;
+          return gate.future;
+        });
+        await flush();
+        final other = controller.current.available.last;
+        final first = controller.select(other);
+        expect(await controller.select(other), isFalse);
+        gate.complete(true);
+        await first;
+        expect(calls, 1);
+      },
+    );
 
     test('o já escolhido não é testado de novo', () async {
       var calls = 0;
@@ -399,4 +409,260 @@ void main() {
       expect(calls, 0);
     });
   });
+
+  group('identidade do servidor', () {
+    late ServerTrust trust;
+    late List<Uri> probed;
+
+    Future<ServerListController> makeTrusted(
+      List<DiscoveredServer> initial, {
+      int random = 0,
+      bool probeOk = true,
+    }) async {
+      trust = ServerTrust(MemoryKeyValueStore());
+      probed = [];
+      discovery = FakeDiscovery(initial);
+      controller = ServerListController(
+        discovery: discovery,
+        random: FixedRandom(random),
+        trust: trust,
+        probe: (uri) async {
+          probed.add(uri);
+          return probeOk;
+        },
+      );
+      addTearDown(controller.dispose);
+      await flush();
+      return controller;
+    }
+
+    DiscoveredServer casa(String id) =>
+        server('Casa', addresses: ['10.0.0.1'], id: id);
+
+    test('o primeiro contato entra direto e fica lembrado', () async {
+      await makeTrusted([casa('aaa')]);
+      expect(controller.current.selected?.name, 'Casa');
+      expect(trust.trustOf('Casa', 'aaa'), Trust.same);
+    });
+
+    test('outro id sob o mesmo nome pergunta antes e não sonda', () async {
+      await makeTrusted([
+        server('Nuvem', addresses: ['10.0.0.9']),
+      ]);
+      await trust.remember('Casa', 'aaa');
+      discovery.emit([
+        casa('bbb'),
+        server('Nuvem', addresses: ['10.0.0.9']),
+      ]);
+      await flush();
+
+      final changed = controller.current.available.firstWhere(
+        (s) => s.name == 'Casa',
+      );
+      expect(await controller.select(changed), isTrue, reason: 'nada falhou');
+      expect(controller.current.pendingChange, changed);
+      expect(controller.current.selected?.name, 'Nuvem');
+      expect(probed, isEmpty);
+    });
+
+    test('cancelar fecha a pergunta e deixa tudo como estava', () async {
+      await makeTrusted([
+        server('Nuvem', addresses: ['10.0.0.9']),
+      ]);
+      await trust.remember('Casa', 'aaa');
+      discovery.emit([
+        casa('bbb'),
+        server('Nuvem', addresses: ['10.0.0.9']),
+      ]);
+      await flush();
+      await controller.select(
+        controller.current.available.firstWhere((s) => s.name == 'Casa'),
+      );
+      controller.cancelChange();
+      expect(controller.current.pendingChange, isNull);
+      expect(controller.current.selected?.name, 'Nuvem');
+      expect(trust.trustOf('Casa', 'aaa'), Trust.same);
+    });
+
+    test('confirmar sonda, escolhe e passa a lembrar do novo id', () async {
+      await makeTrusted([
+        server('Nuvem', addresses: ['10.0.0.9']),
+      ]);
+      await trust.remember('Casa', 'aaa');
+      discovery.emit([
+        casa('bbb'),
+        server('Nuvem', addresses: ['10.0.0.9']),
+      ]);
+      await flush();
+      await controller.select(
+        controller.current.available.firstWhere((s) => s.name == 'Casa'),
+      );
+      expect(await controller.confirmChange(), isTrue);
+      expect(controller.current.pendingChange, isNull);
+      expect(controller.current.selected?.name, 'Casa');
+      expect(probed, hasLength(1));
+      expect(trust.trustOf('Casa', 'bbb'), Trust.same);
+    });
+
+    test(
+      'confirmar um servidor que não responde mantém a escolha anterior e não o lembra',
+      () async {
+        await makeTrusted([
+          server('Nuvem', addresses: ['10.0.0.9']),
+        ], probeOk: false);
+        await trust.remember('Casa', 'aaa');
+        discovery.emit([
+          casa('bbb'),
+          server('Nuvem', addresses: ['10.0.0.9']),
+        ]);
+        await flush();
+        await controller.select(
+          controller.current.available.firstWhere((s) => s.name == 'Casa'),
+        );
+        expect(await controller.confirmChange(), isFalse);
+        expect(controller.current.selected?.name, 'Nuvem');
+        expect(trust.trustOf('Casa', 'aaa'), Trust.same);
+      },
+    );
+
+    test(
+      'com a pergunta aberta, outros toques não empilham perguntas nem escolhem',
+      () async {
+        await makeTrusted([
+          server('Nuvem', addresses: ['10.0.0.9']),
+        ]);
+        await trust.remember('Casa', 'aaa');
+        discovery.emit([
+          casa('bbb'),
+          server('Nuvem', addresses: ['10.0.0.9']),
+          server('Outro', addresses: ['10.0.0.7']),
+        ]);
+        await flush();
+        final changed = controller.current.available.firstWhere(
+          (s) => s.name == 'Casa',
+        );
+        await controller.select(changed);
+        for (var i = 0; i < 5; i++) {
+          await controller.select(
+            controller.current.available.firstWhere((s) => s.name == 'Outro'),
+          );
+          await controller.select(changed);
+        }
+        expect(controller.current.pendingChange, changed);
+        expect(controller.current.selected?.name, 'Nuvem');
+        expect(probed, isEmpty);
+      },
+    );
+
+    test('confirmar ou cancelar sem pergunta aberta não faz nada', () async {
+      await makeTrusted([casa('aaa')]);
+      final before = controller.current.selected;
+      expect(await controller.confirmChange(), isTrue);
+      controller.cancelChange();
+      expect(controller.current.selected, before);
+      expect(probed, isEmpty);
+    });
+
+    test(
+      'o sorteio inicial nunca escolhe sozinho um nome que mudou de id',
+      () async {
+        trust = ServerTrust(MemoryKeyValueStore());
+        await trust.remember('Casa', 'aaa');
+        discovery = FakeDiscovery([
+          casa('bbb'),
+          server('Nuvem', addresses: ['10.0.0.9']),
+        ]);
+        controller = ServerListController(
+          discovery: discovery,
+          random: FixedRandom(0),
+          trust: trust,
+        );
+        addTearDown(controller.dispose);
+        await flush();
+        expect(controller.current.selected?.name, 'Nuvem');
+      },
+    );
+
+    test('se só há nomes que mudaram, nada é escolhido sozinho', () async {
+      trust = ServerTrust(MemoryKeyValueStore());
+      await trust.remember('Casa', 'aaa');
+      discovery = FakeDiscovery([casa('bbb')]);
+      controller = ServerListController(
+        discovery: discovery,
+        random: FixedRandom(0),
+        trust: trust,
+      );
+      addTearDown(controller.dispose);
+      await flush();
+      expect(controller.current.selected, isNull);
+      expect(controller.current.available, hasLength(1));
+    });
+
+    test(
+      'o escolhido que passa a anunciar outro id deixa de estar conectado, não é trocado em silêncio',
+      () async {
+        await makeTrusted([casa('aaa')]);
+        expect(controller.current.connection, ServerConnection.connected);
+        discovery.emit([casa('zzz')]);
+        await flush();
+        expect(controller.current.selected?.serverId, 'aaa');
+        expect(controller.current.connection, ServerConnection.disconnected);
+        expect(controller.current.available.single.serverId, 'zzz');
+      },
+    );
+
+    test(
+      'lista chegando antes de ler o que se lembrava espera por isso',
+      () async {
+        final slow = _SlowStore();
+        await ServerTrust(slow).remember('Casa', 'aaa');
+        trust = ServerTrust(slow);
+        discovery = FakeDiscovery([casa('bbb')]);
+        controller = ServerListController(
+          discovery: discovery,
+          random: FixedRandom(0),
+          trust: trust,
+        );
+        addTearDown(controller.dispose);
+        expect(controller.current.loaded, isFalse);
+        slow.release();
+        await flush();
+        await flush();
+        expect(controller.current.loaded, isTrue);
+        expect(
+          controller.current.selected,
+          isNull,
+          reason: 'o nome mudou de id: não se escolhe sozinho',
+        );
+      },
+    );
+
+    test('sem trust tudo funciona como antes', () async {
+      make();
+      await flush();
+      expect(controller.current.pendingChange, isNull);
+      expect(controller.current.selected, isNotNull);
+    });
+  });
+}
+
+/// A store that only answers reads after [release]: the first list arrives before what was remembered is read.
+class _SlowStore implements KeyValueStore {
+  final _data = <String, String>{};
+  final _gate = Completer<void>();
+  bool _open = false;
+
+  void release() {
+    _open = true;
+    _gate.complete();
+  }
+
+  @override
+  Future<String?> read(String key) async {
+    if (!_open) await _gate.future;
+    return _data[key];
+  }
+
+  @override
+  Future<void> write(String key, String value) async => _data[key] = value;
 }

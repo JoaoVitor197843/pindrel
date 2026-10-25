@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { found, mockDiscover } from '../../test/discovery'
+import { stubLocalStorage } from '../../test/storage'
 import {
   directory,
   embedded,
@@ -13,6 +14,7 @@ import {
   toOption,
 } from './servers.svelte'
 import { toast } from './toast.svelte'
+import { remember, trustOf } from './trust'
 
 afterEach(() => vi.useRealTimers())
 
@@ -49,6 +51,23 @@ describe('anúncios', () => {
     ['', false],
   ])('IPv4 %s utilizável: %s', (ip, ok) => expect(isUsableIpv4(ip)).toBe(ok))
 
+  it('o id que o servidor anuncia é atualizado na lista mesmo com o mesmo nome e endereço', async () => {
+    const d = new ServerDirectory()
+    mockDiscover([found('Casa', '10.0.0.5', 8095, 'aaa')])
+    await d.refresh()
+    expect(d.others[0].serverId).toBe('aaa')
+    mockDiscover([found('Casa', '10.0.0.5', 8095, 'bbb')])
+    await d.refresh()
+    expect(d.others[0].serverId).toBe('bbb')
+  })
+
+  it('toOption leva o id do servidor; um id inútil vira vazio', () => {
+    expect(toOption(found('Casa', '10.0.0.5', 8095, 'a1B2-c3'))?.serverId).toBe('a1B2-c3')
+    for (const bad of ['', 'com espaço', 'a;b', 'ü', 'x'.repeat(65), '<b>']) {
+      expect(toOption(found('Casa', '10.0.0.5', 8095, bad))?.serverId, bad).toBe('')
+    }
+  })
+
   it('id sem acentos, minúsculo e só com letras, números e hífens', () => {
     expect(idFor('Escritório  do João!')).toBe('escritorio-do-joao')
     expect(idFor('!!!')).toBe('servidor')
@@ -60,16 +79,17 @@ describe('anúncios', () => {
       name: 'Casa',
       address: '10.0.0.5:8095',
       url: 'http://10.0.0.5:8095',
+      serverId: '',
     })
-    expect(toOption({ name: 'X', host: 'pi', addresses: ['127.0.0.1'], port: 80 })?.address).toBe('pi.local:80')
+    expect(toOption({ name: 'X', host: 'pi', id: '', addresses: ['127.0.0.1'], port: 80 })?.address).toBe('pi.local:80')
   })
 
   it.each([
-    ['sem nome', { name: '', host: 'h', addresses: ['10.0.0.1'], port: 80 }],
-    ['nome enorme', { name: 'N'.repeat(65), host: 'h', addresses: ['10.0.0.1'], port: 80 }],
-    ['porta zero', { name: 'A', host: 'h', addresses: ['10.0.0.1'], port: 0 }],
-    ['porta enorme', { name: 'A', host: 'h', addresses: ['10.0.0.1'], port: 70000 }],
-    ['sem endereço nem host', { name: 'A', host: '', addresses: ['127.0.0.1'], port: 80 }],
+    ['sem nome', { name: '', host: 'h', id: '', addresses: ['10.0.0.1'], port: 80 }],
+    ['nome enorme', { name: 'N'.repeat(65), host: 'h', id: '', addresses: ['10.0.0.1'], port: 80 }],
+    ['porta zero', { name: 'A', host: 'h', id: '', addresses: ['10.0.0.1'], port: 0 }],
+    ['porta enorme', { name: 'A', host: 'h', id: '', addresses: ['10.0.0.1'], port: 70000 }],
+    ['sem endereço nem host', { name: 'A', host: '', id: '', addresses: ['127.0.0.1'], port: 80 }],
   ])('anúncio inútil (%s) é ignorado', (_, server) => expect(toOption(server)).toBeNull())
 })
 
@@ -195,9 +215,11 @@ describe('selection.open', () => {
   const server = { id: 'escritorio', name: 'Escritório', address: '10.0.0.9:8095', url: 'http://10.0.0.9:8095' }
 
   beforeEach(() => {
+    stubLocalStorage()
     go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
     vi.mocked(fetch).mockResolvedValue(new Response(null))
     selection.connecting = null
+    selection.pendingChange = null
     toast.message = ''
   })
   afterEach(() => go.mockRestore())
@@ -224,6 +246,88 @@ describe('selection.open', () => {
     await first
     expect(go).toHaveBeenCalledOnce()
     expect(go).toHaveBeenCalledWith(server.url)
+  })
+
+  describe('identidade do servidor', () => {
+    const casa = { ...server, id: 'casa', name: 'Casa', serverId: 'aaa' }
+
+    it('o primeiro contato entra direto e fica lembrado; voltar com o mesmo id também', async () => {
+      await selection.open(casa)
+      expect(selection.pendingChange).toBeNull()
+      expect(go).toHaveBeenCalledOnce()
+      expect(trustOf('Casa', 'aaa')).toBe('same')
+      selection.connecting = null
+      await selection.open(casa)
+      expect(go).toHaveBeenCalledTimes(2)
+    })
+
+    it('outro id sob o mesmo nome pergunta antes e não sai da página', async () => {
+      remember('Casa', 'aaa')
+      await selection.open({ ...casa, serverId: 'bbb' })
+      expect(selection.pendingChange?.serverId).toBe('bbb')
+      expect(selection.connecting).toBeNull()
+      expect(go).not.toHaveBeenCalled()
+      expect(vi.mocked(fetch)).not.toHaveBeenCalled()
+    })
+
+    it('sem id onde havia um também pergunta', async () => {
+      remember('Casa', 'aaa')
+      await selection.open({ ...casa, serverId: '' })
+      expect(selection.pendingChange).not.toBeNull()
+    })
+
+    it('cancelar fecha a pergunta, não navega e não muda o que se lembra', async () => {
+      remember('Casa', 'aaa')
+      await selection.open({ ...casa, serverId: 'bbb' })
+      selection.cancelChange()
+      expect(selection.pendingChange).toBeNull()
+      expect(go).not.toHaveBeenCalled()
+      expect(trustOf('Casa', 'aaa')).toBe('same')
+    })
+
+    it('confirmar sonda, navega e passa a lembrar do novo id', async () => {
+      remember('Casa', 'aaa')
+      await selection.open({ ...casa, serverId: 'bbb' })
+      selection.confirmChange()
+      await vi.waitFor(() => expect(go).toHaveBeenCalledOnce())
+      expect(selection.pendingChange).toBeNull()
+      expect(trustOf('Casa', 'bbb')).toBe('same')
+    })
+
+    it('com a pergunta aberta, outros toques não abrem outro servidor nem empilham perguntas', async () => {
+      remember('Casa', 'aaa')
+      const changed = { ...casa, serverId: 'bbb' }
+      await selection.open(changed)
+      for (let i = 0; i < 5; i++) await selection.open({ ...server, id: `o${i}`, name: `O${i}`, url: `http://10.0.0.${i}:1` })
+      await selection.open(changed)
+      expect(go).not.toHaveBeenCalled()
+      expect(selection.pendingChange).toEqual(changed)
+    })
+
+    it('confirmar sem pergunta aberta (toque duplo) não faz nada', async () => {
+      selection.confirmChange()
+      await Promise.resolve()
+      expect(go).not.toHaveBeenCalled()
+    })
+
+    it('servidor que não respondeu não passa a ser lembrado', async () => {
+      vi.mocked(fetch).mockRejectedValue(new TypeError('sem rota'))
+      await selection.open(casa)
+      expect(trustOf('Casa', 'aaa')).toBe('new')
+    })
+
+    it('sem armazenamento a navegação continua funcionando', async () => {
+      vi.stubGlobal('localStorage', {
+        getItem: () => {
+          throw new Error('bloqueado')
+        },
+        setItem: () => {
+          throw new Error('bloqueado')
+        },
+      })
+      await selection.open(casa)
+      expect(go).toHaveBeenCalledOnce()
+    })
   })
 
   it('escolher o embutido não faz nada', async () => {

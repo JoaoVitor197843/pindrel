@@ -43,13 +43,15 @@ const DiscoveredServer$json = {
     {'1': 'host', '3': 2, '4': 1, '5': 9, '10': 'host'},
     {'1': 'addresses', '3': 3, '4': 3, '5': 9, '10': 'addresses'},
     {'1': 'port', '3': 4, '4': 1, '5': 5, '10': 'port'},
+    {'1': 'id', '3': 5, '4': 1, '5': 9, '10': 'id'},
   ],
 };
 
 /// Descriptor for `DiscoveredServer`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List discoveredServerDescriptor = $convert.base64Decode(
     'ChBEaXNjb3ZlcmVkU2VydmVyEhIKBG5hbWUYASABKAlSBG5hbWUSEgoEaG9zdBgCIAEoCVIEaG'
-    '9zdBIcCglhZGRyZXNzZXMYAyADKAlSCWFkZHJlc3NlcxISCgRwb3J0GAQgASgFUgRwb3J0');
+    '9zdBIcCglhZGRyZXNzZXMYAyADKAlSCWFkZHJlc3NlcxISCgRwb3J0GAQgASgFUgRwb3J0Eg4K'
+    'AmlkGAUgASgJUgJpZA==');
 
 @$core.Deprecated('Use discoveredServersDescriptor instead')
 const DiscoveredServers$json = {
