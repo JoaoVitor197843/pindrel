@@ -1,6 +1,7 @@
 import { fetchDiscoveredServers } from '../api/servers'
 import type { DiscoveredServer } from '../../types/shared/protos/server'
 import { toast } from './toast.svelte'
+import { remember, trustOf } from './trust'
 
 export interface ServerOption {
   id: string
@@ -9,6 +10,8 @@ export interface ServerOption {
   address: string
   /** The server's origin, where the browser goes when it is chosen. */
   url: string
+  /** What the server announced as its own id (empty or absent: it announces none). */
+  serverId?: string
 }
 
 // The open page is always the embedded server's, and it is always the default.
@@ -61,7 +64,8 @@ export function toOption(server: DiscoveredServer): ServerOption | null {
   const host = ip ?? (server.host ? `${server.host}.local` : '')
   if (!host) return null
   const address = `${host}:${server.port}`
-  return { id: idFor(server.name), name: server.name, address, url: `http://${address}` }
+  const serverId = /^[A-Za-z0-9-]{1,64}$/.test(server.id ?? '') ? server.id : ''
+  return { id: idFor(server.name), name: server.name, address, url: `http://${address}`, serverId }
 }
 
 /**
@@ -115,7 +119,7 @@ export class ServerDirectory {
       }
     }
     const sorted = [...next.values()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-    const same = sorted.length === this.others.length && sorted.every((s, i) => s.id === this.others[i].id && s.address === this.others[i].address)
+    const same = sorted.length === this.others.length && sorted.every((s, i) => s.id === this.others[i].id && s.address === this.others[i].address && s.serverId === this.others[i].serverId)
     if (!same) this.others = sorted
   }
 
@@ -193,6 +197,8 @@ export async function probe(url: string, timeoutMs = PROBE_TIMEOUT_MS): Promise<
 class ServerSelection {
   readonly selected = embedded
   connecting = $state<ServerOption | null>(null)
+  /** A server whose name is known but whose id is not the one opened before: waits for the user to say go on. */
+  pendingChange = $state<ServerOption | null>(null)
   /** Whether this page's server responds: `disconnected` after consecutive failures, back to connected on the first success. */
   health = $state<Health>('connected')
   /**
@@ -273,15 +279,34 @@ class ServerSelection {
     }
   }
 
-  async open(server: ServerOption): Promise<void> {
+  async open(server: ServerOption, confirmed = false): Promise<void> {
     if (this.connecting || server.id === embedded.id) return
+    if (!confirmed) {
+      if (this.pendingChange) return // the question is still open
+      if (trustOf(server.name, server.serverId ?? '') === 'changed') {
+        this.pendingChange = server
+        return
+      }
+    }
+    this.pendingChange = null
     this.connecting = server
     if (await probe(server.url)) {
+      remember(server.name, server.serverId ?? '') // only what really answered becomes the one we know
       navigation.go(server.url)
     } else {
       this.connecting = null
       toast.show(`${server.name} não respondeu.`)
     }
+  }
+
+  /** The user accepted the change: go on to the server. */
+  confirmChange(): void {
+    const server = this.pendingChange
+    if (server) void this.open(server, true)
+  }
+
+  cancelChange(): void {
+    this.pendingChange = null
   }
 }
 

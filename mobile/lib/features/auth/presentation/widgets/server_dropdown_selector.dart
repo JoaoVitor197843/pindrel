@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -60,6 +62,52 @@ class _ServerDropdownSelectorState
     extends ConsumerState<ServerDropdownSelector> {
   /// Menu open: the button's arrow turns.
   bool _open = false;
+
+  StreamSubscription<ServerListState>? _changes;
+  ServerListController? _watched;
+  bool _asking = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final controller = ref.read(serverListControllerProvider);
+    if (identical(controller, _watched)) return;
+    _changes?.cancel();
+    _watched = controller;
+    _changes = controller.stream.listen((state) {
+      final pending = state.pendingChange;
+      if (pending != null && !_asking && mounted) _ask(controller, pending);
+    });
+  }
+
+  @override
+  void dispose() {
+    _changes?.cancel();
+    super.dispose();
+  }
+
+  /// The name is one the user opened before but the server answering now has another id: asks before going on.
+  Future<void> _ask(
+    ServerListController controller,
+    ServerOption server,
+  ) async {
+    _asking = true;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (_) => _ChangedServerDialog(name: server.name),
+    );
+    _asking = false;
+    if (go == true) {
+      if (!await controller.confirmChange()) {
+        messenger?.showSnackBar(
+          SnackBar(content: Text('${server.name} não respondeu.')),
+        );
+      }
+    } else {
+      controller.cancelChange();
+    }
+  }
 
   void _setOpen(bool open) {
     if (mounted && _open != open) setState(() => _open = open);
@@ -249,8 +297,8 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
                   selected: server == state.selected,
                   connected: false,
                   onTap: state.connecting != null
-                    ? null
-                    : () => Navigator.pop(context, server),
+                      ? null
+                      : () => Navigator.pop(context, server),
                 ),
             ],
             const Divider(height: 1, color: AppColors.border),
@@ -392,6 +440,58 @@ class _ServersSkeleton extends StatelessWidget {
           SkeletonBar(height: 36),
         ],
       ),
+    );
+  }
+}
+
+/// Asks whether to go on to a server that is not the one opened before under that name. The safe answer has the focus.
+class _ChangedServerDialog extends StatelessWidget {
+  const _ChangedServerDialog({required this.name});
+
+  final String name;
+
+  static const title = 'Este servidor mudou';
+  static const cancelLabel = 'Cancelar';
+  static const continueLabel = 'Continuar mesmo assim';
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      title: const Text(
+        title,
+        style: TextStyle(fontFamily: 'serif', color: AppColors.text),
+      ),
+      content: Text(
+        'O que responde como “$name” não é o mesmo servidor que você abriu '
+        'antes. Pode ser um servidor novo com o mesmo nome, ou outro aparelho '
+        'da rede se passando por ele. Só continue se você o reconhece: ele '
+        'verá a senha que você digitar.',
+        style: const TextStyle(color: AppColors.textMuted, height: 1.4),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text(
+            continueLabel,
+            style: TextStyle(color: AppColors.textMuted),
+          ),
+        ),
+        FilledButton(
+          autofocus: true,
+          onPressed: () => Navigator.of(context).pop(false),
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.primaryButton,
+            foregroundColor: AppColors.onPrimaryButton,
+          ),
+          child: const Text(cancelLabel),
+        ),
+      ],
     );
   }
 }

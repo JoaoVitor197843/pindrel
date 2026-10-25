@@ -40,8 +40,18 @@ class FakeMdnsApi implements MdnsApi {
   }
 }
 
-MdnsFound found(String name, {String ip = '192.168.1.10', int port = 8080}) =>
-    MdnsFound(name: name, host: '$name-host', port: port, addresses: [ip]);
+MdnsFound found(
+  String name, {
+  String ip = '192.168.1.10',
+  int port = 8080,
+  String id = '',
+}) => MdnsFound(
+  name: name,
+  host: '$name-host',
+  port: port,
+  addresses: [ip],
+  id: id,
+);
 
 const _interval = Duration(milliseconds: 20);
 
@@ -89,6 +99,22 @@ void main() {
       expect(emitted.last.first.addresses, ['10.0.0.1']);
     },
   );
+
+  test('o id do TXT chega ao servidor e um id inútil vira vazio', () async {
+    final api = FakeMdnsApi([
+      [
+        found('Casa', ip: '10.0.0.1', id: 'abc123'),
+        found('Falso', ip: '10.0.0.2', id: 'com espaço'),
+        found('Velho', ip: '10.0.0.3'),
+      ],
+    ]);
+    await listen(make(api));
+    await wait(60);
+    expect(
+      {for (final s in emitted.last) s.name: s.id},
+      {'Casa': 'abc123', 'Falso': '', 'Velho': ''},
+    );
+  });
 
   test(
     'varre de novo a cada intervalo, sem re-emitir o que não mudou',

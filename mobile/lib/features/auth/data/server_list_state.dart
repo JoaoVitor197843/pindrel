@@ -21,6 +21,7 @@ class ServerListState {
     this.selectedConnected = false,
     this.searchError,
     this.connecting,
+    this.pendingChange,
     this.loaded = false,
   });
 
@@ -37,6 +38,10 @@ class ServerListState {
 
   /// The server being tested before it is chosen, if any.
   final ServerOption? connecting;
+
+  /// A server whose name the user has opened before but whose id is another one: waits for the user to say go on
+  /// (`confirmChange`) or not (`cancelChange`).
+  final ServerOption? pendingChange;
 
   /// Whether the search has answered at least once (with a list or with an error).
   final bool loaded;

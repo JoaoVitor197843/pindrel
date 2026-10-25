@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { directory, navigation, selection } from '../lib/stores/servers.svelte'
 import { found, mockDiscover } from '../test/discovery'
 import { viewport } from '../test/setup'
+import { stubLocalStorage } from '../test/storage'
+import { remember } from '../lib/stores/trust'
 import Login from './Login.svelte'
 
 const click = (el: HTMLElement) => fireEvent.click(el)
@@ -10,7 +12,9 @@ const click = (el: HTMLElement) => fireEvent.click(el)
 const openMenu = () => click(screen.getByRole('button', { name: 'Selecionar servidor' }))
 
 beforeEach(async () => {
+  stubLocalStorage()
   selection.connecting = null
+  selection.pendingChange = null
   selection.health = 'connected'
   selection.address = null
   directory.others = []
@@ -170,6 +174,46 @@ describe('Login — seletor de servidor', () => {
     await openMenu()
     await fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('menu')).toBeNull()
+  })
+})
+
+describe('Login — servidor com outra identidade', () => {
+  async function chooseOffice(announcedId: string) {
+    mockDiscover([found('Escritório', '192.168.0.20', 8095, announcedId)])
+    await directory.refresh()
+    render(Login)
+    await openMenu()
+    await click(screen.getByRole('menuitemradio', { name: /Escritório/ }))
+  }
+
+  it('o mesmo nome com outro id pergunta, e Cancelar deixa tudo como estava', async () => {
+    remember('Escritório', 'aaa')
+    const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
+    await chooseOffice('bbb')
+    expect(screen.getByRole('heading', { name: 'Este servidor mudou' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Embutido')
+    await click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(go).not.toHaveBeenCalled()
+    go.mockRestore()
+  })
+
+  it('Continuar mesmo assim segue para o servidor', async () => {
+    remember('Escritório', 'aaa')
+    const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
+    await chooseOffice('bbb')
+    await click(screen.getByRole('button', { name: 'Continuar mesmo assim' }))
+    await vi.waitFor(() => expect(go).toHaveBeenCalledWith('http://192.168.0.20:8095'))
+    go.mockRestore()
+  })
+
+  it('o mesmo id, ou um servidor novo, não pergunta nada', async () => {
+    remember('Escritório', 'aaa')
+    const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
+    await chooseOffice('aaa')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await vi.waitFor(() => expect(go).toHaveBeenCalledOnce())
+    go.mockRestore()
   })
 })
 

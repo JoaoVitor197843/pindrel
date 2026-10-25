@@ -20,6 +20,12 @@ services:
     restart: unless-stopped
     mem_limit: 16m
     memswap_limit: 16m
+    # the process only reads the network and (optionally) one file: no writable root, no capabilities, no new privileges
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
     environment:
       - GATEWAY_PORT=${PORT:-8080}
       - SERVER_NAME=${SERVER_NAME:-Plany}
@@ -27,5 +33,12 @@ services:
       # behind a tunnel or proxy on this host (cloudflared, tailscale serve): TRUSTED_PROXIES=127.0.0.1,::1 in .env
       - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       - CLIENT_IP_HEADER=${CLIENT_IP_HEADER:-x-forwarded-for}
+      # who this server is (clients that remember servers notice a different one under the same name)
+      - SERVER_ID_FILE=/data/server-id
+    volumes:
+      - gateway-data:/data
     depends_on:
       - plany
+
+volumes:
+  gateway-data:

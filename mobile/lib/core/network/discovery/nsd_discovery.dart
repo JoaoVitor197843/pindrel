@@ -58,7 +58,6 @@ class NsdDiscovery implements ServerDiscovery {
     this.lostGrace = ServerTable.defaultLostGrace,
   });
 
-
   final NsdApi api;
   final String serviceType;
   final Duration restartWhileEmpty;
@@ -158,6 +157,7 @@ class NsdDiscovery implements ServerDiscovery {
         (service.addresses ?? const []).map((a) => a.address),
       ),
       port: port,
+      id: serverIdFromTxt(service.txt),
     );
   }
 }

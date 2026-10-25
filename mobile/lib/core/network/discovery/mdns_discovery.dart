@@ -13,12 +13,16 @@ class MdnsFound {
     required this.host,
     required this.port,
     required this.addresses,
+    this.id = '',
   });
 
   final String name;
   final String host;
   final int port;
   final List<String> addresses;
+
+  /// The `id` of the TXT record, when valid.
+  final String id;
 }
 
 /// The little we use of `multicast_dns`, so it can be swapped out in tests.
@@ -75,6 +79,12 @@ class PluginMdnsApi implements MdnsApi {
       ))
         a.address.address,
     ];
+    final txt = await _first(
+      _client.lookup<TxtResourceRecord>(
+        ResourceRecordQuery.text(instance),
+        timeout: timeout,
+      ),
+    );
     // "Plany._plany._tcp.local" -> "Plany"
     final name = instance.endsWith('.$domain')
         ? instance.substring(0, instance.length - domain.length - 1)
@@ -84,6 +94,7 @@ class PluginMdnsApi implements MdnsApi {
       host: _withoutLocal(srv.target),
       port: srv.port,
       addresses: addresses,
+      id: txt == null ? '' : serverIdFromTxtText(txt.text),
     );
   }
 }
@@ -168,6 +179,7 @@ class MdnsDiscovery implements ServerDiscovery {
               host: f.host,
               addresses: usableIpv4(f.addresses),
               port: f.port,
+              id: isValidServerId(f.id) ? f.id : '',
             ),
           );
         }

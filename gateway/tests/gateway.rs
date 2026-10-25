@@ -210,6 +210,48 @@ async fn requests_through_a_declared_proxy_never_get_the_private_address() {
 }
 
 #[tokio::test]
+async fn server_info_carries_the_id_of_this_server_also_through_a_tunnel_and_only_there() {
+    let a = Backend::start("a").await;
+    let gw = gateway(&[&a]).await;
+    let id = gw.app.registry.id().to_string();
+    assert_eq!(id.len(), 32);
+    assert_eq!(get(gw.addr, "/server/info/").await.header("x-plany-id"), id);
+    for (method, path) in [("POST", "/server/info/"), ("GET", "/server/info"), ("GET", "/auth/me/")] {
+        assert_eq!(
+            send(gw.addr, method, path, &[], "").await.header("x-plany-id"),
+            "",
+            "{method} {path}"
+        );
+    }
+    // a client cannot make the gateway repeat an id of its own choosing
+    let r = send(gw.addr, "GET", "/server/info/", &[("x-plany-id", "evil")], "").await;
+    assert_eq!(r.header("x-plany-id"), id);
+    let tunnel = behind_proxy(&a, "x-forwarded-for").await;
+    let r = send(tunnel.addr, "GET", "/server/info/", &[("x-forwarded-for", "203.0.113.7")], "").await;
+    assert_eq!(r.header("x-plany-id"), tunnel.app.registry.id(), "the id is not private");
+    assert_ne!(tunnel.app.registry.id(), id, "each gateway without a file has its own");
+    gw.shutdown().await;
+    tunnel.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_id_is_the_same_after_a_restart_when_there_is_a_file() {
+    let a = Backend::start("a").await;
+    let file = std::env::temp_dir().join(format!("plany-gw-id-{}", std::process::id()));
+    let _ = std::fs::remove_file(&file);
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let f = file.clone();
+        let gw = gateway_with(&[&a], move |c| c.server_id_file = Some(f)).await;
+        ids.push(get(gw.addr, "/server/info/").await.header("x-plany-id").to_string());
+        gw.shutdown().await;
+    }
+    assert_eq!(ids[0], ids[1]);
+    assert_eq!(ids[0].len(), 32);
+    let _ = std::fs::remove_file(&file);
+}
+
+#[tokio::test]
 async fn without_any_replica_the_answer_is_a_protobuf_502() {
     let a = Backend::start("a").await;
     let gw = gateway(&[&a]).await;
@@ -314,6 +356,7 @@ async fn discover_lists_the_other_servers_as_protobuf() {
         Server {
             name: "Zeta".into(),
             host: "zeta".into(),
+            id: String::new(),
             ips: vec!["192.168.1.9".into()],
             port: 8080,
         },
@@ -323,6 +366,7 @@ async fn discover_lists_the_other_servers_as_protobuf() {
         Server {
             name: "Alfa".into(),
             host: "alfa".into(),
+            id: String::new(),
             ips: vec!["192.168.1.8".into(), "10.0.0.8".into()],
             port: 39215,
         },
@@ -423,6 +467,92 @@ async fn the_connection_limit_holds_new_clients_until_one_leaves() {
         .unwrap();
     assert!(buf.starts_with(b"HTTP/1.1 200"), "{}", String::from_utf8_lossy(&buf));
     gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn one_client_cannot_hold_all_the_connections_and_gets_its_slots_back() {
+    let a = Backend::start("a").await;
+    let gw = gateway_with(&[&a], |c| {
+        c.max_connections = 100;
+        c.max_connections_per_ip = 3;
+    })
+    .await;
+    // a flood of connections that stay silent: only the first 3 are kept, the others are closed at once
+    let mut held = Vec::new();
+    let mut refused = 0;
+    for _ in 0..20 {
+        let mut s = TcpStream::connect(gw.addr).await.unwrap();
+        match read_until_closed(&mut s, Duration::from_millis(100)).await {
+            None => held.push(s),
+            Some(_) => refused += 1,
+        }
+    }
+    assert_eq!((held.len(), refused), (3, 17));
+    // while they are held, this address gets no more; once one leaves, a request is served again
+    drop(held.pop());
+    let mut ok = false;
+    for _ in 0..20 {
+        let mut s = TcpStream::connect(gw.addr).await.unwrap();
+        s.write_all(b"GET /x HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        if read_until_closed(&mut s, Duration::from_secs(1))
+            .await
+            .is_some_and(|r| r.starts_with(b"HTTP/1.1 200"))
+        {
+            ok = true;
+            break;
+        }
+        time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(ok, "the freed slot is usable");
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_declared_proxy_is_not_held_to_the_per_client_connection_limit() {
+    let a = Backend::start("a").await;
+    let gw = gateway_with(&[&a], |c| {
+        c.max_connections_per_ip = 1;
+        c.client_ip = ClientIp::new(parse_trusted("127.0.0.1").unwrap(), "x-forwarded-for").unwrap();
+    })
+    .await;
+    let mut held = Vec::new();
+    for _ in 0..5 {
+        let mut s = TcpStream::connect(gw.addr).await.unwrap();
+        s.write_all(b"GET /x HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
+        let mut buf = [0u8; 12];
+        time::timeout(Duration::from_secs(2), s.read_exact(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(buf.starts_with(b"HTTP/1.1 200"));
+        held.push(s);
+    }
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_map_of_the_lan_is_not_served_through_a_tunnel() {
+    let a = Backend::start("a").await;
+    let server = Server {
+        name: "Casa".into(),
+        host: "casa".into(),
+        id: String::new(),
+        ips: vec!["192.168.1.9".into()],
+        port: 8080,
+    };
+    let direct = gateway(&[&a]).await;
+    direct.app.registry.upsert("c".into(), server.clone());
+    assert_eq!(get(direct.addr, "/server/discover/").await.status, StatusCode::OK);
+
+    let tunnel = behind_proxy(&a, "x-forwarded-for").await;
+    tunnel.app.registry.upsert("c".into(), server);
+    let r = send(tunnel.addr, "GET", "/server/discover/", &[("x-forwarded-for", "203.0.113.7")], "").await;
+    assert_eq!(r.status, StatusCode::NOT_FOUND);
+    assert!(!String::from_utf8_lossy(&r.body).contains("192.168"));
+    direct.shutdown().await;
+    tunnel.shutdown().await;
 }
 
 #[tokio::test]

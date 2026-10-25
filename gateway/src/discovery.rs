@@ -19,11 +19,23 @@ pub const SERVICE_TYPE: &str = "_plany._tcp.local.";
 /// can announce anything, so the tables must not grow with what they are told.
 const MAX_LIVE: usize = 256;
 const MAX_KNOWN: usize = 64;
+/// What `list` hands out, which is what the web reads: it throws away an answer over 64 KiB, so one device flooding
+/// the LAN with announcements must not be able to make the whole list disappear. Same limits the web applies.
+const MAX_LISTED: usize = 64;
+const MAX_NAME_CHARS: usize = 64;
+const MAX_LISTED_ADDRESSES: usize = 8;
+
+/// An id is what a server chose for itself and then travels over the network: only plain, short text is accepted.
+pub fn valid_id(id: &str) -> bool {
+    (1..=64).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Server {
     pub name: String,
     pub host: String,
+    /// Random id the server keeps between runs (`identity`); empty for an older server that announces none.
+    pub id: String,
     pub ips: Vec<String>,
     pub port: u16,
 }
@@ -44,13 +56,23 @@ impl Lan {
         Self { ip, mask }
     }
 
-    /// The interface that holds the default route.
+    /// The LAN of this machine: an interface that is up, not a tunnel (Tailscale and other VPNs are
+    /// point-to-point, and mDNS does not cross them), with a private IPv4 address. When several qualify
+    /// (docker bridges, a second NIC) the one the default route uses wins, then a physical one.
     pub fn detect() -> Option<Lan> {
-        let IpAddr::V4(ip) = lan_ip()? else { return None };
-        if_addrs::get_if_addrs().ok()?.into_iter().find_map(|i| match i.addr {
-            if_addrs::IfAddr::V4(a) if a.ip == ip => Some(Lan::new(a.ip, a.netmask)),
-            _ => None,
-        })
+        let route = route_ip();
+        let candidates: Vec<Candidate> = netdev::get_interfaces()
+            .iter()
+            .filter(|i| i.is_up() && i.is_running() && !i.is_loopback() && !i.is_tun() && !i.is_point_to_point())
+            .flat_map(|i| {
+                let physical = i.is_physical();
+                i.ipv4.iter().map(move |n| Candidate {
+                    lan: Lan::new(n.addr(), n.netmask()),
+                    physical,
+                })
+            })
+            .collect();
+        pick(candidates, route)
     }
 
     /// Whether `ip` is another host of this subnet (never ourselves or a special address). Loopback is
@@ -65,6 +87,21 @@ impl Lan {
             && !(ip.is_unspecified() || ip.is_multicast() || ip.is_broadcast())
             && u32::from(ip) & mask == u32::from(self.ip) & mask
     }
+}
+
+/// An address of an interface that is not a tunnel, as `Lan::detect` sees it.
+struct Candidate {
+    lan: Lan,
+    physical: bool,
+}
+
+/// Private addresses only: a public one means the machine is directly on the internet (no LAN to
+/// announce on), and 100.64/10 or 169.254/16 are VPNs and link-local, never a LAN.
+fn pick(mut candidates: Vec<Candidate>, route: Option<Ipv4Addr>) -> Option<Lan> {
+    candidates.retain(|c| c.lan.ip.is_private());
+    // false sorts first, so "uses the default route" and "is physical" are negated
+    candidates.sort_by_key(|c| (Some(c.lan.ip) != route, !c.physical, c.lan.ip));
+    candidates.into_iter().next().map(|c| c.lan)
 }
 
 struct Remembered {
@@ -90,6 +127,10 @@ pub struct Registry {
     memory: Mutex<Memory>,
     own_port: u16,
     own_ips: Vec<String>,
+    own_id: String,
+    /// Announced addresses outside it (a VPN such as Tailscale, docker bridges) are dropped: mDNS does not
+    /// cross them, so nobody on this LAN could use them.
+    lan: Option<Lan>,
     searches: AtomicU64,
     /// Woken when a server stops being announced, so it is checked right away.
     pub lost: Notify,
@@ -102,16 +143,42 @@ impl Registry {
             memory: Mutex::new(Memory::default()),
             own_port,
             own_ips,
+            own_id: String::new(),
+            lan: None,
             searches: AtomicU64::new(0),
             lost: Notify::new(),
         }
     }
 
-    fn is_self(&self, s: &Server) -> bool {
-        s.port == self.own_port && s.ips.iter().any(|i| self.own_ips.contains(i))
+    /// This gateway's own id, so that it hides itself from the list even when its addresses differ.
+    pub fn with_id(mut self, id: String) -> Self {
+        self.own_id = id;
+        self
     }
 
-    pub fn upsert(&self, fullname: String, server: Server) {
+    pub fn id(&self) -> &str {
+        &self.own_id
+    }
+
+    pub fn with_lan(mut self, lan: Option<Lan>) -> Self {
+        self.lan = lan;
+        self
+    }
+
+    fn is_self(&self, s: &Server) -> bool {
+        (!s.id.is_empty() && s.id == self.own_id) || (s.port == self.own_port && s.ips.iter().any(|i| self.own_ips.contains(i)))
+    }
+
+    pub fn upsert(&self, fullname: String, mut server: Server) {
+        if let Some(lan) = &self.lan {
+            // our own address is not "another host" for `allows`, but it must reach `is_self`
+            server
+                .ips
+                .retain(|i| i.parse().is_ok_and(|ip: Ipv4Addr| ip == lan.ip || lan.allows(ip)));
+            if server.ips.is_empty() {
+                return;
+            }
+        }
         {
             let mut f = self.found.lock().unwrap();
             if f.len() >= MAX_LIVE && !f.contains_key(&fullname) {
@@ -171,6 +238,14 @@ impl Registry {
             }
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));
+        out.truncate(MAX_LISTED);
+        for s in &mut out {
+            s.name
+                .truncate(s.name.char_indices().nth(MAX_NAME_CHARS).map_or(s.name.len(), |(i, _)| i));
+            s.host
+                .truncate(s.host.char_indices().nth(MAX_NAME_CHARS).map_or(s.host.len(), |(i, _)| i));
+            s.ips.truncate(MAX_LISTED_ADDRESSES);
+        }
         out
     }
 
@@ -223,17 +298,27 @@ impl Registry {
     }
 }
 
-/// The address used to reach the outside, i.e. the LAN one. No packet is sent.
-pub fn lan_ip() -> Option<IpAddr> {
+/// The source address of the default route. Only a hint to choose among the LAN interfaces: with a
+/// VPN exit node this is the tunnel's address, which `Lan::detect` never accepts. No packet is sent.
+fn route_ip() -> Option<Ipv4Addr> {
     let s = UdpSocket::bind("0.0.0.0:0").ok()?;
     s.connect("192.0.2.1:9").ok()?;
-    s.local_addr().ok().map(|a| a.ip())
+    match s.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) => Some(ip),
+        IpAddr::V6(_) => None,
+    }
+}
+
+/// The address of the LAN this machine is on, see `Lan::detect`.
+pub fn lan_ip() -> Option<IpAddr> {
+    Lan::detect().map(|l| IpAddr::V4(l.ip))
 }
 
 /// Starts announcing `name` on `port` and browsing for the others. Keep the daemon alive; call
 /// `shutdown` to say goodbye on the network.
 pub fn start(
     name: &str,
+    id: &str,
     port: u16,
     lan: Option<IpAddr>,
     ifaces: &[String],
@@ -254,7 +339,7 @@ pub fn start(
         }
     }
     let host = format!("{}.local.", gethostname::gethostname().to_string_lossy());
-    let props = [("name", name)];
+    let props = [("name", name), ("id", id)];
     let info = match lan {
         Some(ip) => ServiceInfo::new(SERVICE_TYPE, name, &host, ip, port, &props[..]),
         None => ServiceInfo::new(SERVICE_TYPE, name, &host, "", port, &props[..]).map(|i| i.enable_addr_auto()),
@@ -284,12 +369,14 @@ fn apply(registry: &Registry, ev: ServiceEvent) {
             let name = full.strip_suffix(&format!(".{SERVICE_TYPE}")).unwrap_or(&full).to_string();
             let mut ips: Vec<String> = i.get_addresses_v4().iter().map(|a| a.to_string()).collect();
             ips.sort();
+            let id = i.get_property_val_str("id").filter(|v| valid_id(v)).unwrap_or_default().to_string();
             let host = i.get_hostname().trim_end_matches('.').trim_end_matches(".local").to_string();
             registry.upsert(
                 full,
                 Server {
                     name,
                     host,
+                    id,
                     ips,
                     port: i.get_port(),
                 },
@@ -340,6 +427,7 @@ mod tests {
         Server {
             name: name.into(),
             host: "h".into(),
+            id: String::new(),
             ips: vec![ip.into()],
             port,
         }
@@ -352,6 +440,68 @@ mod tests {
         r.upsert("me".into(), srv("Me", "192.168.1.5", 8200));
         r.upsert("a".into(), srv("A", "192.168.1.7", 9000));
         assert_eq!(r.list().iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["A", "B"]);
+    }
+
+    #[test]
+    fn addresses_outside_the_lan_are_not_listed() {
+        let r = Registry::new(1, vec![]).with_lan(Some(lan()));
+        let mut s = srv("X", "100.101.1.2", 8200);
+        s.ips.push("192.168.1.9".into());
+        r.upsert("x".into(), s);
+        assert_eq!(r.list()[0].ips, ["192.168.1.9"]);
+        r.upsert("y".into(), srv("Y", "100.101.1.3", 8200));
+        assert_eq!(r.list().len(), 1, "a server reachable only outside the LAN is not listed");
+    }
+
+    fn cand(ip: &str, physical: bool) -> Candidate {
+        Candidate {
+            lan: Lan::new(ip.parse().unwrap(), "255.255.255.0".parse().unwrap()),
+            physical,
+        }
+    }
+
+    #[test]
+    fn the_lan_is_never_a_vpn_or_link_local_address() {
+        let none = pick(
+            vec![cand("100.96.228.54", true), cand("169.254.3.4", true), cand("8.8.8.8", true)],
+            None,
+        );
+        assert_eq!(none, None);
+    }
+
+    #[test]
+    fn the_default_route_wins_then_a_physical_interface_then_the_lowest_address() {
+        let ip = |l: Option<Lan>| l.unwrap().ip.to_string();
+        let all = || vec![cand("172.18.0.1", false), cand("192.168.1.163", true), cand("10.0.0.2", true)];
+        assert_eq!(ip(pick(all(), Some("172.18.0.1".parse().unwrap()))), "172.18.0.1");
+        // the route goes through a VPN exit node: its address is not a candidate, so it is only ignored
+        assert_eq!(ip(pick(all(), Some("100.96.228.54".parse().unwrap()))), "10.0.0.2");
+        assert_eq!(
+            ip(pick(vec![cand("172.18.0.1", false), cand("192.168.1.9", true)], None)),
+            "192.168.1.9"
+        );
+    }
+
+    #[test]
+    fn this_gateway_is_hidden_by_its_id_even_when_it_is_announced_from_other_addresses() {
+        let r = Registry::new(8200, vec!["192.168.1.5".into()]).with_id("abc".into());
+        let mut me = srv("Me", "10.9.9.9", 1234);
+        me.id = "abc".into();
+        r.upsert("me".into(), me);
+        let mut other = srv("Other", "192.168.1.6", 8200);
+        other.id = "def".into();
+        r.upsert("o".into(), other);
+        assert_eq!(r.list().iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Other"]);
+    }
+
+    #[test]
+    fn only_short_plain_text_is_an_id() {
+        for ok in ["a", "0123456789abcdef0123456789abcdef", "Casa-2025", &"x".repeat(64)] {
+            assert!(valid_id(ok), "{ok:?}");
+        }
+        for bad in ["", " ", "a b", "a/b", "a\nb", "ü", &"x".repeat(65), "a;b", "<b>"] {
+            assert!(!valid_id(bad), "{bad:?}");
+        }
     }
 
     #[test]
@@ -472,13 +622,35 @@ mod tests {
     }
 
     #[test]
+    fn the_answer_stays_far_below_what_the_web_accepts_whatever_is_announced() {
+        let r = Registry::new(1, vec![]);
+        for i in 0..400 {
+            let long = "é".repeat(200);
+            let mut s = srv(&format!("{long}{i:04}"), "192.168.1.9", 8000);
+            s.host = long.clone();
+            s.ips = (0..40).map(|n| format!("192.168.1.{n}")).collect();
+            r.upsert(format!("f{i}"), s);
+        }
+        let list = r.list();
+        assert_eq!(list.len(), MAX_LISTED);
+        assert!(list
+            .iter()
+            .all(|s| s.name.chars().count() <= 64 && s.host.chars().count() <= 64 && s.ips.len() <= 8));
+        assert!(
+            crate::proto::discovered_servers(&list).len() < 32 * 1024,
+            "web discards over 64 KiB"
+        );
+    }
+
+    #[test]
     fn the_tables_cannot_be_grown_without_limit_by_what_the_network_announces() {
         // literal numbers on purpose: changing a limit should be a decision, not a side effect
         let r = Registry::new(1, vec![]);
         for i in 0..306 {
             r.upsert(format!("f{i}"), srv(&format!("S{i}"), "192.168.1.9", 8080));
         }
-        assert_eq!(r.list().len(), 256, "at most 256 announced servers are kept");
+        assert_eq!(r.found.lock().unwrap().len(), 256, "at most 256 announced servers are kept");
+        assert_eq!(r.list().len(), 64, "and at most 64 are handed out");
         // the memory keeps the 64 most recently seen of the accepted ones
         let names: Vec<String> = r.snapshot().into_iter().map(|s| s.name).collect();
         assert_eq!(names.len(), 64);

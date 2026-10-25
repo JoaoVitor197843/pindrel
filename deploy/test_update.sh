@@ -179,6 +179,7 @@ out=$(sh "$here/install-timer.sh" --print)
 proj=$(cd "$here/.." && pwd)
 check "service roda o update.sh deste diretório" sh -c 'echo "$1" | grep -q "^ExecStart=$2/deploy/update.sh$"' _ "$out" "$proj"
 check "service é oneshot com timeout" sh -c 'echo "$1" | grep -q "^Type=oneshot" && echo "$1" | grep -q "^TimeoutStartSec="' _ "$out"
+check "service é restrito: sem privilégios novos, sistema só de leitura e só o diretório do projeto gravável" sh -c 'echo "$1" | grep -q "^NoNewPrivileges=yes" && echo "$1" | grep -q "^ProtectSystem=strict" && echo "$1" | grep -q "^ReadWritePaths=$2 "' _ "$out" "$proj"
 check "timer repete a cada 1 min e sobrevive a reinício" sh -c 'echo "$1" | grep -q "^OnUnitActiveSec=1min" && echo "$1" | grep -q "^Persistent=true"' _ "$out"
 if command -v systemd-analyze >/dev/null 2>&1; then
   mkdir -p "$work/units"
