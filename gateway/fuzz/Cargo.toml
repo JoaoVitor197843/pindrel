@@ -1,0 +1,40 @@
+[package]
+name = "plany-gateway-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+hyper = { version = "1", default-features = false }
+
+[dependencies.plany-gateway]
+path = ".."
+
+# not part of the gateway workspace: it needs nightly and must not change the gateway's own build
+[workspace]
+
+[[bin]]
+name = "discovered_servers"
+path = "fuzz_targets/discovered_servers.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "settings"
+path = "fuzz_targets/settings.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "client_ip"
+path = "fuzz_targets/client_ip.rs"
+test = false
+doc = false
+bench = false

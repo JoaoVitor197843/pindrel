@@ -29,8 +29,13 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     touch src/lib.rs src/main.rs && cargo build --release --locked --target "$(cat /rust-target)" \
     && cp "target/$(cat /rust-target)/release/gateway" /gateway
 
+# /data holds the id of this server (and the servers it remembers) between restarts; the volume mounted there starts
+# with this owner, so the non-root user can write it (scratch has no mkdir)
+RUN mkdir /data && chown 10001:10001 /data
+
 FROM scratch
 COPY --from=builder /gateway /gateway
+COPY --from=builder --chown=10001:10001 /data /data
 # non-root: the gateway only needs ports above 1024 and UDP multicast
 USER 10001:10001
 ENV GATEWAY_PORT=8080

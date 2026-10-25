@@ -51,6 +51,10 @@ const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", 
 /// proxy (a tunnel): those clients are not on the LAN and have no use for its private address.
 pub const ADDRESS_HEADER: &str = "x-plany-address";
 
+/// Also on `GET /server/info/`: the id of this server (see `identity`), which a client that remembers servers by id can
+/// read from the page it is on. Unlike the address it is harmless for anyone to see, so a tunnel gets it too.
+pub const ID_HEADER: &str = "x-plany-id";
+
 const HOP_BY_HOP: [&str; 8] = [
     "connection",
     "keep-alive",
@@ -94,7 +98,13 @@ pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> 
         }
     }
     let path = req.uri().path();
+    let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
     if req.method() == Method::GET && path == "/server/discover/" {
+        // the list is the map of the LAN (names, private addresses): only for clients that are on it, never for
+        // whoever reaches a tunnel
+        if via_proxy {
+            return Ok(error(StatusCode::NOT_FOUND, "not_found", "not found"));
+        }
         let mut r = reply(
             StatusCode::OK,
             "application/x-protobuf",
@@ -114,7 +124,6 @@ pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> 
             return Ok(rate_limited(wait));
         }
     }
-    let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
     Ok(proxy(&app, ip, via_proxy, req).await)
 }
 
@@ -163,6 +172,12 @@ async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incom
                     p.headers.remove(h);
                 }
                 p.headers.remove(ADDRESS_HEADER);
+                p.headers.remove(ID_HEADER);
+                if parts.method == Method::GET && parts.uri.path() == "/server/info/" {
+                    if let Ok(v) = header::HeaderValue::from_str(app.registry.id()) {
+                        p.headers.insert(ID_HEADER, v);
+                    }
+                }
                 if !via_proxy && parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     let address = app.address.read().ok().and_then(|a| a.clone());
                     if let Some(v) = address.and_then(|a| header::HeaderValue::from_str(&a).ok()) {

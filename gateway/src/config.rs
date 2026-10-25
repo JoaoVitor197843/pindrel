@@ -22,7 +22,11 @@ pub struct Config {
     pub known_interval: Duration,
     /// Where to keep the remembered servers between runs (unset: only in memory).
     pub known_file: Option<std::path::PathBuf>,
+    /// Where the id of this server is kept between runs (unset: a new id on every start).
+    pub server_id_file: Option<std::path::PathBuf>,
     pub max_connections: usize,
+    /// Open connections one client may hold (not counted for the declared proxies, which carry many clients).
+    pub max_connections_per_ip: usize,
     pub rate_limit: bool,
     /// Who counts as the client behind a trusted proxy (`TRUSTED_PROXIES`, `CLIENT_IP_HEADER`); by default the peer.
     pub client_ip: ClientIp,
@@ -45,7 +49,9 @@ impl Config {
             probe_interval: Duration::from_secs(3),
             known_interval: Duration::from_secs(15),
             known_file: None,
+            server_id_file: None,
             max_connections: 1024,
+            max_connections_per_ip: 64,
             rate_limit: true,
             client_ip: ClientIp::direct(),
             max_body: 1 << 20,
@@ -77,6 +83,7 @@ impl Config {
         let mdns_refresh = parse("MDNS_REFRESH_SECS", "15", 0, 3600);
         let known_interval = parse("KNOWN_PROBE_SECS", "15", 0, 3600);
         let max_connections = parse("MAX_CONNECTIONS", "1024", 1, 100_000) as usize;
+        let max_connections_per_ip = parse("MAX_CONNECTIONS_PER_IP", "64", 1, 100_000) as usize;
         let max_body = parse("MAX_BODY_BYTES", "1048576", 1, 64 << 20) as usize;
         let mut flag = |key: &str, default: bool| -> bool {
             match get(key) {
@@ -124,7 +131,9 @@ impl Config {
             probe_interval: Duration::from_secs(probe),
             known_interval: Duration::from_secs(known_interval),
             known_file: get("KNOWN_SERVERS_FILE").map(std::path::PathBuf::from),
+            server_id_file: get("SERVER_ID_FILE").map(std::path::PathBuf::from),
             max_connections,
+            max_connections_per_ip,
             rate_limit,
             client_ip,
             max_body,
@@ -151,8 +160,8 @@ mod tests {
             (8080, 3, "Plany", true, true)
         );
         assert_eq!(
-            (c.max_connections, c.max_body, c.probe_interval),
-            (1024, 1 << 20, Duration::from_secs(3))
+            (c.max_connections, c.max_connections_per_ip, c.max_body, c.probe_interval),
+            (1024, 64, 1 << 20, Duration::from_secs(3))
         );
     }
 
@@ -166,6 +175,8 @@ mod tests {
             ("RATE_LIMIT_ENABLED", "false"),
             ("MDNS_INTERFACES", "eth0, wlan0"),
             ("MAX_CONNECTIONS", "8"),
+            ("MAX_CONNECTIONS_PER_IP", "3"),
+            ("SERVER_ID_FILE", "/data/server-id"),
         ])
         .unwrap();
         assert_eq!(
@@ -173,6 +184,8 @@ mod tests {
             (9000, "Casa", false, false, 8)
         );
         assert_eq!(c.mdns_interfaces, ["eth0", "wlan0"]);
+        assert_eq!(c.max_connections_per_ip, 3);
+        assert_eq!(c.server_id_file.as_deref(), Some(std::path::Path::new("/data/server-id")));
     }
 
     #[test]
