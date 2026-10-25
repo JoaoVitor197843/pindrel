@@ -91,12 +91,14 @@ class DiscoveredServer extends $pb.GeneratedMessage {
     $core.String? host,
     $core.Iterable<$core.String>? addresses,
     $core.int? port,
+    $core.String? id,
   }) {
     final result = DiscoveredServer._();
     if (name != null) result.name = name;
     if (host != null) result.host = host;
     if (addresses != null) result.addresses.addAll(addresses);
     if (port != null) result.port = port;
+    if (id != null) result.id = id;
     return result;
   }
 
@@ -117,6 +119,7 @@ class DiscoveredServer extends $pb.GeneratedMessage {
     ..aOS(2, _omitFieldNames ? '' : 'host')
     ..pPS(3, _omitFieldNames ? '' : 'addresses')
     ..aI(4, _omitFieldNames ? '' : 'port')
+    ..aOS(5, _omitFieldNames ? '' : 'id')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -170,6 +173,17 @@ class DiscoveredServer extends $pb.GeneratedMessage {
   $core.bool hasPort() => $_has(3);
   @$pb.TagNumber(4)
   void clearPort() => $_clearField(4);
+
+  /// Random id the server generated once and keeps (empty: an older server). Lets a client notice that "Casa" is no
+  /// longer the same server it opened before.
+  @$pb.TagNumber(5)
+  $core.String get id => $_getSZ(4);
+  @$pb.TagNumber(5)
+  set id($core.String value) => $_setString(4, value);
+  @$pb.TagNumber(5)
+  $core.bool hasId() => $_has(4);
+  @$pb.TagNumber(5)
+  void clearId() => $_clearField(5);
 }
 
 class DiscoveredServers extends $pb.GeneratedMessage {

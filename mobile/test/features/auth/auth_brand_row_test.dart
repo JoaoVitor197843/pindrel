@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/features/auth/data/server_trust.dart';
 import 'package:mobile/features/auth/presentation/providers/servers_provider.dart';
 import 'package:mobile/features/auth/presentation/widgets/auth_header.dart';
 import 'package:mobile/features/auth/presentation/widgets/pulsing_dot.dart';
@@ -51,6 +52,9 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            serverTrustProvider.overrideWithValue(
+              ServerTrust(MemoryKeyValueStore()),
+            ),
             serverDiscoveryProvider.overrideWithValue(
               FakeDiscovery([
                 server(

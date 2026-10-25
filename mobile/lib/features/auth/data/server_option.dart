@@ -7,6 +7,7 @@ class ServerOption {
     required this.name,
     required this.address,
     this.baseUri,
+    this.serverId = '',
   });
 
   /// From a server found on the network.
@@ -15,6 +16,7 @@ class ServerOption {
     name: server.name,
     address: '${server.address}:${server.port}',
     baseUri: server.baseUri,
+    serverId: server.id,
   );
 
   final String id;
@@ -25,6 +27,10 @@ class ServerOption {
 
   /// Where the API responds, when the server came from the network.
   final Uri? baseUri;
+
+  /// The id the server announced for itself (empty: it announces none). Two servers with the same name but
+  /// another id are not the same server.
+  final String serverId;
 
   /// Stable identifier derived from the name: lowercase, without accents and only with
   /// letters, numbers and hyphens.
@@ -42,8 +48,9 @@ class ServerOption {
   }
 
   @override
-  bool operator ==(Object other) => other is ServerOption && other.id == id;
+  bool operator ==(Object other) =>
+      other is ServerOption && other.id == id && other.serverId == serverId;
 
   @override
-  int get hashCode => id.hashCode;
+  int get hashCode => Object.hash(id, serverId);
 }
