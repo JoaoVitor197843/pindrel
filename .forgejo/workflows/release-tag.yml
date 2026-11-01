@@ -13,7 +13,8 @@
 # - Android: the APK is signed with the key kept in two more secrets, ANDROID_KEYSTORE_BASE64 (the .jks, base64) and
 #   ANDROID_KEYSTORE_PASSWORD (store and key password; the alias is `plany`). The same key must sign every release or
 #   installed apps cannot be updated: keep a backup of it.
-# - Windows, macOS and iOS are not built here (no runner for them); they are added as their builds are set up.
+# - Windows and macOS are built on GitHub (the repository is mirrored there) and copied in by the `desktop` job after the
+#   release is published. iOS is only compiled there as a check: nothing installable without an Apple developer account.
 name: release-tag
 
 on:
@@ -236,3 +237,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Publicar a release
         run: sh .forgejo/scripts/release.sh publish "$GITHUB_REF_NAME"
+
+  # Windows and macOS are built by GitHub Actions (.github/workflows/release-desktop.yml) because Flutter cannot
+  # cross-compile them. They come AFTER publish on purpose: the release is already out, and if GitHub is late or
+  # down this job fails alone without taking anything back (continue-on-error keeps the run green).
+  desktop:
+    needs: publish
+    runs-on: build
+    container:
+      image: ci-pc:1
+    timeout-minutes: 60
+    continue-on-error: true
+    env:
+      MIRROR_REPO: JoaoVitor197843/plany
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows e macOS (construídos no GitHub)
+        run: |
+          mkdir -p /tmp/assets
+          sh .forgejo/scripts/github-assets.sh "$MIRROR_REPO" "$GITHUB_REF_NAME" /tmp/assets \
+            "plany-app_${GITHUB_REF_NAME}_windows_amd64.zip" "plany-app_${GITHUB_REF_NAME}_macos_universal.zip"
+          sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.zip
