@@ -122,3 +122,15 @@ Configurar o espelho (uma vez, pelo navegador): Forgejo > repositório > Configu
 `https://github.com/JoaoVitor197843/plany.git`, usuário `JoaoVitor197843` e, como senha, um token do GitHub **restrito a este repositório** (fine-grained, só *Contents: Read and write*). Marcar "sincronizar ao fazer commit".
 
 Testes do script que baixa do GitHub: `sh .forgejo/scripts/test_github_assets.sh` (contra um GitHub falso, sem rede).
+
+## Downloads públicos (release do GitHub)
+
+O Forgejo só é alcançável pela Tailscale, então a página pública de downloads é a **release do GitHub**. O job `github-release` do
+`release-tag.yml` roda depois do `desktop` e **copia** a release do Forgejo para lá (mesmas notas, mesmos arquivos; os zips de
+Windows e macOS já estão lá, vêm do próprio GitHub). O Forgejo continua sendo a fonte da verdade; o GitHub guarda uma cópia que um novo run só atualiza
+(`.forgejo/scripts/github-release.sh`, testado com `sh .forgejo/scripts/test_github_release.sh`). A tag precisa já estar no GitHub (o espelho a leva),
+porque criar uma release para uma tag inexistente faz o GitHub criar a tag a partir da branch padrão.
+
+Precisa do secret **`GH_RELEASE_TOKEN`** no Forgejo (Configurações > Actions > Secrets): um token do GitHub *fine-grained* restrito ao repositório
+`plany`, com **Contents: Read and write** (cobre releases e envio de arquivos). O nome não pode começar com `GITHUB_`. Se o secret faltar ou o GitHub cair,
+só esse job falha (`continue-on-error`) e a release do Forgejo já está pública.

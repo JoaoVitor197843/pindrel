@@ -35,6 +35,18 @@ class H(BaseHTTPRequestHandler):
         if self.headers.get("Authorization") != "token " + token:
             return self.send(401, {"message": "token is required"})
         path = self.path.split("?")[0]
+        m = re.fullmatch(r"/attachments/(\d+)", path)
+        if m and method == "GET":
+            for r in releases.values():
+                for a in r["assets"]:
+                    if a["id"] == int(m.group(1)):
+                        data = a["data"].encode("latin-1")
+                        self.send_response(200)
+                        self.send_header("Content-Length", str(len(data)))
+                        self.end_headers()
+                        self.wfile.write(data)
+                        return
+            return self.send(404, {"message": "attachment not found"})
         if not path.startswith(BASE):
             return self.send(404, {"message": "not found"})
         path = path[len(BASE):]
@@ -71,7 +83,12 @@ class H(BaseHTTPRequestHandler):
                 raw = self.body()
                 if any(a["name"] == name for a in r["assets"]):
                     return self.send(409, {"message": "asset exists"})
-                a = {"id": next_id[0], "name": name, "size": len(raw), "raw": raw.decode("latin-1")}
+                # the multipart body holds the file between the first blank line and the closing boundary
+                boundary = self.headers.get("Content-Type", "").split("boundary=")[-1].encode()
+                data = raw.split(b"\r\n\r\n", 1)[-1].rsplit(b"\r\n--" + boundary, 1)[0]
+                a = {"id": next_id[0], "name": name, "size": len(data), "raw": raw.decode("latin-1"),
+                     "data": data.decode("latin-1"),
+                     "browser_download_url": "http://%s/attachments/%d" % (self.headers["Host"], next_id[0])}
                 next_id[0] += 1
                 r["assets"].append(a)
                 return self.send(201, a)
