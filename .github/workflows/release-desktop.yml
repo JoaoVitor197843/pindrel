@@ -162,6 +162,8 @@ jobs:
           pre=""
           case "$TAG" in *-*) pre="--prerelease" ;; esac
           notes="Builds de Windows e macOS da versão $TAG (sem assinatura). As demais plataformas e os binários do gateway estão na release principal do Forgejo."
+          # every download has its checksum next to it, like the ones the Forgejo makes
+          (cd dist && for f in *.zip; do sha256sum "$f" > "$f.sha256"; done)
           # a re-run replaces the files instead of failing on the existing release
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "$notes" $pre
