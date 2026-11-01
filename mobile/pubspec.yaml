@@ -26,6 +26,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # smoke test that opens the real app on a real window/emulator (integration_test/); only used by the CI
+  integration_test:
+    sdk: flutter
+
   flutter_lints: ^6.0.0
 
 flutter:
