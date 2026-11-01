@@ -14,6 +14,20 @@ O Plany é um espaço de notas e organização no estilo Notion que você roda n
 - **Cofre zero-knowledge, opcional.** Para os itens sensíveis, o conteúdo é cifrado no aparelho e o servidor nunca vê a chave. *(planejado)*
 - **Software livre** sob a AGPL v3.
 
+## Baixar
+
+Cada versão fica na página de **[Releases](https://github.com/JoaoVitor197843/plany/releases)**, com um arquivo `.sha256` ao lado de cada download:
+
+| Arquivo | O que é |
+| --- | --- |
+| `plany_<versão>_android.apk` | app Android |
+| `plany-app_<versão>_windows_amd64.zip` | app Windows (descompacte e execute `Plany.exe`) |
+| `plany-app_<versão>_macos_universal.zip` | app macOS (Apple Silicon e Intel) |
+| `plany-app_<versão>_linux_amd64.tar.gz` | app Linux |
+| `plany-gateway_<versão>_linux_amd64.tar.gz` e `..._arm64.tar.gz` | gateway para Linux (x86_64 e Raspberry Pi de 64 bits) |
+
+Os apps **ainda não são assinados**: o Windows mostra o aviso do SmartScreen na primeira execução ("Mais informações" e "Executar assim mesmo"), e o macOS pede para abrir pelo menu de contexto (botão direito em "Abrir"). No Android, é preciso permitir a instalação de fontes desconhecidas.
+
 ## Como as partes se encaixam
 
 O projeto é dividido em partes independentes:
@@ -112,7 +126,7 @@ O [`CLAUDE.md`](./CLAUDE.md) reúne o detalhamento técnico (arquitetura, conven
 
 ## Licença
 
-O Plany é software livre, licenciado sob a **GNU Affero General Public License, versão 3** (ou, a seu critério, qualquer versão posterior). Na prática: você pode usar, estudar, modificar e redistribuir o Plany; se rodar uma versão modificada como serviço acessível pela rede, precisa oferecer o código-fonte dela aos usuários desse serviço.
+O Plany é software livre, licenciado sob a **GNU Affero General Public License, versão 3** (`AGPL-3.0-only`: somente essa versão). Na prática: você pode usar, estudar, modificar e redistribuir o Plany; se rodar uma versão modificada como serviço acessível pela rede, precisa oferecer o código-fonte dela aos usuários desse serviço.
 
 O texto completo está em [LICENSE](./LICENSE).
 
