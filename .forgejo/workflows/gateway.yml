@@ -48,10 +48,23 @@ jobs:
       - name: Análise — clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
+      # cargo audit clones the whole history of the advisory database and that clone does not finish from the PC's
+      # network (measured: a full clone did not end in 120 s, a shallow one takes seconds), which failed the job twice.
+      # So it gets a shallow clone and does not fetch. Yanked crates stay covered: deny.toml has `yanked = "deny"`.
       - name: Segurança — dependências (cargo audit + cargo deny)
         run: |
-          cargo audit --deny warnings
-          cargo deny check
+          for i in 1 2 3; do
+            rm -rf /tmp/advisory-db
+            git clone -q --depth 1 https://github.com/RustSec/advisory-db.git /tmp/advisory-db && break
+            [ "$i" -lt 3 ] || { echo "não consegui baixar o banco de advisories"; exit 1; }
+            sleep 10
+          done
+          cargo audit --db /tmp/advisory-db --no-fetch --no-yanked --deny warnings
+          for i in 1 2 3; do
+            cargo deny check && break
+            [ "$i" -lt 3 ] || exit 1
+            sleep 10
+          done
 
       - name: Testes (unitários, integração, binário e mDNS)
         run: cargo test --locked
