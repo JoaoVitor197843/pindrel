@@ -17,10 +17,12 @@ class FakeMdnsApi implements MdnsApi {
   int maxConcurrent = 0;
   Duration scanTime = Duration.zero;
   Object? startError;
+  Completer<void>? startGate;
 
   @override
   Future<void> start() async {
     starts++;
+    await startGate?.future;
     if (startError != null) throw startError!;
   }
 
@@ -319,6 +321,47 @@ void main() {
           api.scans,
           greaterThan(0),
           reason: 'a busca se recupera sozinha',
+        );
+      },
+    );
+
+    test(
+      'pausar durante o início: o cliente que subiu é parado e nada varre pausado',
+      () async {
+        final api = FakeMdnsApi([
+          [found('A')],
+        ])..startGate = Completer<void>();
+        await listen(makeFast(api));
+        await wait(10);
+        sub.pause();
+        api.startGate!.complete();
+        await wait(120);
+        expect(api.stops, 1);
+        expect(api.scans, 0);
+      },
+    );
+
+    test(
+      'pausar e retomar durante o início sobe um cliente só e varre depois',
+      () async {
+        final api = FakeMdnsApi([
+          [found('A')],
+        ])..startGate = Completer<void>();
+        await listen(makeFast(api));
+        await wait(10);
+        sub.pause();
+        sub.resume();
+        api.startGate!.complete();
+        await wait(120);
+        expect(api.starts, 1);
+        expect(api.scans, greaterThan(0));
+        await sub.cancel();
+        final scans = api.scans;
+        await wait(100);
+        expect(
+          api.scans,
+          scans,
+          reason: 'nenhum timer sobrou depois de cancelar',
         );
       },
     );

@@ -136,10 +136,7 @@ class NsdDiscovery implements ServerDiscovery {
     }
 
     void scheduleExpiry() {
-      if (closed ||
-          paused ||
-          expireTimer?.isActive == true ||
-          !table.hasLost) {
+      if (closed || paused || expireTimer?.isActive == true || !table.hasLost) {
         return;
       }
       expireTimer = Timer(lostGrace ~/ 3, () {
@@ -170,7 +167,10 @@ class NsdDiscovery implements ServerDiscovery {
       arm();
     };
 
+    // one start in flight at a time: a resume that comes meanwhile would open a second search and the first
+    // one would never be stopped; the one in flight looks at the state when it ends
     Future<void> start({required bool initial}) async {
+      if (working) return;
       working = true;
       await begin(initial: initial);
       working = false;
