@@ -64,8 +64,18 @@ jobs:
           # the image must be >= go.mod's version (otherwise Go would download another toolchain)
           [ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -n1)" = "$want" ]
 
+      # The image already carries the modules (ci-pc-cache.Dockerfile); this only matters when go.mod gets ahead of it.
+      # proxy.golang.org kept cutting HTTP/2 streams on this network ("stream error ... INTERNAL_ERROR"), so the
+      # download uses HTTP/1.1 and tries up to 3 times.
       - name: Dependências
-        run: go mod download
+        env:
+          GODEBUG: http2client=0
+        run: |
+          for i in 1 2 3; do
+            go mod download && exit 0
+            [ "$i" -lt 3 ] || exit 1
+            sleep 10
+          done
 
       - name: Análise — gofmt
         run: |
