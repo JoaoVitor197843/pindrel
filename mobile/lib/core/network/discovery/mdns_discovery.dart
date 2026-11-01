@@ -33,35 +33,48 @@ const _asks = 3;
 /// The mDNS multicast group (IPv4).
 final _mdnsGroup = InternetAddress('224.0.0.251');
 
-/// The interfaces on which the mDNS group can be joined. `MDnsClient` joins it on every
-/// interface and a single refusal aborts the whole start; virtual adapters such as Tailscale's
-/// refuse on Windows (WSAENOPROTOOPT, 10042), so the search never started. Interfaces that
-/// refuse are left out; if none accepts, all are returned so the real error still shows.
-Future<Iterable<NetworkInterface>> _interfacesThatJoinMdns(
-  InternetAddressType type,
+// keepJoinable, pickLanAddress and askUpTo are public only so the tests can reach them; this file stays plain Dart
+// (no Flutter import), which also lets it run on its own.
+
+/// Keeps what [canJoin] accepts from [all]. `MDnsClient` joins the mDNS group on every interface and a single
+/// refusal aborts the whole start; virtual adapters such as Tailscale's refuse on Windows
+/// (WSAENOPROTOOPT, 10042), so the search never started. If none accepts, all are returned so the real
+/// error still shows.
+Future<List<T>> keepJoinable<T>(
+  List<T> all,
+  Future<bool> Function(T) canJoin,
 ) async {
-  final all = await NetworkInterface.list(
-    includeLinkLocal: true,
-    type: type,
-    includeLoopback: false,
-  );
-  if (type != InternetAddressType.IPv4) return all;
-  final joinable = <NetworkInterface>[];
-  for (final interface in all) {
-    RawDatagramSocket? socket;
-    try {
-      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      socket.joinMulticast(_mdnsGroup, interface);
-      joinable.add(interface);
-    } on OSError {
-      // this interface does not do multicast (`joinMulticast` throws the raw OSError)
-    } on SocketException {
-      // same, or the probe socket could not be opened
-    } finally {
-      socket?.close();
-    }
+  final joinable = <T>[];
+  for (final item in all) {
+    if (await canJoin(item)) joinable.add(item);
   }
   return joinable.isEmpty ? all : joinable;
+}
+
+Future<bool> _canJoinMdns(NetworkInterface interface) async {
+  RawDatagramSocket? socket;
+  try {
+    socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+    socket.joinMulticast(_mdnsGroup, interface);
+    return true;
+  } on OSError {
+    // this interface does not do multicast (`joinMulticast` throws the raw OSError)
+    return false;
+  } on SocketException {
+    // same, or the probe socket could not be opened
+    return false;
+  } finally {
+    socket?.close();
+  }
+}
+
+Future<List<NetworkInterface>> _interfacesThatJoinMdns() async {
+  final all = await NetworkInterface.list(
+    includeLinkLocal: true,
+    type: InternetAddressType.IPv4,
+    includeLoopback: false,
+  );
+  return keepJoinable(all, _canJoinMdns);
 }
 
 /// The little we use of `multicast_dns`, so it can be swapped out in tests.
@@ -77,21 +90,60 @@ abstract interface class MdnsApi {
 /// `IP_MULTICAST_IF` on Windows: which interface multicast packets leave through.
 const _windowsIpMulticastIf = 9;
 
-/// The address of the local network (private IPv4; not Tailscale's 100.64/10 nor link-local)
-/// among [interfaces], or null.
-InternetAddress? _lanAddress(Iterable<NetworkInterface> interfaces) {
+/// Adapters made by virtual machines, WSL, Docker and the like: they carry private addresses too, but the
+/// local network is not behind them.
+final _virtualName = RegExp(
+  r'vethernet|wsl|docker|virtualbox|vmware|vmnet|hyper-v|veth|^br-',
+  caseSensitive: false,
+);
+
+/// How likely a private IPv4 is to be the local network: 192.168/16 (homes, the common case) first, then 10/8,
+/// then 172.16/12 (where Docker, WSL and Hyper-V like to live). Null for what is not a private IPv4: Tailscale's
+/// 100.64/10, link-local, public addresses.
+int? _privateRank(InternetAddress address) {
+  if (address.type != InternetAddressType.IPv4) return null;
+  final b = address.rawAddress;
+  if (b[0] == 192 && b[1] == 168) return 0;
+  if (b[0] == 10) return 1;
+  if (b[0] == 172 && b[1] >= 16 && b[1] <= 31) return 2;
+  return null;
+}
+
+/// The address of the local network among [interfaces] (name and addresses of each), or null. A physical adapter
+/// beats a virtual one by name, then [_privateRank] decides, then the order given.
+InternetAddress? pickLanAddress(
+  Iterable<({String name, List<InternetAddress> addresses})> interfaces,
+) {
+  InternetAddress? best;
+  var bestScore = 1 << 30;
   for (final interface in interfaces) {
+    final penalty = _virtualName.hasMatch(interface.name) ? 10 : 0;
     for (final address in interface.addresses) {
-      final b = address.rawAddress;
-      if (address.type != InternetAddressType.IPv4) continue;
-      if (b[0] == 10 ||
-          (b[0] == 172 && b[1] >= 16 && b[1] <= 31) ||
-          (b[0] == 192 && b[1] == 168)) {
-        return address;
+      final rank = _privateRank(address);
+      if (rank == null) continue;
+      if (penalty + rank < bestScore) {
+        best = address;
+        bestScore = penalty + rank;
       }
     }
   }
-  return null;
+  return best;
+}
+
+/// Runs [ask] up to [asks] times, giving each a share of [timeout], and stops at the first that returns something.
+/// Wi-Fi drops multicast packets and a single `lookup` asks only once; the replies to one ask also carry the other
+/// records of the service, which the client caches and which answer the next lookups at once.
+Future<List<T>> askUpTo<T>(
+  Future<List<T>> Function(Duration slice) ask,
+  Duration timeout, {
+  int asks = _asks,
+}) async {
+  final slice = timeout ~/ asks;
+  for (var i = 0; i < asks; i++) {
+    final found = await ask(slice);
+    if (found.isNotEmpty) return found;
+  }
+  return const [];
 }
 
 class PluginMdnsApi implements MdnsApi {
@@ -103,10 +155,12 @@ class PluginMdnsApi implements MdnsApi {
   /// which interface to use (the local network's); the replies are heard on all of them.
   @override
   Future<void> start() async {
-    final interfaces = (await _interfacesThatJoinMdns(
-      InternetAddressType.IPv4,
-    )).toList();
-    final lan = Platform.isWindows ? _lanAddress(interfaces) : null;
+    final interfaces = await _interfacesThatJoinMdns();
+    final lan = Platform.isWindows
+        ? pickLanAddress([
+            for (final i in interfaces) (name: i.name, addresses: i.addresses),
+          ])
+        : null;
     _client = MDnsClient(
       rawDatagramSocketFactory:
           (
@@ -191,24 +245,16 @@ class PluginMdnsApi implements MdnsApi {
     );
   }
 
-  /// Asks for [query] up to [_asks] times, splitting [timeout] between the asks, and
-  /// stops at the first one that gets an answer. Wi-Fi drops multicast packets and a
-  /// single `lookup` asks only once; replies to one ask also carry the other records
-  /// of the service, which the client caches and which answer the next lookups at once.
   Future<List<T>> _ask<T extends ResourceRecord>(
     ResourceRecordQuery query,
     Duration timeout,
-  ) async {
-    final slice = timeout ~/ _asks;
-    for (var ask = 0; ask < _asks; ask++) {
-      final found = [
-        await for (final record in _client.lookup<T>(query, timeout: slice))
-          record,
-      ];
-      if (found.isNotEmpty) return found;
-    }
-    return const [];
-  }
+  ) => askUpTo<T>(
+    (slice) async => [
+      await for (final record in _client.lookup<T>(query, timeout: slice))
+        record,
+    ],
+    timeout,
+  );
 }
 
 String _withoutLocal(String host) {
@@ -218,7 +264,8 @@ String _withoutLocal(String host) {
 }
 
 /// Discovery through mDNS sweeps made by the app itself (`multicast_dns`).
-/// It is the Linux path, where the `nsd` plugin does not exist. It follows the same rules
+/// It is the Linux path, where the `nsd` plugin does not exist, and the Windows one, where it loses its
+/// results (it sends them from a non-platform thread). It follows the same rules
 /// as `NsdDiscovery`:
 ///
 /// * a server that disappears from a sweep is only marked as lost and stays in the
