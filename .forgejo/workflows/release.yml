@@ -4,9 +4,10 @@
 # - Runs on the PC's runner (label `build`): it has the host's Docker, RAM and CPU. The Pi compiles nothing.
 # - There is no emulation: the Dockerfiles cross-compile to arm64 (Go and Rust in the build machine's
 #   stage; the final stage has no RUN).
-# - Needs two repository secrets (Settings > Actions > Secrets):
-#     REGISTRY_USER   Forgejo user that owns the packages
-#     REGISTRY_TOKEN  access token with write:package scope
+# - Needs three repository secrets (Settings > Actions > Secrets):
+#     REGISTRY_USER    Forgejo user that owns the packages
+#     REGISTRY_TOKEN   access token with write:package scope
+#     DOCKERHUB_TOKEN  Docker Hub access token (Account settings > Personal access tokens, Read & Write)
 # - The release only happens if ALL tests pass: it calls the same CI workflows (backend, web, gateway
 #   and mobile, with `uses:`; the backend includes the tests with a database) and the `images` job depends on all of them. If one
 #   fails nothing is published, the `latest` tag does not change and the Pi stays on the version it already runs.
@@ -74,6 +75,7 @@ jobs:
     env:
       REGISTRY: raspberry-joao.tail7a986c.ts.net
       OWNER: joao_vitor
+      DOCKERHUB_OWNER: joaovitor2753
     steps:
       - uses: actions/checkout@v4
 
@@ -111,4 +113,21 @@ jobs:
           for name in plany plany-gateway; do
             docker buildx imagetools inspect "$REGISTRY/$OWNER/$name:latest" | tee /tmp/inspect.txt
             grep -q 'linux/amd64' /tmp/inspect.txt && grep -q 'linux/arm64' /tmp/inspect.txt
+          done
+
+      # After the Forgejo registry on purpose: the Raspberry Pi must never wait for Docker Hub. The image is copied as it is
+      # (same digest, both architectures), so nothing is built twice.
+      - name: Publicar no Docker Hub
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          [ -n "$DOCKERHUB_TOKEN" ] || { echo "falta o secret DOCKERHUB_TOKEN"; exit 1; }
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_OWNER" --password-stdin
+          sha=$(git rev-parse --short=12 HEAD)
+          for name in plany plany-gateway; do
+            docker buildx imagetools create \
+              -t "$DOCKERHUB_OWNER/$name:$sha" -t "$DOCKERHUB_OWNER/$name:latest" \
+              "$REGISTRY/$OWNER/$name:$sha"
+            docker buildx imagetools inspect "$DOCKERHUB_OWNER/$name:latest" | tee /tmp/inspect-hub.txt
+            grep -q 'linux/amd64' /tmp/inspect-hub.txt && grep -q 'linux/arm64' /tmp/inspect-hub.txt
           done

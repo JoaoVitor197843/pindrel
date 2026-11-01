@@ -53,7 +53,7 @@ caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar e
 | `gateway` | PC (`build`, imagem `ci-pc:1`) | rustfmt, clippy, `cargo test` (o Pi não tem Rust) |
 | `mobile` | PC (`flutter`, imagem `ci-flutter:1` do PC) | `flutter analyze` e `flutter test` |
 | `release` / `prebuild` | PC (`build`, imagem `ci-docker:1`) | compila as imagens sem publicar, **enquanto os testes rodam**, para o cache do buildkit estar quente |
-| `release` / `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem; empurra as camadas já prontas |
+| `release` / `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem; empurra as camadas já prontas para o registry do Forgejo e, por último, copia as imagens (mesmo digest) para o Docker Hub (`joaovitor2753/plany` e `plany-gateway`; secret `DOCKERHUB_TOKEN`) |
 
 Tudo roda no PC, em paralelo (`capacity: 4`). O runner do Pi (`ci`, `ci-flutter`) tem um slot só e era o gargalo:
 backend (~5 min) + web (~2 min) + mobile (~6 min) rodavam em fila, ~13 min no total; no PC cada um leva segundos a
@@ -85,3 +85,24 @@ O `release.yml` roda no runner do **PC** (`~/homelab`, contêiner `runner`), que
 
 O job monta o socket do Docker: quem consegue editar o `release.yml` na `main` controla o Docker do PC.
 Mantenha a `main` protegida (só merge por revisão) e não registre este label em repositórios de terceiros.
+
+## Release versionada (tag `v*`)
+
+`release.yml` publica as imagens a cada push na `main`; o `release-tag.yml` é o que gera a **release que o usuário baixa**.
+
+```sh
+git tag v1.2.0 && git push origin v1.2.0      # v1.2.0-rc1 vira pré-release
+```
+
+1. Roda os mesmos quatro workflows de teste. Se um falhar, nada é criado.
+2. Cria a release como **rascunho** (`.forgejo/scripts/release.sh create`), com as notas geradas do `git log` desde a tag anterior.
+3. Em paralelo no PC: `gateway` (binários estáticos musl `amd64` e `arm64`, `.tar.gz`), `linux` (bundle do app Flutter, amd64), `android` (APK assinado) e `docker-tags` (tags `1.2.0` e `1.2` nas imagens que o `release.yml` já publicou para o commit, no registry do Forgejo e no Docker Hub; sem `1.2` em pré-release).
+4. Só quando todos terminam, `publish` tira o rascunho. Um build que falha deixa o rascunho invisível; basta rodar de novo (o upload substitui arquivos de mesmo nome) ou apagar o rascunho.
+
+Cada arquivo sobe com o seu `.sha256`. O build number do app é a contagem de commits (só precisa crescer).
+
+- **Imagem do job de app:** `ci-release:1` (ci-flutter + toolchain de desktop Linux: clang, cmake, ninja, GTK, libsecret; o plugin `sodium` compila a libsodium). Construir no PC, depois da `ci-flutter:1`: `docker build -f .forgejo/images/ci-release.Dockerfile -t ci-release:1 .forgejo/images`. Os jobs a usam com `runs-on: build` + `container:`, então não é preciso mexer nos labels do runner.
+- **Token:** o job tenta o token automático do Forgejo; se ele não puder criar releases, crie o secret `RELEASE_TOKEN` (token de acesso com `write:repository`).
+- **A imagem do commit precisa existir:** `docker-tags` falha com uma mensagem clara se o commit marcado não gerou imagem (mudança fora dos caminhos do `release.yml`); rode o `release.yml` à mão na `main` e repita.
+- **Testes do script da API:** `sh .forgejo/scripts/test_release.sh` (roda o `release.sh` contra uma API falsa do Forgejo; não está no CI, como o `deploy/test_update.sh`).
+- **Assinatura do Android:** secrets `ANDROID_KEYSTORE_BASE64` (o `.jks` em base64) e `ANDROID_KEYSTORE_PASSWORD` (mesma senha para a loja e a chave; alias `plany`). **A mesma chave tem de assinar todas as versões**, senão quem já instalou não consegue atualizar: guarde um backup fora do PC. O job confere o certificado do APK e falha se for o de debug.

@@ -72,6 +72,16 @@ class _SilentDiscovery implements ServerDiscovery {
   Stream<List<DiscoveredServer>> watch() => controller.stream;
 }
 
+/// The first probe (the server picked at start) answers, the following ones do not.
+Future<bool> Function(Uri) answersOnlyOnce() {
+  var first = true;
+  return (_) async {
+    final ok = first;
+    first = false;
+    return ok;
+  };
+}
+
 void main() {
   group('animações e esqueleto', () {
     testWidgets('esqueleto no menu até a primeira resposta da busca', (
@@ -536,7 +546,7 @@ void main() {
     testWidgets(
       'continuar com um servidor que não responde avisa e mantém a escolha',
       (tester) async {
-        await pumpWithChangedOffice(tester, probe: (_) async => false);
+        await pumpWithChangedOffice(tester, probe: answersOnlyOnce());
         await chooseOffice(tester);
         await tester.tap(find.text('Continuar mesmo assim'));
         await tester.pumpAndSettle();
@@ -801,7 +811,7 @@ void main() {
     testWidgets('servidor que não responde: avisa e a escolha fica', (
       tester,
     ) async {
-      await pumpApp(tester, probe: (_) async => false);
+      await pumpApp(tester, probe: answersOnlyOnce());
       await openMenu(tester);
 
       await tester.tap(find.byKey(const ValueKey('server-item-escritorio')));
