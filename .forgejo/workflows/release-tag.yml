@@ -1,0 +1,238 @@
+# Versioned release: on a `v*` tag, runs every test and then builds what users download, attached to a Forgejo release.
+#
+#   git tag v1.2.0 && git push origin v1.2.0       (v1.2.0-rc1 makes a pre-release)
+#
+# - The release is created as a DRAFT and only published when every build has uploaded its files, so a failed build
+#   leaves nothing half-published (the draft can be deleted or the workflow re-run: uploads replace by name).
+# - Each file is attached with its .sha256 (.forgejo/scripts/release.sh, tested by test_release.sh).
+# - Docker images are not rebuilt here: release.yml already published the commit's images (tag `<sha>`); this
+#   workflow only adds the version tags (`1.2.0`, `1.2`) to the Forgejo registry and Docker Hub. If the tagged commit has
+#   no image yet (a change outside the paths release.yml watches), run release.yml by hand on main first.
+# - Same secrets as release.yml, plus RELEASE_TOKEN (optional): an access token with write:repository, used when the
+#   token Forgejo gives the job cannot create releases.
+# - Android: the APK is signed with the key kept in two more secrets, ANDROID_KEYSTORE_BASE64 (the .jks, base64) and
+#   ANDROID_KEYSTORE_PASSWORD (store and key password; the alias is `plany`). The same key must sign every release or
+#   installed apps cannot be updated: keep a backup of it.
+# - Windows, macOS and iOS are not built here (no runner for them); they are added as their builds are set up.
+name: release-tag
+
+on:
+  push:
+    tags: ["v*"]
+
+# two versions at the same time would fight over the release and the tags
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+env:
+  API: ${{ github.server_url }}/api/v1/repos/${{ github.repository }}
+  TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+jobs:
+  test-backend:
+    uses: ./.forgejo/workflows/backend.yml
+  test-web:
+    uses: ./.forgejo/workflows/web.yml
+  test-gateway:
+    uses: ./.forgejo/workflows/gateway.yml
+  test-mobile:
+    uses: ./.forgejo/workflows/mobile.yml
+
+  release:
+    needs: [test-backend, test-web, test-gateway, test-mobile]
+    runs-on: build
+    container:
+      image: ci-pc:1
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Notas e release (rascunho)
+        run: |
+          tag=${GITHUB_REF_NAME}
+          prev=$(git describe --tags --abbrev=0 --match 'v*' "$tag^" 2>/dev/null || true)
+          {
+            if [ -n "$prev" ]; then echo "Mudanças desde $prev:"; else echo "Primeira versão:"; fi
+            echo
+            git log --no-merges --pretty='- %s' ${prev:+"$prev..$tag"} | head -n 100
+          } > /tmp/notes.md
+          sh .forgejo/scripts/release.sh create "$tag" /tmp/notes.md
+
+  gateway:
+    needs: release
+    runs-on: build
+    container:
+      image: ci-pc:1
+    timeout-minutes: 30
+    env:
+      CARGO_BUILD_JOBS: "2"
+    steps:
+      - uses: actions/checkout@v4
+
+      # static musl binaries, no C toolchain (gateway/.cargo/config.toml): the Pi runs the arm64 one
+      - name: Compilar (Linux amd64 e arm64)
+        working-directory: gateway
+        run: |
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+          mkdir -p /tmp/assets
+          for pair in x86_64-unknown-linux-musl:amd64 aarch64-unknown-linux-musl:arm64; do
+            target=${pair%:*} arch=${pair#*:}
+            cargo build --release --locked --target "$target"
+            tar -czf "/tmp/assets/plany-gateway_${GITHUB_REF_NAME}_linux_${arch}.tar.gz" \
+              -C "target/$target/release" gateway
+          done
+
+      - name: Anexar à release
+        run: sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.tar.gz
+
+  linux:
+    needs: release
+    runs-on: build
+    container:
+      image: ci-release:1
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      FLUTTER_SUPPRESS_ANALYTICS: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Flutter da imagem = versão pinada no .fvmrc
+        working-directory: mobile
+        run: |
+          want=$(sed -n 's/.*"flutter": *"\([^"]*\)".*/\1/p' .fvmrc)
+          have=$(flutter --version | awk 'NR==1{print $2}')
+          echo ".fvmrc: $want | imagem: $have"
+          [ "$want" = "$have" ]
+
+      - name: Compilar (Linux amd64)
+        working-directory: mobile
+        run: |
+          flutter pub get
+          # the build number only has to grow with every release: the commit count does
+          flutter build linux --release \
+            --build-name="${GITHUB_REF_NAME#v}" --build-number="$(git rev-list --count HEAD)"
+          mkdir -p /tmp/assets
+          tar -czf "/tmp/assets/plany-app_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
+            -C build/linux/x64/release/bundle .
+
+      - name: Anexar à release
+        run: sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.tar.gz
+
+  android:
+    needs: release
+    runs-on: build
+    container:
+      image: ci-release:1
+    timeout-minutes: 45
+    env:
+      CI: "true"
+      FLUTTER_SUPPRESS_ANALYTICS: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Flutter da imagem = versão pinada no .fvmrc
+        working-directory: mobile
+        run: |
+          want=$(sed -n 's/.*"flutter": *"\([^"]*\)".*/\1/p' .fvmrc)
+          have=$(flutter --version | awk 'NR==1{print $2}')
+          echo ".fvmrc: $want | imagem: $have"
+          [ "$want" = "$have" ]
+
+      # both files are ignored by git (mobile/android/.gitignore) and die with the job's container
+      - name: Chave de assinatura
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] \
+            || { echo "faltam os secrets ANDROID_KEYSTORE_BASE64 e ANDROID_KEYSTORE_PASSWORD"; exit 1; }
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/app/plany-release.jks
+          {
+            echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyPassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "keyAlias=plany"
+            echo "storeFile=plany-release.jks"
+          } > mobile/android/key.properties
+
+      - name: Compilar (APK)
+        working-directory: mobile
+        run: |
+          flutter pub get
+          # versionCode must grow with every release or Android refuses the update: the commit count does
+          flutter build apk --release \
+            --build-name="${GITHUB_REF_NAME#v}" --build-number="$(git rev-list --count HEAD)"
+          mkdir -p /tmp/assets
+          cp build/app/outputs/flutter-apk/app-release.apk "/tmp/assets/plany_${GITHUB_REF_NAME}_android.apk"
+
+      # the build falls back to the debug key when key.properties is wrong; such an APK must never be released
+      - name: Conferir a assinatura
+        run: |
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
+          "$apksigner" verify --print-certs "/tmp/assets/plany_${GITHUB_REF_NAME}_android.apk" | tee /tmp/certs.txt
+          grep -q 'CN=Plany' /tmp/certs.txt
+          ! grep -qi 'Android Debug' /tmp/certs.txt
+
+      - name: Anexar à release
+        run: sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.apk
+
+  docker-tags:
+    needs: release
+    runs-on: build
+    container:
+      image: ci-docker:1
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    timeout-minutes: 15
+    env:
+      REGISTRY: raspberry-joao.tail7a986c.ts.net
+      OWNER: joao_vitor
+      DOCKERHUB_OWNER: joaovitor2753
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Logins
+        env:
+          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_TOKEN" ] && [ -n "$DOCKERHUB_TOKEN" ] \
+            || { echo "faltam os secrets REGISTRY_USER, REGISTRY_TOKEN e DOCKERHUB_TOKEN"; exit 1; }
+          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_OWNER" --password-stdin
+
+      - name: Tags de versão nas imagens do commit
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          sha=$(git rev-parse --short=12 HEAD)
+          # 1.2.3 -> also 1.2; a pre-release (1.2.3-rc1) only gets its own tag
+          extra=""
+          case $version in *-*) ;; *) extra="${version%.*}" ;; esac
+          for name in plany plany-gateway; do
+            docker buildx imagetools inspect "$REGISTRY/$OWNER/$name:$sha" >/dev/null 2>&1 \
+              || { echo "não há imagem $name:$sha: rode o release.yml na main antes de marcar a versão"; exit 1; }
+            for repo in "$REGISTRY/$OWNER/$name" "$DOCKERHUB_OWNER/$name"; do
+              tags="-t $repo:$version"
+              [ -z "$extra" ] || tags="$tags -t $repo:$extra"
+              docker buildx imagetools create $tags "$REGISTRY/$OWNER/$name:$sha"
+            done
+          done
+
+  publish:
+    needs: [gateway, linux, android, docker-tags]
+    runs-on: build
+    container:
+      image: ci-pc:1
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publicar a release
+        run: sh .forgejo/scripts/release.sh publish "$GITHUB_REF_NAME"
