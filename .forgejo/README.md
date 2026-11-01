@@ -59,7 +59,7 @@ Tudo roda no PC, em paralelo (`capacity: 4`). O runner do Pi (`ci`, `ci-flutter`
 backend (~5 min) + web (~2 min) + mobile (~6 min) rodavam em fila, ~13 min no total; no PC cada um leva segundos a
 poucos minutos e começam juntos. O Pi segue disponível como alternativa (basta trocar o `runs-on`).
 
-A imagem `ci-pc:1` (Go + Rust com clippy/rustfmt + node + yarn + CLI golang-migrate + git) se constrói no PC:
+A imagem `ci-pc:1` (Go + Rust com clippy/rustfmt + node + yarn + CLI golang-migrate + git) se constrói no PC: Por cima dela vai uma camada com os caches do PC (`ci-pc-cache.Dockerfile`: módulos Go e registry do cargo, ~2,5 GB), porque o `proxy.golang.org` cortava os streams HTTP/2 do `go mod download` na rede lenta do PC e derrubou o backend três vezes; com o cache os jobs de backend e gateway não precisam de rede para as dependências. Construir: `docker tag ci-pc:1 ci-pc:base` (uma vez) e `docker buildx build -f .forgejo/images/ci-pc-cache.Dockerfile -t ci-pc:1 --load --build-context go-mod=$HOME/go/pkg/mod --build-context cargo-registry=$HOME/.cargo/registry .forgejo/images`. O `backend.yml` ainda tenta o download 3 vezes com HTTP/1.1, para quando o `go.mod` passar do cache.
 `docker build -f .forgejo/images/ci-pc.Dockerfile -t ci-pc:1 .forgejo/images`. O runner do PC tem `capacity: 4` e os labels `build`, `flutter` e `apk`.
 
 Ler o log de um job: o Forgejo guarda em `/mnt/ssd-data/services/forgejo/data/gitea/actions_log/<dono>/<repo>/<id em hex>/<id>.log.zst`
