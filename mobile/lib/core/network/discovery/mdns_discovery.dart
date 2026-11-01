@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:multicast_dns/multicast_dns.dart';
 
@@ -26,6 +27,43 @@ class MdnsFound {
   final String id;
 }
 
+/// How many times each question of a sweep is asked before giving up on it.
+const _asks = 3;
+
+/// The mDNS multicast group (IPv4).
+final _mdnsGroup = InternetAddress('224.0.0.251');
+
+/// The interfaces on which the mDNS group can be joined. `MDnsClient` joins it on every
+/// interface and a single refusal aborts the whole start; virtual adapters such as Tailscale's
+/// refuse on Windows (WSAENOPROTOOPT, 10042), so the search never started. Interfaces that
+/// refuse are left out; if none accepts, all are returned so the real error still shows.
+Future<Iterable<NetworkInterface>> _interfacesThatJoinMdns(
+  InternetAddressType type,
+) async {
+  final all = await NetworkInterface.list(
+    includeLinkLocal: true,
+    type: type,
+    includeLoopback: false,
+  );
+  if (type != InternetAddressType.IPv4) return all;
+  final joinable = <NetworkInterface>[];
+  for (final interface in all) {
+    RawDatagramSocket? socket;
+    try {
+      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket.joinMulticast(_mdnsGroup, interface);
+      joinable.add(interface);
+    } on OSError {
+      // this interface does not do multicast (`joinMulticast` throws the raw OSError)
+    } on SocketException {
+      // same, or the probe socket could not be opened
+    } finally {
+      socket?.close();
+    }
+  }
+  return joinable.isEmpty ? all : joinable;
+}
+
 /// The little we use of `multicast_dns`, so it can be swapped out in tests.
 abstract interface class MdnsApi {
   Future<void> start();
@@ -36,11 +74,69 @@ abstract interface class MdnsApi {
   void stop();
 }
 
-class PluginMdnsApi implements MdnsApi {
-  final MDnsClient _client = MDnsClient();
+/// `IP_MULTICAST_IF` on Windows: which interface multicast packets leave through.
+const _windowsIpMulticastIf = 9;
 
+/// The address of the local network (private IPv4; not Tailscale's 100.64/10 nor link-local)
+/// among [interfaces], or null.
+InternetAddress? _lanAddress(Iterable<NetworkInterface> interfaces) {
+  for (final interface in interfaces) {
+    for (final address in interface.addresses) {
+      final b = address.rawAddress;
+      if (address.type != InternetAddressType.IPv4) continue;
+      if (b[0] == 10 ||
+          (b[0] == 172 && b[1] >= 16 && b[1] <= 31) ||
+          (b[0] == 192 && b[1] == 168)) {
+        return address;
+      }
+    }
+  }
+  return null;
+}
+
+class PluginMdnsApi implements MdnsApi {
+  MDnsClient _client = MDnsClient();
+
+  /// On Windows an mDNS question leaves through whichever interface the system finds
+  /// first (often a VPN's), where nobody answers: with the default, no question of ours
+  /// got an answer; sent through the Wi-Fi, nearly all did. So the sending socket is told
+  /// which interface to use (the local network's); the replies are heard on all of them.
   @override
-  Future<void> start() => _client.start();
+  Future<void> start() async {
+    final interfaces = (await _interfacesThatJoinMdns(
+      InternetAddressType.IPv4,
+    )).toList();
+    final lan = Platform.isWindows ? _lanAddress(interfaces) : null;
+    _client = MDnsClient(
+      rawDatagramSocketFactory:
+          (
+            dynamic host,
+            int port, {
+            bool reuseAddress = true,
+            bool reusePort = true,
+            int ttl = 1,
+          }) async {
+            final socket = await RawDatagramSocket.bind(
+              host,
+              port,
+              reuseAddress: reuseAddress,
+              reusePort: reusePort && !Platform.isWindows,
+              ttl: ttl,
+            );
+            if (lan != null) {
+              socket.setRawOption(
+                RawSocketOption(
+                  RawSocketOption.levelIPv4,
+                  _windowsIpMulticastIf,
+                  lan.rawAddress,
+                ),
+              );
+            }
+            return socket;
+          },
+    );
+    await _client.start(interfacesFactory: (_) async => interfaces);
+  }
 
   @override
   void stop() => _client.stop();
@@ -49,9 +145,9 @@ class PluginMdnsApi implements MdnsApi {
   Future<List<MdnsFound>> scan(String serviceType, Duration timeout) async {
     final domain = '$serviceType.local';
     final instances = <String>{
-      await for (final ptr in _client.lookup<PtrResourceRecord>(
+      for (final ptr in await _ask<PtrResourceRecord>(
         ResourceRecordQuery.serverPointer(domain),
-        timeout: timeout,
+        timeout,
       ))
         ptr.domainName,
     };
@@ -66,26 +162,22 @@ class PluginMdnsApi implements MdnsApi {
     String domain,
     Duration timeout,
   ) async {
-    final srv = await _first(
-      _client.lookup<SrvResourceRecord>(
-        ResourceRecordQuery.service(instance),
-        timeout: timeout,
-      ),
-    );
+    final srv = (await _ask<SrvResourceRecord>(
+      ResourceRecordQuery.service(instance),
+      timeout,
+    )).firstOrNull;
     if (srv == null) return null;
     final addresses = [
-      await for (final a in _client.lookup<IPAddressResourceRecord>(
+      for (final a in await _ask<IPAddressResourceRecord>(
         ResourceRecordQuery.addressIPv4(srv.target),
-        timeout: timeout,
+        timeout,
       ))
         a.address.address,
     ];
-    final txt = await _first(
-      _client.lookup<TxtResourceRecord>(
-        ResourceRecordQuery.text(instance),
-        timeout: timeout,
-      ),
-    );
+    final txt = (await _ask<TxtResourceRecord>(
+      ResourceRecordQuery.text(instance),
+      timeout,
+    )).firstOrNull;
     // "Plany._plany._tcp.local" -> "Plany"
     final name = instance.endsWith('.$domain')
         ? instance.substring(0, instance.length - domain.length - 1)
@@ -98,13 +190,25 @@ class PluginMdnsApi implements MdnsApi {
       id: txt == null ? '' : serverIdFromTxtText(txt.text),
     );
   }
-}
 
-Future<T?> _first<T>(Stream<T> stream) async {
-  await for (final value in stream) {
-    return value;
+  /// Asks for [query] up to [_asks] times, splitting [timeout] between the asks, and
+  /// stops at the first one that gets an answer. Wi-Fi drops multicast packets and a
+  /// single `lookup` asks only once; replies to one ask also carry the other records
+  /// of the service, which the client caches and which answer the next lookups at once.
+  Future<List<T>> _ask<T extends ResourceRecord>(
+    ResourceRecordQuery query,
+    Duration timeout,
+  ) async {
+    final slice = timeout ~/ _asks;
+    for (var ask = 0; ask < _asks; ask++) {
+      final found = [
+        await for (final record in _client.lookup<T>(query, timeout: slice))
+          record,
+      ];
+      if (found.isNotEmpty) return found;
+    }
+    return const [];
   }
-  return null;
 }
 
 String _withoutLocal(String host) {
