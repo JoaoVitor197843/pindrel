@@ -59,6 +59,8 @@ fvm flutter test
 fvm flutter analyze        # flutter_lints
 ```
 
+Smoke test on a real platform (opens the real app and checks the login screen answers; needs a device or a desktop session, not part of `flutter test`): `fvm flutter test integration_test/app_smoke_test.dart -d linux` (also `-d windows`, `-d macos`, or an Android device/emulator). On GitHub, `.github/workflows/smoke.yml` runs it on Windows, macOS and an Android emulator for every push to `main` that touches the app and for every tag; it does not hold a release back. Its text must not collide with the placeholders of the fields (the e-mail field's hint is `voce@casa.local`).
+
 ### Gateway (run from `gateway/`)
 
 ```bash

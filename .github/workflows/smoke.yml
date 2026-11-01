@@ -1,0 +1,121 @@
+# Smoke test of the app on the real platforms: opens the app (mobile/integration_test/app_smoke_test.dart) and checks that
+# the login screen shows up and answers taps. The release builds are only compiled otherwise, and nobody here has a
+# Windows or a macOS machine at hand for every version.
+#
+# - Windows and macOS: the app runs in a window on the GitHub machine.
+# - Android: the app runs in an emulator (KVM makes it fast enough on the Linux runners); it is not a phone, but it is the
+#   installed app opening for real. Linux is left out: it needs a desktop keyring that a headless runner does not have, and it is
+#   tested by hand.
+# It does not hold the release back (release-desktop.yml does not wait for it): a red smoke test is a warning to look at.
+name: smoke
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["mobile/**", "shared/protos/**", ".github/workflows/smoke.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_SUPPRESS_ANALYTICS: "true"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão do Flutter
+        id: flutter
+        run: |
+          echo "version=$(sed -n 's/.*"flutter": *"\([^"]*\)".*/\1/p' .fvmrc)" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+          cache: true
+
+      - name: Abrir o app no Windows
+        run: |
+          flutter pub get
+          flutter test integration_test/app_smoke_test.dart -d windows
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão do Flutter
+        id: flutter
+        run: |
+          echo "version=$(sed -n 's/.*"flutter": *"\([^"]*\)".*/\1/p' .fvmrc)" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+          cache: true
+
+      - name: Abrir o app no macOS
+        run: |
+          flutter pub get
+          flutter test integration_test/app_smoke_test.dart -d macos
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      # without this the emulator runs without hardware acceleration and takes forever
+      - name: Ligar o KVM
+        working-directory: .
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Versão do Flutter
+        id: flutter
+        run: |
+          echo "version=$(sed -n 's/.*"flutter": *"\([^"]*\)".*/\1/p' .fvmrc)" >> "$GITHUB_OUTPUT"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.flutter.outputs.version }}
+          channel: stable
+          cache: true
+
+      - name: Dependências
+        run: flutter pub get
+
+      - name: Abrir o app no emulador Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          working-directory: mobile
+          script: flutter test integration_test/app_smoke_test.dart
