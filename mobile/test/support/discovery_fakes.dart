@@ -36,6 +36,26 @@ class FakeDiscovery implements ServerDiscovery {
   });
 }
 
+/// A discovery that honours pause and resume of the subscription, like the real ones.
+class PausableDiscovery implements ServerDiscovery {
+  PausableDiscovery(this.initial);
+
+  final List<DiscoveredServer> initial;
+  int pauses = 0;
+  int resumes = 0;
+  late final StreamController<List<DiscoveredServer>> out;
+
+  @override
+  Stream<List<DiscoveredServer>> watch() {
+    out = StreamController<List<DiscoveredServer>>(
+      onPause: () => pauses++,
+      onResume: () => resumes++,
+    );
+    out.add(initial);
+    return out.stream;
+  }
+}
+
 /// Predictable draw: always returns [value] (capped at the requested maximum).
 class FixedRandom implements Random {
   FixedRandom(this.value);

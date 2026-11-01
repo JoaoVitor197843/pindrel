@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:nsd/nsd.dart' as nsd;
 
 import 'discovered_server.dart';
+import 'restart_policy.dart';
 import 'server_discovery.dart';
 import 'server_table.dart';
 
@@ -47,71 +48,64 @@ class PluginNsdApi implements NsdApi {
 ///
 /// Wi-Fi drops many multicast packets and the system's retries get
 /// further and further apart; so, while nothing has been found (or some
-/// server is lost), the search is restarted every [restartWhileEmpty].
+/// server is lost), the search is restarted, each wait twice the previous one
+/// ([RestartPolicy]). Stopping a search emits no "lost" and a new one reports every
+/// server again as "found", so a restart never makes a known server blink.
 /// A "lost" server stays in the list for [lostGrace]; if it is found again
 /// within that time, nothing changes for the user (see [ServerTable]).
+///
+/// The search stops when the subscription is paused (the app went to the background)
+/// and starts again on resume, with the servers it knew marked as lost until they answer.
 class NsdDiscovery implements ServerDiscovery {
   NsdDiscovery({
     this.api = const PluginNsdApi(),
     this.serviceType = plannyServiceType,
     this.restartWhileEmpty = const Duration(seconds: 15),
+    this.maxRestartDelay = const Duration(minutes: 5),
     this.lostGrace = ServerTable.defaultLostGrace,
   });
 
   final NsdApi api;
   final String serviceType;
+
+  /// The first wait before restarting; it doubles up to [maxRestartDelay].
   final Duration restartWhileEmpty;
+  final Duration maxRestartDelay;
   final Duration lostGrace;
 
   @override
   Stream<List<DiscoveredServer>> watch() {
     final table = ServerTable();
+    final policy = RestartPolicy(base: restartWhileEmpty, max: maxRestartDelay);
     final controller = StreamController<List<DiscoveredServer>>();
     Object? session;
     Timer? restartTimer;
     Timer? expireTimer;
     var closed = false;
-    var restarting = false;
+    var paused = false;
+    var working = false;
+    // begin, arm and the listener call each other, so the listener is assigned below
+    late final void Function(nsd.ServiceStatus, nsd.Service) onService;
 
     void emit() {
       if (!closed) controller.add(table.snapshot);
     }
 
-    void scheduleExpiry() {
-      if (closed || expireTimer?.isActive == true || !table.hasLost) return;
-      expireTimer = Timer(lostGrace ~/ 3, () {
-        if (closed) return;
-        if (table.expire(lostGrace)) emit();
-        scheduleExpiry();
-      });
-    }
+    bool healthy() => session != null && !table.isEmpty && !table.hasLost;
 
-    void onService(nsd.ServiceStatus status, nsd.Service service) {
-      final name = service.name;
-      if (name == null || name.isEmpty) return;
-      var changed = false;
-      switch (status) {
-        case nsd.ServiceStatus.found:
-          final server = _toServer(service);
-          if (server != null) changed = table.upsert(server);
-        case nsd.ServiceStatus.lost:
-          // does not leave right away: it may just be an announcement lost on Wi-Fi
-          table.markLost(name);
-      }
-      if (changed) emit();
-      scheduleExpiry();
-    }
-
-    Future<void> begin() async {
+    Future<void> begin({required bool initial}) async {
       try {
         final s = await api.startDiscovery(serviceType, onService);
-        if (closed) {
+        if (closed || paused) {
           await api.stopDiscovery(s);
         } else {
           session = s;
+          policy.succeeded();
         }
       } catch (error, stack) {
-        if (!closed) controller.addError(error, stack);
+        if (!closed && policy.failed(surfaceNow: initial)) {
+          controller.addError(error, stack);
+        }
       }
     }
 
@@ -126,17 +120,83 @@ class NsdDiscovery implements ServerDiscovery {
       }
     }
 
+    void arm() {
+      if (closed || paused || restartTimer?.isActive == true || healthy()) {
+        return;
+      }
+      restartTimer = Timer(policy.delay, () async {
+        if (closed || paused || working || healthy()) return;
+        working = true;
+        await end();
+        if (!closed && !paused) await begin(initial: false);
+        working = false;
+        policy.restarted();
+        arm();
+      });
+    }
+
+    void scheduleExpiry() {
+      if (closed ||
+          paused ||
+          expireTimer?.isActive == true ||
+          !table.hasLost) {
+        return;
+      }
+      expireTimer = Timer(lostGrace ~/ 3, () {
+        if (closed || paused) return;
+        if (table.expire(lostGrace)) emit();
+        scheduleExpiry();
+        arm();
+      });
+    }
+
+    onService = (nsd.ServiceStatus status, nsd.Service service) {
+      final name = service.name;
+      if (name == null || name.isEmpty) return;
+      var changed = false;
+      switch (status) {
+        case nsd.ServiceStatus.found:
+          final server = _toServer(service);
+          if (server != null) {
+            changed = table.upsert(server);
+            policy.reset();
+          }
+        case nsd.ServiceStatus.lost:
+          // does not leave right away: it may just be an announcement lost on Wi-Fi
+          table.markLost(name);
+      }
+      if (changed) emit();
+      scheduleExpiry();
+      arm();
+    };
+
+    Future<void> start({required bool initial}) async {
+      working = true;
+      await begin(initial: initial);
+      working = false;
+      arm();
+    }
+
     controller.onListen = () {
       emit();
-      begin();
-      restartTimer = Timer.periodic(restartWhileEmpty, (_) async {
-        if (closed || restarting) return;
-        if (!table.isEmpty && !table.hasLost) return;
-        restarting = true;
-        await end();
-        if (!closed) await begin();
-        restarting = false;
-      });
+      unawaited(start(initial: true));
+      arm();
+    };
+    controller.onPause = () {
+      paused = true;
+      restartTimer?.cancel();
+      expireTimer?.cancel();
+      unawaited(end());
+    };
+    controller.onResume = () {
+      paused = false;
+      // the network may have changed while away: what was known must answer again
+      policy.reset();
+      for (final server in table.snapshot) {
+        table.markLost(server.name);
+      }
+      scheduleExpiry();
+      unawaited(start(initial: false));
     };
     controller.onCancel = () async {
       closed = true;

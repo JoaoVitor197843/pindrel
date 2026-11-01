@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:multicast_dns/multicast_dns.dart';
 
 import 'discovered_server.dart';
+import 'restart_policy.dart';
 import 'server_discovery.dart';
 import 'server_table.dart';
 
@@ -120,8 +121,10 @@ String _withoutLocal(String host) {
 ///   list for [lostGrace]; if it comes back within that time, nothing changes (on Wi-Fi a
 ///   lost reply is common and does not mean the server left);
 /// * while nothing has been found (or some server is lost), the mDNS client
-///   is restarted every [restartWhileEmpty], the way nsd restarts the search;
-/// * the table has a cap and refuses absurd names ([ServerTable]).
+///   is restarted with a wait that doubles each time ([RestartPolicy]);
+/// * the table has a cap and refuses absurd names ([ServerTable]);
+/// * a paused subscription stops the client and the sweeps; resuming starts them again
+///   with the known servers marked as lost until they answer.
 class MdnsDiscovery implements ServerDiscovery {
   MdnsDiscovery({
     MdnsApi? api,
@@ -129,6 +132,7 @@ class MdnsDiscovery implements ServerDiscovery {
     this.interval = const Duration(seconds: 5),
     this.scanTimeout = const Duration(seconds: 3),
     this.restartWhileEmpty = const Duration(seconds: 15),
+    this.maxRestartDelay = const Duration(minutes: 5),
     this.lostGrace = ServerTable.defaultLostGrace,
   }) : _api = api ?? PluginMdnsApi();
 
@@ -136,38 +140,66 @@ class MdnsDiscovery implements ServerDiscovery {
   final String serviceType;
   final Duration interval;
   final Duration scanTimeout;
+
+  /// The first wait before restarting the client; it doubles up to [maxRestartDelay].
   final Duration restartWhileEmpty;
+  final Duration maxRestartDelay;
   final Duration lostGrace;
 
   @override
   Stream<List<DiscoveredServer>> watch() {
     final table = ServerTable();
+    final policy = RestartPolicy(base: restartWhileEmpty, max: maxRestartDelay);
     final controller = StreamController<List<DiscoveredServer>>();
     Timer? timer;
     var closed = false;
+    var paused = false;
     var scanning = false;
     var started = false;
+    var clientUp = false;
     var lastStart = DateTime.now();
 
     void emit() {
       if (!closed) controller.add(table.snapshot);
     }
 
-    Future<void> restartIfStuck() async {
-      if (!table.isEmpty && !table.hasLost) return;
-      if (DateTime.now().difference(lastStart) < restartWhileEmpty) return;
-      _api.stop();
-      await _api.start();
+    bool healthy() => clientUp && !table.isEmpty && !table.hasLost;
+
+    /// Starts the client (again). A failure is counted; it reaches the user only
+    /// when it repeats ([RestartPolicy.failed]), or at once if it is the first start.
+    Future<bool> startClient({required bool initial}) async {
       lastStart = DateTime.now();
+      try {
+        await _api.start();
+        clientUp = true;
+        policy.succeeded();
+        return true;
+      } catch (error, stack) {
+        clientUp = false;
+        if (!closed && policy.failed(surfaceNow: initial)) {
+          controller.addError(error, stack);
+        }
+        return false;
+      }
+    }
+
+    Future<void> restartIfDue() async {
+      if (healthy()) return;
+      if (DateTime.now().difference(lastStart) < policy.delay) return;
+      if (clientUp) _api.stop();
+      clientUp = false;
+      policy.restarted();
+      await startClient(initial: false);
     }
 
     Future<void> scanOnce() async {
-      if (closed || scanning || !started) return;
+      if (closed || paused || scanning || !started) return;
       scanning = true;
       try {
-        await restartIfStuck();
+        await restartIfDue();
+        if (!clientUp) return;
         final found = await _api.scan(serviceType, scanTimeout);
-        if (closed) return;
+        if (closed || paused) return;
         var changed = false;
         final seen = <String>{};
         for (final f in found) {
@@ -183,6 +215,7 @@ class MdnsDiscovery implements ServerDiscovery {
             ),
           );
         }
+        if (seen.isNotEmpty) policy.reset();
         for (final server in table.snapshot) {
           if (!seen.contains(server.name)) table.markLost(server.name);
         }
@@ -197,16 +230,41 @@ class MdnsDiscovery implements ServerDiscovery {
 
     controller.onListen = () async {
       emit();
-      try {
-        await _api.start();
-      } catch (error, stack) {
-        if (!closed) controller.addError(error, stack);
+      if (!await startClient(initial: true)) {
+        // the sweeps go on: each one tries the client again, with the usual wait
+        started = true;
+        timer = Timer.periodic(interval, (_) => scanOnce());
         return;
       }
       started = true;
-      lastStart = DateTime.now();
       if (closed) {
         _api.stop();
+        return;
+      }
+      unawaited(scanOnce());
+      timer = Timer.periodic(interval, (_) => scanOnce());
+    };
+    controller.onPause = () {
+      paused = true;
+      timer?.cancel();
+      if (clientUp) _api.stop();
+      clientUp = false;
+    };
+    controller.onResume = () async {
+      paused = false;
+      policy.reset();
+      for (final server in table.snapshot) {
+        table.markLost(server.name);
+      }
+      if (!await startClient(initial: false)) {
+        if (!closed && !paused) {
+          timer = Timer.periodic(interval, (_) => scanOnce());
+        }
+        return;
+      }
+      if (closed || paused) {
+        _api.stop();
+        clientUp = false;
         return;
       }
       unawaited(scanOnce());
@@ -215,7 +273,7 @@ class MdnsDiscovery implements ServerDiscovery {
     controller.onCancel = () {
       closed = true;
       timer?.cancel();
-      if (started) _api.stop();
+      if (clientUp) _api.stop();
     };
     return controller.stream;
   }
