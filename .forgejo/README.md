@@ -134,3 +134,8 @@ porque criar uma release para uma tag inexistente faz o GitHub criar a tag a par
 Precisa do secret **`GH_RELEASE_TOKEN`** no Forgejo (Configurações > Actions > Secrets): um token do GitHub *fine-grained* restrito ao repositório
 `plany`, com **Contents: Read and write** (cobre releases e envio de arquivos). O nome não pode começar com `GITHUB_`. Se o secret faltar ou o GitHub cair,
 só esse job falha (`continue-on-error`) e a release do Forgejo já está pública.
+
+Além de compilar, o GitHub **abre o app** em cada plataforma: `.github/workflows/smoke.yml` roda o teste de integração
+`mobile/integration_test/app_smoke_test.dart` no Windows, no macOS e num emulador Android (o Linux fica de fora: precisa de um chaveiro de
+desktop que o runner sem tela não tem; eu o testo à mão). Ele roda a cada push na `main` que mexe no app e a cada tag, e **não segura a release**: um
+smoke vermelho é um aviso para olhar. Localmente: `cd mobile && fvm flutter test integration_test/app_smoke_test.dart -d linux` (precisa de uma sessão gráfica).
