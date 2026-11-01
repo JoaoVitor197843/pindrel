@@ -58,7 +58,9 @@ jobs:
           {
             if [ -n "$prev" ]; then echo "Mudanças desde $prev:"; else echo "Primeira versão:"; fi
             echo
-            git log --no-merges --pretty='- %s' ${prev:+"$prev..$tag"} | head -n 100
+            # -n here and not `| head`: with pipefail, head closing the pipe kills git log (exit 141) and fails the job
+            if [ -n "$prev" ]; then range="$prev..$tag"; else range="$tag"; fi
+            git log --no-merges --pretty='- %s' -n 100 "$range"
           } > /tmp/notes.md
           sh .forgejo/scripts/release.sh create "$tag" /tmp/notes.md
 
@@ -258,3 +260,23 @@ jobs:
           sh .forgejo/scripts/github-assets.sh "$MIRROR_REPO" "$GITHUB_REF_NAME" /tmp/assets \
             "plany-app_${GITHUB_REF_NAME}_windows_amd64.zip" "plany-app_${GITHUB_REF_NAME}_macos_universal.zip"
           sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.zip
+
+  # The public downloads page is the GitHub release: it gets a copy of everything the Forgejo release holds (notes and
+  # files; the Windows and macOS zips are already there, they come from GitHub). It comes after `desktop` because that
+  # one waits until the tag and the GitHub build exist; here too a failure takes nothing back.
+  github-release:
+    needs: desktop
+    runs-on: build
+    container:
+      image: ci-pc:1
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      GH_REPO: JoaoVitor197843/plany
+      GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copiar a release para o GitHub
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "falta o secret GH_RELEASE_TOKEN"; exit 1; }
+          sh .forgejo/scripts/github-release.sh "$GITHUB_REF_NAME"
