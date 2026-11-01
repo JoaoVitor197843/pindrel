@@ -228,21 +228,33 @@ class MdnsDiscovery implements ServerDiscovery {
       }
     }
 
+    var starting = false;
+
+    /// Brings the client up and starts the sweeps. Only one start is in flight at a time: a pause or a resume that
+    /// comes meanwhile does not start another, the one in flight looks at the state when it ends (otherwise two clients
+    /// and two timers would come up, and a pause would leave the client running).
+    Future<void> startSearch({required bool initial}) async {
+      if (starting) return;
+      starting = true;
+      final up = await startClient(initial: initial);
+      starting = false;
+      started = true;
+      if (closed || paused) {
+        if (up) {
+          _api.stop();
+          clientUp = false;
+        }
+        return;
+      }
+      timer?.cancel();
+      if (up) unawaited(scanOnce());
+      // without the client the sweeps still go on: each one tries it again, with the usual wait
+      timer = Timer.periodic(interval, (_) => scanOnce());
+    }
+
     controller.onListen = () async {
       emit();
-      if (!await startClient(initial: true)) {
-        // the sweeps go on: each one tries the client again, with the usual wait
-        started = true;
-        timer = Timer.periodic(interval, (_) => scanOnce());
-        return;
-      }
-      started = true;
-      if (closed) {
-        _api.stop();
-        return;
-      }
-      unawaited(scanOnce());
-      timer = Timer.periodic(interval, (_) => scanOnce());
+      await startSearch(initial: true);
     };
     controller.onPause = () {
       paused = true;
@@ -256,19 +268,7 @@ class MdnsDiscovery implements ServerDiscovery {
       for (final server in table.snapshot) {
         table.markLost(server.name);
       }
-      if (!await startClient(initial: false)) {
-        if (!closed && !paused) {
-          timer = Timer.periodic(interval, (_) => scanOnce());
-        }
-        return;
-      }
-      if (closed || paused) {
-        _api.stop();
-        clientUp = false;
-        return;
-      }
-      unawaited(scanOnce());
-      timer = Timer.periodic(interval, (_) => scanOnce());
+      await startSearch(initial: false);
     };
     controller.onCancel = () {
       closed = true;
