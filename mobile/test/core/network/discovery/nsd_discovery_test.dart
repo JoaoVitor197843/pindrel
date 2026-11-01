@@ -438,5 +438,19 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 250));
       expect(errors, hasLength(1));
     });
+
+    test('pausar e retomar durante o início não abre duas buscas', () async {
+      api.startGate = Completer<void>();
+      sub = make().watch().listen(emitted.add, onError: errors.add);
+      await settle();
+      sub.pause();
+      sub.resume();
+      api.startGate!.complete();
+      await settle();
+      expect(api.starts, 1);
+      await sub.cancel();
+      await settle();
+      expect(api.stops, 1, reason: 'a única busca aberta é parada ao cancelar');
+    });
   });
 }
