@@ -11,6 +11,9 @@
 # - The release only happens if ALL tests pass: it calls the same CI workflows (backend, web, gateway
 #   and mobile, with `uses:`; the backend includes the tests with a database) and the `images` job depends on all of them. If one
 #   fails nothing is published, the `latest` tag does not change and the Pi stays on the version it already runs.
+# - A version tag (release-tag.yml) needs the images of ITS commit. When only files outside the paths below changed since the
+#   last run (for example just `mobile/**`), nothing runs here: start this workflow by hand on main (workflow_dispatch), or push a
+#   change to one of the watched files, before tagging.
 name: release
 
 on:
