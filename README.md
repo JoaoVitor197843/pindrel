@@ -43,7 +43,7 @@ O contrato de mensagens entre as partes fica em [`shared/protos/`](./shared/prot
 
 Na tela de login, os dois clientes têm uma aba superior para escolher (e, no futuro, adicionar) um servidor:
 
-- **Mobile:** descobre sozinho, por mDNS (`_plany._tcp`), os servidores da rede atual e sorteia um deles, testando se ele responde antes de entrar. A lista acompanha a rede **ao vivo**. Se o servidor escolhido sai da rede, ele **não some**: continua escolhido, a bolinha ao lado do nome passa de verde para vermelha, e ele aparece em "Desconectados". Quando volta, a bolinha volta a ser verde. Com o app em segundo plano, a busca é pausada.
+- **Mobile:** descobre sozinho, por mDNS (`_plany._tcp`), os servidores da rede atual (com o plugin `nsd` no Android, iOS e macOS, e com um cliente mDNS próprio no Linux e no Windows) e sorteia um deles, testando se ele responde antes de entrar. A lista acompanha a rede **ao vivo**. Se o servidor escolhido sai da rede, ele **não some**: continua escolhido, a bolinha ao lado do nome passa de verde para vermelha, e ele aparece em "Desconectados". Quando volta, a bolinha volta a ser verde. Com o app em segundo plano, a busca é pausada.
 - **Web:** o servidor padrão **é sempre o embutido** (o mesmo que serve a página). Como navegadores não fazem mDNS, a lista dos outros servidores da rede vem do **gateway**, em `GET /server/discover/`. A aba da web ainda não foi implementada.
 
 **mDNS e gateway:** quem anuncia o servidor na rede é o **gateway**, e não cada instância da API. Ele anuncia só na interface da rede local, resolve conflito de nomes (`Plany`, `Plany (2)`...), avisa quando sai e, como o Wi-Fi perde muitos pacotes multicast, refaz a busca de tempos em tempos e **lembra** dos servidores já vistos. Sem o gateway (um `docker compose up` simples) não há anúncio na rede. O mDNS só funciona com o gateway na **rede do host**: um container em rede bridge não enxerga a LAN.
@@ -59,7 +59,7 @@ A API é **explicitamente stateless**, para poder rodar atrás de um load balanc
 | Backend | Go, PostgreSQL (pgx + sqlc), Protobuf |
 | Gateway | Rust (hyper + tokio, `mdns-sd`), Protobuf |
 | Web | Svelte 5, Tailwind CSS, Vite, IndexedDB (`idb`) |
-| Mobile/Desktop | Flutter, Riverpod, SQLite (armazenamento local), mDNS (`nsd`, `multicast_dns`) |
+| Mobile/Desktop | Flutter, Riverpod, SQLite (armazenamento local), mDNS (`nsd` no Android, iOS e macOS; `multicast_dns` no Linux e no Windows) |
 | Infraestrutura | Docker, Docker Compose |
 
 ## Rodando com Docker

@@ -15,7 +15,7 @@ Aplicativo mobile (e desktop) do Plany, construído em Flutter. É **autossufici
 - **flutter_secure_storage** — chaves e segredos no cofre do sistema
 - **sodium** — criptografia do cofre seguro
 - **flutter_riverpod** — gerenciamento de estado
-- **nsd** e **multicast_dns** — descoberta de servidores na rede por mDNS (`nsd` em Android, iOS, macOS e Windows; `multicast_dns` em Linux, onde o `nsd` não existe)
+- **nsd** e **multicast_dns** — descoberta de servidores na rede por mDNS (`nsd` em Android, iOS e macOS; `multicast_dns` em Linux, onde o `nsd` não existe, e em Windows, onde o `nsd` perde os resultados porque os envia de uma thread que não é a da plataforma)
 - **http**, **protobuf**, **fixnum** — comunicação opcional com o servidor de nuvem/sincronização (`http` no lugar do `dio`, bem menor)
 - **path_provider**, **path** — localização do arquivo do banco
 
