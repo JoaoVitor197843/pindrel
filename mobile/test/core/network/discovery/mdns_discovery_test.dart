@@ -239,4 +239,88 @@ void main() {
     expect(api.stops, 1);
     expect(api.scans, scans);
   });
+
+  group('política de reinício, pausa e erros', () {
+    MdnsDiscovery makeFast(
+      FakeMdnsApi api, {
+      Duration restart = const Duration(milliseconds: 20),
+      Duration max = const Duration(hours: 1),
+    }) => MdnsDiscovery(
+      api: api,
+      interval: _interval,
+      scanTimeout: _interval,
+      lostGrace: const Duration(milliseconds: 70),
+      restartWhileEmpty: restart,
+      maxRestartDelay: max,
+    );
+
+    test('lista vazia: a espera entre reinícios do cliente cresce', () async {
+      final api = FakeMdnsApi([<MdnsFound>[]]);
+      await listen(makeFast(api));
+      await wait(300);
+      // fixed 20 ms would restart about 14 times; doubling (20, 40, 80, 160) about 3
+      expect(api.starts, inInclusiveRange(3, 6));
+    });
+
+    test(
+      'pausar para o cliente e as varreduras; retomar volta a varrer',
+      () async {
+        final api = FakeMdnsApi([
+          [found('A')],
+        ]);
+        await listen(makeFast(api));
+        await wait(50);
+        sub.pause();
+        await wait(10);
+        expect(api.stops, 1);
+        final scans = api.scans;
+        await wait(120);
+        expect(api.scans, scans);
+        final starts = api.starts;
+        sub.resume();
+        await wait(80);
+        expect(api.starts, starts + 1);
+        expect(api.scans, greaterThan(scans));
+      },
+    );
+
+    test('ao retomar, quem não responde sai depois do prazo', () async {
+      final api = FakeMdnsApi([
+        [found('A'), found('B', ip: '10.0.0.9')],
+        [found('A')],
+      ]);
+      await listen(makeFast(api));
+      await wait(30);
+      expect(emitted.last.map((s) => s.name), ['A', 'B']);
+      sub.pause();
+      sub.resume();
+      await wait(250);
+      expect(emitted.last.map((s) => s.name), ['A']);
+    });
+
+    test(
+      'um reinício que falha só vira erro na terceira vez, uma vez',
+      () async {
+        final api = FakeMdnsApi([<MdnsFound>[]]);
+        await listen(
+          makeFast(
+            api,
+            restart: const Duration(milliseconds: 20),
+            max: const Duration(milliseconds: 20),
+          ),
+        );
+        await wait(10);
+        api.startError = StateError('interface sumiu');
+        await wait(300);
+        expect(errors, hasLength(1));
+        api.startError = null;
+        await wait(120);
+        expect(
+          api.scans,
+          greaterThan(0),
+          reason: 'a busca se recupera sozinha',
+        );
+      },
+    );
+  });
 }
