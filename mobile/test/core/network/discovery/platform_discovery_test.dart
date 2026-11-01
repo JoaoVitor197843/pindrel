@@ -9,16 +9,15 @@ import 'package:mobile/core/network/discovery/server_discovery.dart';
 void main() {
   test('cada sistema usa a descoberta que funciona nele', () {
     final discovery = createPlatformDiscovery();
-    if (Platform.isLinux) {
+    if (Platform.isLinux || Platform.isWindows) {
       expect(
         discovery,
         isA<MdnsDiscovery>(),
-        reason: 'o plugin nsd não existe no Linux',
+        reason:
+            'o plugin nsd não existe no Linux e perde mensagens no Windows '
+            '(envia da thread errada)',
       );
-    } else if (Platform.isAndroid ||
-        Platform.isIOS ||
-        Platform.isMacOS ||
-        Platform.isWindows) {
+    } else if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
       expect(discovery, isA<NsdDiscovery>());
     }
   });
