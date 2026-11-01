@@ -106,3 +106,19 @@ Cada arquivo sobe com o seu `.sha256`. O build number do app é a contagem de co
 - **A imagem do commit precisa existir:** `docker-tags` falha com uma mensagem clara se o commit marcado não gerou imagem (mudança fora dos caminhos do `release.yml`); rode o `release.yml` à mão na `main` e repita.
 - **Testes do script da API:** `sh .forgejo/scripts/test_release.sh` (roda o `release.sh` contra uma API falsa do Forgejo; não está no CI, como o `deploy/test_update.sh`).
 - **Assinatura do Android:** secrets `ANDROID_KEYSTORE_BASE64` (o `.jks` em base64) e `ANDROID_KEYSTORE_PASSWORD` (mesma senha para a loja e a chave; alias `plany`). **A mesma chave tem de assinar todas as versões**, senão quem já instalou não consegue atualizar: guarde um backup fora do PC. O job confere o certificado do APK e falha se for o de debug.
+
+## Windows e macOS (GitHub)
+
+O Flutter não compila para Windows nem macOS a partir do runner Linux do PC, então esses dois saem do **GitHub Actions**
+(`.github/workflows/release-desktop.yml`; o Forgejo lê só `.forgejo/workflows`, o GitHub só `.github`). O repositório
+público `JoaoVitor197843/plany` é um **espelho de push** do Forgejo: ele leva só o git (branches e tags), nunca issues, PRs nem releases.
+
+1. Em push na `main` que mexe no app: o GitHub só compila Windows, macOS e iOS (sem assinatura), para pegar quebra cedo.
+2. Em tag `v*`: o espelho leva a tag, o GitHub compila e publica `plany-app_<tag>_windows_amd64.zip` e `plany-app_<tag>_macos_universal.zip` numa release dele.
+3. No Forgejo, o job `desktop` do `release-tag.yml` roda **depois** do `publish`, espera esses arquivos aparecerem (até 45 min cada) e os anexa à release (`github-assets.sh` + `release.sh upload`). Se o GitHub atrasar ou cair, só esse job falha (`continue-on-error`) e a release principal já está pública.
+4. Sem assinatura: o Windows mostra o SmartScreen na primeira execução, e o macOS exige "Abrir" pelo menu de contexto. O iOS só compila; sem conta Apple paga não há o que instalar.
+
+Configurar o espelho (uma vez, pelo navegador): Forgejo > repositório > Configurações > Repositório > **Espelhos de push**: URL
+`https://github.com/JoaoVitor197843/plany.git`, usuário `JoaoVitor197843` e, como senha, um token do GitHub **restrito a este repositório** (fine-grained, só *Contents: Read and write*). Marcar "sincronizar ao fazer commit".
+
+Testes do script que baixa do GitHub: `sh .forgejo/scripts/test_github_assets.sh` (contra um GitHub falso, sem rede).
