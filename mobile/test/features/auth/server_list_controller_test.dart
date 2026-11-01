@@ -358,7 +358,12 @@ void main() {
     });
 
     test('não responde: a escolha anterior fica', () async {
-      makeProbed((_) async => false);
+      var first = true;
+      makeProbed((_) async {
+        final ok = first; // the first call is the pick made at start
+        first = false;
+        return ok;
+      });
       await flush();
       final before = controller.current.selected;
       expect(
@@ -370,7 +375,14 @@ void main() {
     });
 
     test('a consulta que lança conta como falha', () async {
-      makeProbed((_) async => throw StateError('boom'));
+      var first = true;
+      makeProbed((_) async {
+        if (first) {
+          first = false;
+          return true;
+        }
+        throw StateError('boom');
+      });
       await flush();
       expect(
         await controller.select(controller.current.available.last),
@@ -386,7 +398,7 @@ void main() {
         var calls = 0;
         makeProbed((_) {
           calls++;
-          return gate.future;
+          return calls == 1 ? Future.value(true) : gate.future;
         });
         await flush();
         final other = controller.current.available.last;
@@ -394,7 +406,7 @@ void main() {
         expect(await controller.select(other), isFalse);
         gate.complete(true);
         await first;
-        expect(calls, 1);
+        expect(calls, 2, reason: 'the pick at start plus one for the tap');
       },
     );
 
@@ -405,14 +417,16 @@ void main() {
         return true;
       });
       await flush();
+      expect(calls, 1, reason: 'the pick at start is tested');
       expect(await controller.select(controller.current.selected!), isTrue);
-      expect(calls, 0);
+      expect(calls, 1);
     });
   });
 
   group('identidade do servidor', () {
     late ServerTrust trust;
     late List<Uri> probed;
+    late List<Uri> autoProbed;
 
     Future<ServerListController> makeTrusted(
       List<DiscoveredServer> initial, {
@@ -421,6 +435,8 @@ void main() {
     }) async {
       trust = ServerTrust(MemoryKeyValueStore());
       probed = [];
+      var answer =
+          true; // the pick at start must succeed; [probeOk] is for what follows
       discovery = FakeDiscovery(initial);
       controller = ServerListController(
         discovery: discovery,
@@ -428,19 +444,23 @@ void main() {
         trust: trust,
         probe: (uri) async {
           probed.add(uri);
-          return probeOk;
+          return answer;
         },
       );
       addTearDown(controller.dispose);
       await flush();
+      autoProbed = List.of(probed);
+      probed.clear();
+      answer = probeOk;
       return controller;
     }
 
     DiscoveredServer casa(String id) =>
         server('Casa', addresses: ['10.0.0.1'], id: id);
 
-    test('o primeiro contato entra direto e fica lembrado', () async {
+    test('o primeiro contato é testado, entra e fica lembrado', () async {
       await makeTrusted([casa('aaa')]);
+      expect(autoProbed, [casa('aaa').baseUri]);
       expect(controller.current.selected?.name, 'Casa');
       expect(trust.trustOf('Casa', 'aaa'), Trust.same);
     });
@@ -642,6 +662,228 @@ void main() {
       await flush();
       expect(controller.current.pendingChange, isNull);
       expect(controller.current.selected, isNotNull);
+    });
+  });
+
+  group('escolha automática testada no início', () {
+    const retry = Duration(milliseconds: 30);
+
+    ServerListController makeAuto(
+      Future<bool> Function(Uri) probe, {
+      List<DiscoveredServer>? initial,
+      int random = 0,
+    }) {
+      discovery = FakeDiscovery(initial ?? sampleServers);
+      controller = ServerListController(
+        discovery: discovery,
+        random: FixedRandom(random),
+        probe: probe,
+        autoRetry: retry,
+      );
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
+    test('o sorteado é testado antes de ser escolhido', () async {
+      final gate = Completer<bool>();
+      Uri? asked;
+      makeAuto((uri) {
+        asked = uri;
+        return gate.future;
+      });
+      await flush();
+      expect(asked, sampleServers.first.baseUri);
+      expect(controller.current.selected, isNull, reason: 'ainda testando');
+      expect(controller.current.available, hasLength(3));
+      gate.complete(true);
+      await flush();
+      expect(controller.current.selected?.name, 'Casa');
+      expect(controller.current.connection, ServerConnection.connected);
+    });
+
+    test('se o sorteado não responde, tenta o próximo', () async {
+      final asked = <String>[];
+      makeAuto((uri) async {
+        asked.add(uri.host);
+        return uri.host == '192.168.0.20';
+      });
+      await flush();
+      await flush();
+      expect(controller.current.selected?.name, 'Escritório');
+      expect(asked.length, 2);
+    });
+
+    test('um que lança é tratado como não respondeu', () async {
+      var calls = 0;
+      makeAuto((_) async {
+        if (calls++ == 0) throw StateError('boom');
+        return true;
+      });
+      await flush();
+      await flush();
+      expect(controller.current.selected, isNotNull);
+      expect(calls, 2);
+    });
+
+    test(
+      'ninguém responde: sem escolha, no máximo 3 testes por rodada',
+      () async {
+        var calls = 0;
+        makeAuto(
+          (_) async {
+            calls++;
+            return false;
+          },
+          initial: [
+            for (var i = 0; i < 6; i++)
+              server('S$i', addresses: ['10.0.0.${i + 1}']),
+          ],
+        );
+        await flush();
+        await flush();
+        expect(controller.current.selected, isNull);
+        expect(controller.current.available, hasLength(6));
+        expect(calls, ServerListController.maxAutoProbes);
+      },
+    );
+
+    test('depois de uma rodada sem resposta, tenta de novo sozinho', () async {
+      var up = false;
+      makeAuto((_) async => up);
+      await flush();
+      expect(controller.current.selected, isNull);
+      up = true;
+      await Future<void>.delayed(retry * 3);
+      expect(controller.current.selected, isNotNull);
+    });
+
+    test(
+      'o usuário escolhe durante o teste: o resultado do teste é descartado',
+      () async {
+        final gate = Completer<bool>();
+        var calls = 0;
+        makeAuto((_) {
+          calls++;
+          return calls == 1 ? gate.future : Future.value(true);
+        });
+        await flush();
+        final mine = controller.current.available.last;
+        expect(await controller.select(mine), isTrue);
+        gate.complete(true);
+        await flush();
+        expect(controller.current.selected, mine);
+      },
+    );
+
+    test(
+      'lista chegando de novo durante o teste não dispara outro teste',
+      () async {
+        final gate = Completer<bool>();
+        var calls = 0;
+        makeAuto((_) {
+          calls++;
+          return gate.future;
+        });
+        await flush();
+        for (var i = 0; i < 10; i++) {
+          discovery.emit([
+            ...sampleServers,
+            server('Extra$i', addresses: ['10.1.0.$i']),
+          ]);
+          await flush();
+        }
+        expect(calls, 1);
+        gate.complete(true);
+        await flush();
+        expect(controller.current.selected, isNotNull);
+      },
+    );
+
+    test(
+      'fechar a tela durante o teste não escolhe nada nem deixa timer',
+      () async {
+        final gate = Completer<bool>();
+        makeAuto((_) => gate.future);
+        await flush();
+        await controller.dispose();
+        gate.complete(true);
+        await flush();
+        expect(controller.current.selected, isNull);
+      },
+    );
+  });
+
+  group('pausa com o app em segundo plano', () {
+    late PausableDiscovery pausable;
+
+    ServerListController makePausable({List<DiscoveredServer>? initial}) {
+      pausable = PausableDiscovery(initial ?? sampleServers);
+      controller = ServerListController(
+        discovery: pausable,
+        random: FixedRandom(0),
+      );
+      addTearDown(controller.dispose);
+      return controller;
+    }
+
+    test('pausar pausa a busca; retomar a retoma', () async {
+      makePausable();
+      await flush();
+      controller.pause();
+      expect(pausable.pauses, 1);
+      controller.resume();
+      expect(pausable.resumes, 1);
+    });
+
+    test('pausar e retomar várias vezes seguidas não confunde', () async {
+      makePausable();
+      await flush();
+      controller
+        ..pause()
+        ..pause()
+        ..pause();
+      expect(pausable.pauses, 1);
+      controller
+        ..resume()
+        ..resume();
+      expect(pausable.resumes, 1);
+      controller.resume();
+      expect(
+        pausable.resumes,
+        1,
+        reason: 'retomar sem estar pausado não faz nada',
+      );
+    });
+
+    test('a escolha continua enquanto pausado', () async {
+      makePausable();
+      await flush();
+      final before = controller.current.selected;
+      controller.pause();
+      await flush();
+      expect(controller.current.selected, before);
+      expect(controller.current.connection, ServerConnection.connected);
+    });
+
+    test('sem escolha, ao retomar sorteia com o que já se sabia', () async {
+      makePausable(initial: const []);
+      await flush();
+      controller.pause();
+      pausable.out.add(sampleServers); // buffered while paused
+      await flush();
+      expect(controller.current.selected, isNull);
+      controller.resume();
+      await flush();
+      expect(controller.current.selected?.name, 'Casa');
+    });
+
+    test('pausar e fechar em seguida não quebra', () async {
+      makePausable();
+      await flush();
+      controller.pause();
+      await controller.dispose();
+      controller.resume();
+      controller.pause();
     });
   });
 }

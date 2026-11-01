@@ -312,4 +312,131 @@ void main() {
       expect(emitted, [<DiscoveredServer>[]]);
     },
   );
+
+  group('política de reinício, pausa e erros', () {
+    NsdDiscovery make({
+      Duration restart = const Duration(milliseconds: 20),
+      Duration max = const Duration(hours: 1),
+      Duration grace = const Duration(milliseconds: 60),
+    }) => NsdDiscovery(
+      api: api,
+      restartWhileEmpty: restart,
+      maxRestartDelay: max,
+      lostGrace: grace,
+    );
+
+    Future<void> listenTo(NsdDiscovery d) async {
+      sub = d.watch().listen(emitted.add, onError: errors.add);
+      await settle();
+    }
+
+    test('rede vazia: a espera entre reinícios cresce, não é fixa', () async {
+      await listenTo(make());
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      // fixed 20 ms would restart about 12 times; doubling (20, 40, 80, 160) about 3
+      expect(api.starts, inInclusiveRange(3, 6));
+    });
+
+    test('o teto limita a espera', () async {
+      await listenTo(
+        make(
+          restart: const Duration(milliseconds: 10),
+          max: const Duration(milliseconds: 20),
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(api.starts, greaterThan(6));
+    });
+
+    test('pausar para a busca e nenhum reinício acontece pausado', () async {
+      await listenTo(make());
+      sub.pause();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final starts = api.starts;
+      expect(api.stops, 1);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(api.starts, starts);
+      expect(api.stops, 1);
+    });
+
+    test(
+      'retomar começa a busca de novo, e pausar duas vezes não quebra',
+      () async {
+        await listenTo(make());
+        sub.pause();
+        sub.pause();
+        sub.resume();
+        await settle();
+        expect(api.starts, 1, reason: 'ainda pausado uma vez');
+        sub.resume();
+        await settle();
+        expect(api.starts, 2);
+      },
+    );
+
+    test(
+      'ao retomar, quem não responde sai depois do prazo; quem responde fica',
+      () async {
+        await listenTo(make(restart: const Duration(hours: 1)));
+        api.found('Fica', host: 'a.local', ips: ['10.0.0.1']);
+        api.found('Some', host: 'b.local', ips: ['10.0.0.2']);
+        await settle();
+        sub.pause();
+        sub.resume();
+        await settle();
+        api.found('Fica', host: 'a.local', ips: ['10.0.0.1']);
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        expect(emitted.last.map((s) => s.name), ['Fica']);
+      },
+    );
+
+    test('pausar durante o início não deixa uma busca ligada', () async {
+      api.startGate = Completer<void>();
+      sub = make().watch().listen(emitted.add, onError: errors.add);
+      await settle();
+      sub.pause();
+      api.startGate!.complete();
+      await settle();
+      expect(
+        api.stops,
+        1,
+        reason: 'a busca que chegou durante a pausa é parada',
+      );
+    });
+
+    test('o primeiro início que falha é tentado de novo depois', () async {
+      api.failWith = StateError('sem rede ainda');
+      await listenTo(make());
+      expect(errors, hasLength(1));
+      api.failWith = null;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(api.starts, greaterThanOrEqualTo(1));
+    });
+
+    test('um reinício que falha uma ou duas vezes não vira erro', () async {
+      await listenTo(
+        make(
+          restart: const Duration(milliseconds: 15),
+          max: const Duration(milliseconds: 15),
+        ),
+      );
+      api.failWith = StateError('engasgo');
+      await Future<void>.delayed(const Duration(milliseconds: 22));
+      api.failWith = null;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      expect(errors, isEmpty);
+    });
+
+    test('um reinício que falha sem parar vira um erro só', () async {
+      await listenTo(
+        make(
+          restart: const Duration(milliseconds: 10),
+          max: const Duration(milliseconds: 10),
+        ),
+      );
+      api.failWith = StateError('sem permissão');
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      expect(errors, hasLength(1));
+    });
+  });
 }

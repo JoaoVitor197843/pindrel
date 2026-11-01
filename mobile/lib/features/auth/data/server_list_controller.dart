@@ -23,6 +23,7 @@ class ServerListController {
     Random? random,
     this.probe,
     ServerTrust? trust,
+    this.autoRetry = const Duration(seconds: 10),
   }) : _random = random ?? Random(),
        _trust = trust {
     _ready = trust?.load() ?? Future<void>.value();
@@ -40,7 +41,18 @@ class ServerListController {
   final Random _random;
 
   /// Tests the server before choosing it; without it the choice is immediate.
+  /// The server picked on its own at start goes through the same test.
   final ServerProbe? probe;
+
+  /// How many servers are tested, one after the other, before giving up for now:
+  /// the network may announce many and a probe can take up to its timeout.
+  static const maxAutoProbes = 3;
+
+  /// How long to wait before trying to pick on its own again after every probe failed.
+  final Duration autoRetry;
+  bool _autoPicking = false;
+  bool _paused = false;
+  Timer? _autoTimer;
   ServerOption? _connecting;
   bool _loaded = false;
   late final StreamSubscription<List<DiscoveredServer>> _subscription;
@@ -133,23 +145,91 @@ class ServerListController {
     _available = [for (final s in found) ServerOption.fromDiscovered(s)];
     final selected = _selected;
     if (selected == null) {
-      // a name that now answers with another id than the one opened before is never picked on its own
-      final trust = _trust;
-      final candidates = [
-        for (final s in _available)
-          if (trust == null ||
-              trust.trustOf(s.name, s.serverId) != Trust.changed)
-            s,
-      ];
-      if (candidates.isNotEmpty) {
-        _choose(candidates[_random.nextInt(candidates.length)]);
-      }
+      _autoPick();
     } else {
       final index = _available.indexOf(selected);
       // with the newest address, if it changed
       if (index >= 0) _selected = _available[index];
     }
     _publish();
+  }
+
+  /// Picks a server on its own: one drawn at random among the ones the network announces,
+  /// tested like a manual choice before it is taken. If it does not answer the next one
+  /// is tried (up to [maxAutoProbes]); if none does, it tries again after [autoRetry].
+  /// A name that now answers with another id than the one opened before is never picked
+  /// on its own.
+  void _autoPick() {
+    if (_selected != null || _autoPicking || _disposed || _paused) return;
+    final trust = _trust;
+    final candidates = [
+      for (final s in _available)
+        if (trust == null || trust.trustOf(s.name, s.serverId) != Trust.changed)
+          s,
+    ];
+    if (candidates.isEmpty) return;
+    final first = _random.nextInt(candidates.length);
+    final probe = this.probe;
+    if (probe == null) {
+      _choose(candidates[first]);
+      return;
+    }
+    _autoPicking = true;
+    final order = [
+      candidates[first],
+      for (var i = 0; i < candidates.length; i++)
+        if (i != first) candidates[i],
+    ];
+    unawaited(_probeInOrder(order.take(maxAutoProbes).toList(), probe));
+  }
+
+  Future<void> _probeInOrder(
+    List<ServerOption> order,
+    ServerProbe probe,
+  ) async {
+    try {
+      for (final candidate in order) {
+        final uri = candidate.baseUri;
+        var ok = uri == null;
+        if (uri != null) {
+          try {
+            ok = await probe(uri);
+          } catch (_) {
+            ok = false;
+          }
+        }
+        // the user chose one meanwhile, or the screen is gone: nothing left to do
+        if (_disposed || _selected != null) return;
+        if (_paused) break;
+        if (ok) {
+          _choose(candidate);
+          _publish();
+          return;
+        }
+      }
+    } finally {
+      _autoPicking = false;
+    }
+    if (_disposed || _paused || _selected != null) return;
+    _autoTimer?.cancel();
+    _autoTimer = Timer(autoRetry, _autoPick);
+  }
+
+  /// The app went to the background: the search stops (it costs RAM and battery) and
+  /// the choice is kept.
+  void pause() {
+    if (_paused || _disposed) return;
+    _paused = true;
+    _autoTimer?.cancel();
+    _subscription.pause();
+  }
+
+  /// The app is back: the search starts again.
+  void resume() {
+    if (!_paused || _disposed) return;
+    _paused = false;
+    _subscription.resume();
+    _autoPick();
   }
 
   void _onError(Object error, StackTrace stack) {
@@ -174,6 +254,7 @@ class ServerListController {
 
   Future<void> dispose() async {
     _disposed = true;
+    _autoTimer?.cancel();
     await _subscription.cancel();
     await _out.close();
   }
