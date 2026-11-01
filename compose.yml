@@ -21,12 +21,12 @@ services:
       - PORT=8080
       - SERVER_NAME=${SERVER_NAME:-Plany}
       - DB_USER=${DB_USER:-dev}
-      - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required (set it in .env)}
+      - DB_PASSWORD=${DB_PASSWORD:-change_me}
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}
       - DB_NAME=${DB_NAME:-plany}
       - SSL_MODE=${SSL_MODE:-disable}
-      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required (set it in .env)}
+      - JWT_SECRET=${JWT_SECRET:-change_me_to_a_long_random_string}
       - JWT_ACCESS_EXPIRY=${JWT_ACCESS_EXPIRY:-15m}
       - JWT_REFRESH_EXPIRY=${JWT_REFRESH_EXPIRY:-720h}
       - REGISTRATION_ENABLED=${REGISTRATION_ENABLED:-true}
@@ -65,7 +65,7 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-plany}
       POSTGRES_USER: ${DB_USER:-dev} # if you want other username in your database change this
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required (set it in .env)}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me}
     ports:
       # loopback only: needed to run the backend tests from the host, never exposed to the network
       - "127.0.0.1:5432:5432"
