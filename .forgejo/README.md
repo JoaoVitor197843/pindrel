@@ -105,7 +105,7 @@ Cada arquivo sobe com o seu `.sha256`. O build number do app é a contagem de co
 - **Token:** o job tenta o token automático do Forgejo; se ele não puder criar releases, crie o secret `RELEASE_TOKEN` (token de acesso com `write:repository`).
 - **A imagem do commit precisa existir:** `docker-tags` falha com uma mensagem clara se o commit marcado não gerou imagem (mudança fora dos caminhos do `release.yml`); rode o `release.yml` à mão na `main` e repita.
 - **Testes do script da API:** `sh .forgejo/scripts/test_release.sh` (roda o `release.sh` contra uma API falsa do Forgejo; não está no CI, como o `deploy/test_update.sh`).
-- **Assinatura do Android:** secrets `ANDROID_KEYSTORE_BASE64` (o `.jks` em base64) e `ANDROID_KEYSTORE_PASSWORD` (mesma senha para a loja e a chave; alias `plany` e certificado `CN=Plany`, ambos criados antes da troca de nome e que não mudam com ela). **A mesma chave tem de assinar todas as versões**, senão quem já instalou não consegue atualizar: guarde um backup fora do PC. O job confere o certificado do APK e falha se for o de debug.
+- **Assinatura do Android:** secrets `ANDROID_KEYSTORE_BASE64` (o `.jks` em base64) e `ANDROID_KEYSTORE_PASSWORD` (mesma senha para a loja e a chave; alias `pindrel`, certificado `CN=Pindrel`, PKCS12 de 4096 bits). **A mesma chave tem de assinar todas as versões**, senão quem já instalou não consegue atualizar: guarde um backup fora do PC. O job confere o certificado do APK e falha se for o de debug.
 
 ## Windows e macOS (GitHub)
 
