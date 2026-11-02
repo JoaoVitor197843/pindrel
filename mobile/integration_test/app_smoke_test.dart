@@ -24,7 +24,7 @@ void main() {
     app.main();
     await frames(tester);
 
-    expect(find.text('Plany'), findsWidgets);
+    expect(find.text('Pindrel'), findsWidgets);
     expect(find.text('Bem-vindo de volta'), findsOneWidget);
     expect(find.text('Continuar offline neste dispositivo'), findsOneWidget);
     expect(

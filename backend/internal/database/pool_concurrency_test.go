@@ -3,8 +3,8 @@ package database_test
 import (
 	"context"
 	"errors"
-	"plany/internal/config"
-	"plany/internal/database"
+	"pindrel/internal/config"
+	"pindrel/internal/database"
 	"sync"
 	"sync/atomic"
 	"testing"

@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"plany/internal/api/dto"
+	"pindrel/internal/api/dto"
 
 	"google.golang.org/protobuf/proto"
 )

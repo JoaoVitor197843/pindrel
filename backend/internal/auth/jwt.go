@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"plany/internal/database/db"
+	"pindrel/internal/database/db"
 	"strings"
 	"time"
 

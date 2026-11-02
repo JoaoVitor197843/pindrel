@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"plany/internal/api/dto"
-	"plany/internal/auth"
-	"plany/internal/database/db"
-	"plany/internal/validator"
+	"pindrel/internal/api/dto"
+	"pindrel/internal/auth"
+	"pindrel/internal/database/db"
+	"pindrel/internal/validator"
 )
 
 func median(d []time.Duration) time.Duration {

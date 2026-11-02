@@ -5,7 +5,7 @@ use std::{collections::HashMap, time::Duration};
 
 use common::*;
 use hyper::StatusCode;
-use plany_gateway::discovery::Server;
+use pindrel_gateway::discovery::Server;
 use prost::Message;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -159,7 +159,7 @@ async fn a_dropped_safe_request_is_replayed_once_not_on_every_replica() {
 }
 
 // The web is opened by `localhost` or a VPN address but must show the address the LAN uses for this server.
-fn set_address(gw: &plany_gateway::server::Running, address: Option<&str>) {
+fn set_address(gw: &pindrel_gateway::server::Running, address: Option<&str>) {
     *gw.app.address.write().unwrap() = address.map(str::to_string);
 }
 
@@ -170,7 +170,7 @@ async fn server_info_carries_the_lan_address_and_only_there() {
     set_address(&gw, Some("192.168.1.9:8086"));
     let r = get(gw.addr, "/server/info/").await;
     assert_eq!(
-        r.header("x-plany-address"),
+        r.header("x-pindrel-address"),
         "192.168.1.9:8086",
         "the gateway's value, not the replica's 6.6.6.6:1"
     );
@@ -182,7 +182,7 @@ async fn server_info_carries_the_lan_address_and_only_there() {
         ("GET", "/"),
     ] {
         let r = send(gw.addr, method, path, &[], "").await;
-        assert_eq!(r.header("x-plany-address"), "", "{method} {path}");
+        assert_eq!(r.header("x-pindrel-address"), "", "{method} {path}");
     }
     gw.shutdown().await;
 }
@@ -194,7 +194,7 @@ async fn without_a_known_lan_address_the_header_is_absent_and_a_replicas_one_is_
     set_address(&gw, None);
     let r = get(gw.addr, "/server/info/").await;
     assert_eq!(r.status, StatusCode::OK);
-    assert_eq!(r.header("x-plany-address"), "");
+    assert_eq!(r.header("x-pindrel-address"), "");
     gw.shutdown().await;
 }
 
@@ -205,7 +205,7 @@ async fn requests_through_a_declared_proxy_never_get_the_private_address() {
     set_address(&gw, Some("192.168.1.9:8086"));
     let r = send(gw.addr, "GET", "/server/info/", &[("x-forwarded-for", "203.0.113.7")], "").await;
     assert_eq!(r.status, StatusCode::OK);
-    assert_eq!(r.header("x-plany-address"), "", "the client may be anywhere on the internet");
+    assert_eq!(r.header("x-pindrel-address"), "", "the client may be anywhere on the internet");
     gw.shutdown().await;
 }
 
@@ -215,35 +215,54 @@ async fn server_info_carries_the_id_of_this_server_also_through_a_tunnel_and_onl
     let gw = gateway(&[&a]).await;
     let id = gw.app.registry.id().to_string();
     assert_eq!(id.len(), 32);
-    assert_eq!(get(gw.addr, "/server/info/").await.header("x-plany-id"), id);
+    assert_eq!(get(gw.addr, "/server/info/").await.header("x-pindrel-id"), id);
     for (method, path) in [("POST", "/server/info/"), ("GET", "/server/info"), ("GET", "/auth/me/")] {
         assert_eq!(
-            send(gw.addr, method, path, &[], "").await.header("x-plany-id"),
+            send(gw.addr, method, path, &[], "").await.header("x-pindrel-id"),
             "",
             "{method} {path}"
         );
     }
     // a client cannot make the gateway repeat an id of its own choosing
-    let r = send(gw.addr, "GET", "/server/info/", &[("x-plany-id", "evil")], "").await;
-    assert_eq!(r.header("x-plany-id"), id);
+    let r = send(gw.addr, "GET", "/server/info/", &[("x-pindrel-id", "evil")], "").await;
+    assert_eq!(r.header("x-pindrel-id"), id);
     let tunnel = behind_proxy(&a, "x-forwarded-for").await;
     let r = send(tunnel.addr, "GET", "/server/info/", &[("x-forwarded-for", "203.0.113.7")], "").await;
-    assert_eq!(r.header("x-plany-id"), tunnel.app.registry.id(), "the id is not private");
+    assert_eq!(r.header("x-pindrel-id"), tunnel.app.registry.id(), "the id is not private");
     assert_ne!(tunnel.app.registry.id(), id, "each gateway without a file has its own");
     gw.shutdown().await;
     tunnel.shutdown().await;
 }
 
 #[tokio::test]
+async fn server_info_may_be_read_from_another_origin_and_nothing_else_may() {
+    let a = Backend::start("a").await;
+    let gw = gateway(&[&a]).await;
+    let r = send(gw.addr, "GET", "/server/info/", &[("origin", "http://10.0.0.7:8095")], "").await;
+    assert_eq!(r.header("access-control-allow-origin"), "*");
+    assert_eq!(r.header("access-control-expose-headers"), "x-pindrel-id");
+    for (method, path) in [
+        ("POST", "/server/info/"),
+        ("GET", "/server/info"),
+        ("GET", "/auth/me/"),
+        ("GET", "/server/discover/"),
+    ] {
+        let r = send(gw.addr, method, path, &[("origin", "http://evil.example")], "").await;
+        assert_eq!(r.header("access-control-allow-origin"), "", "{method} {path}");
+    }
+    gw.shutdown().await;
+}
+
+#[tokio::test]
 async fn the_id_is_the_same_after_a_restart_when_there_is_a_file() {
     let a = Backend::start("a").await;
-    let file = std::env::temp_dir().join(format!("plany-gw-id-{}", std::process::id()));
+    let file = std::env::temp_dir().join(format!("pindrel-gw-id-{}", std::process::id()));
     let _ = std::fs::remove_file(&file);
     let mut ids = Vec::new();
     for _ in 0..2 {
         let f = file.clone();
         let gw = gateway_with(&[&a], move |c| c.server_id_file = Some(f)).await;
-        ids.push(get(gw.addr, "/server/info/").await.header("x-plany-id").to_string());
+        ids.push(get(gw.addr, "/server/info/").await.header("x-pindrel-id").to_string());
         gw.shutdown().await;
     }
     assert_eq!(ids[0], ids[1]);
@@ -591,10 +610,10 @@ async fn rate_limit_state_is_tracked_per_client() {
 
 // ---- the client behind a trusted proxy ----
 
-use plany_gateway::clientip::{parse_trusted, ClientIp};
+use pindrel_gateway::clientip::{parse_trusted, ClientIp};
 
 /// A gateway that trusts the test client's own address (127.0.0.1) as a proxy, reading `header`.
-async fn behind_proxy(a: &Backend, header: &str) -> plany_gateway::server::Running {
+async fn behind_proxy(a: &Backend, header: &str) -> pindrel_gateway::server::Running {
     let header = header.to_string();
     gateway_with(&[a], move |c| {
         c.client_ip = ClientIp::new(parse_trusted("127.0.0.1").unwrap(), &header).unwrap();
@@ -602,7 +621,7 @@ async fn behind_proxy(a: &Backend, header: &str) -> plany_gateway::server::Runni
     .await
 }
 
-async fn login_as(gw: &plany_gateway::server::Running, headers: &[(&str, &str)]) -> StatusCode {
+async fn login_as(gw: &pindrel_gateway::server::Running, headers: &[(&str, &str)]) -> StatusCode {
     send(gw.addr, "POST", "/auth/login/", headers, "x").await.status
 }
 

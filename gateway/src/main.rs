@@ -1,6 +1,6 @@
 use std::{net::TcpStream, process::ExitCode, time::Duration};
 
-use plany_gateway::{config::Config, server};
+use pindrel_gateway::{config::Config, server};
 
 /// `gateway healthcheck`: exit 0 when the local listener accepts connections (Docker HEALTHCHECK, no wget needed).
 fn healthcheck() -> ExitCode {

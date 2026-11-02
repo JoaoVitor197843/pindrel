@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Plany's Editorial Dark Variant. The only source of colors/typography: use only these tokens. */
+/* Pindrel's Editorial Dark Variant. The only source of colors/typography: use only these tokens. */
 @theme {
   --color-bg: #141412;
   --color-surface: #1e1e1b;

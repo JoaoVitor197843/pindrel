@@ -39,12 +39,12 @@ describe('trust', () => {
     remember('Casa', 'xyz')
     expect(trustOf('Casa', 'xyz')).toBe('same')
     expect(trustOf('Casa', 'abc')).toBe('changed')
-    expect(JSON.parse(data.get('plany:servers')!)).toHaveLength(1)
+    expect(JSON.parse(data.get('pindrel:servers')!)).toHaveLength(1)
   })
 
   it('guarda no máximo 64 nomes e esquece o mais antigo', () => {
     for (let i = 0; i < 100; i++) remember(`S${i}`, `id${i}`)
-    expect(JSON.parse(data.get('plany:servers')!)).toHaveLength(64)
+    expect(JSON.parse(data.get('pindrel:servers')!)).toHaveLength(64)
     expect(trustOf('S99', 'id99')).toBe('same')
     expect(trustOf('S0', 'qualquer')).toBe('new')
   })
@@ -64,7 +64,7 @@ describe('trust', () => {
     ['itens errados', '[1, null, ["a"], ["a", 2], {"x":1}]'],
     ['vazio', ''],
   ])('armazenamento corrompido (%s) é ignorado, não derruba', (_, raw) => {
-    data.set('plany:servers', raw)
+    data.set('pindrel:servers', raw)
     expect(trustOf('Casa', 'abc')).toBe('new')
     remember('Casa', 'abc')
     expect(trustOf('Casa', 'abc')).toBe('same')

@@ -112,7 +112,7 @@ class AuthBrandRow extends StatelessWidget {
       children: [
         const LogoMark(),
         const SizedBox(width: 10),
-        Text('Plany', style: AppText.serif(24)),
+        Text('Pindrel', style: AppText.serif(24)),
         const SizedBox(width: 10),
         const Flexible(child: _Tag('SELF-HOSTED')),
       ],

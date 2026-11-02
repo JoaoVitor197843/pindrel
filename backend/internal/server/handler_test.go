@@ -5,8 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"plany/internal/api/dto"
-	"plany/internal/server"
+	"pindrel/internal/api/dto"
+	"pindrel/internal/server"
 
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/proto"

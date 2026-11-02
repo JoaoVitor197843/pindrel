@@ -1,7 +1,7 @@
 package auth_test
 
 import (
-	"plany/internal/auth"
+	"pindrel/internal/auth"
 	"testing"
 )
 

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
-	"plany/internal/config"
+	"pindrel/internal/config"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"

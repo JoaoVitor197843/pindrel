@@ -26,7 +26,7 @@ def containers(svc):
 
 
 def healthy_serving():
-    return [c for c in world["containers"] if c["svc"] == "plany" and c["health"] == "healthy"]
+    return [c for c in world["containers"] if c["svc"] == "pindrel" and c["health"] == "healthy"]
 
 
 def new_container(svc, image):
@@ -43,7 +43,7 @@ def new_container(svc, image):
 
 
 def ref_service(ref):
-    return "gateway" if "plany-gateway" in ref else "plany"
+    return "gateway" if "pindrel-gateway" in ref else "pindrel"
 
 
 if args[0] == "compose":
@@ -83,7 +83,7 @@ if args[0] == "compose":
                     new_container(svc, image)
             else:
                 if not have:
-                    for _ in range(scale or (2 if svc == "plany" else 1)):
+                    for _ in range(scale or (2 if svc == "pindrel" else 1)):
                         new_container(svc, image)
                 else:
                     for c in have:

@@ -16,7 +16,7 @@ void main() {
 
   test('o id é estável, sem acento nem símbolos', () {
     expect(ServerOption.idFor('Casa do João #2'), 'casa-do-joao-2');
-    expect(ServerOption.idFor('  Plany!  '), 'plany');
+    expect(ServerOption.idFor('  Pindrel!  '), 'pindrel');
     expect(ServerOption.idFor('Ação'), 'acao');
     expect(ServerOption.idFor('???'), 'servidor');
   });

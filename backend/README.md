@@ -1,10 +1,10 @@
-# Plany — Backend
+# Pindrel — Backend
 
 API em Go responsável por autenticação e, em desenvolvimento, sincronização de notas na nuvem. Serve a web (que vem embutida na imagem) e, opcionalmente, o app mobile/desktop. O app mobile é autossuficiente e usa a API apenas para nuvem e sincronização; a web guarda as notas no navegador e usa a API para login e sincronização.
 
 ## Prioridades do projeto
 
-1. **Uso mínimo absoluto de RAM.** O Plany deve rodar em dispositivos fracos, como um Raspberry Pi antigo ou um celular antigo. Meta: **teto máximo de 512 MB de RAM** e **recomendado de 256 MB**, contando tudo o que é necessário para rodar, inclusive o banco de dados. O limite vale **por instância**; com load balancer, cada instância da API segue o mesmo teto individualmente. Na prática: preferir bibliotecas pequenas, evitar manter dados inteiros em memória, limitar conexões e picos de memória (por exemplo, derivação de chave).
+1. **Uso mínimo absoluto de RAM.** O Pindrel deve rodar em dispositivos fracos, como um Raspberry Pi antigo ou um celular antigo. Meta: **teto máximo de 512 MB de RAM** e **recomendado de 256 MB**, contando tudo o que é necessário para rodar, inclusive o banco de dados. O limite vale **por instância**; com load balancer, cada instância da API segue o mesmo teto individualmente. Na prática: preferir bibliotecas pequenas, evitar manter dados inteiros em memória, limitar conexões e picos de memória (por exemplo, derivação de chave).
 2. **Custo dividido entre cliente e servidor.** Nenhum lado deve receber todo o overhead por conta do outro. Onde o overhead é inevitável (segurança e criptografia), ele é o foco, mas com equilíbrio entre as partes.
 
 No backend: `GOMEMLIMIT` deve ser definido abaixo do teto (por exemplo `GOMEMLIMIT=200MiB`), o pool do pgx e o `max_connections` do Postgres ficam pequenos, e o hash Argon2id de senha consome memória por login simultâneo.
@@ -30,7 +30,7 @@ A API deve ser **explicitamente stateless**, para rodar atrás de um load balanc
 
 ## Descoberta na rede (planejado)
 
-A instância embutida na web usa mDNS para encontrar outros servidores Plany na rede e repassa a lista à web (navegadores não fazem mDNS). O padrão da web continua sendo sempre o servidor embutido. O serviço anunciado (`_plany._tcp`) é o que está na linha de frente: o load balancer, quando houver, e não cada instância da API.
+A instância embutida na web usa mDNS para encontrar outros servidores Pindrel na rede e repassa a lista à web (navegadores não fazem mDNS). O padrão da web continua sendo sempre o servidor embutido. O serviço anunciado (`_pindrel._tcp`) é o que está na linha de frente: o load balancer, quando houver, e não cada instância da API.
 
 ## Estrutura
 

@@ -6,24 +6,24 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"plany/internal/api/route"
-	"plany/internal/auth"
-	"plany/internal/config"
-	"plany/internal/database"
-	"plany/internal/database/db"
-	"plany/internal/middleware"
+	"pindrel/internal/api/route"
+	"pindrel/internal/auth"
+	"pindrel/internal/config"
+	"pindrel/internal/database"
+	"pindrel/internal/database/db"
+	"pindrel/internal/middleware"
 	"syscall"
 	"time"
 
-	_ "plany/docs"
+	_ "pindrel/docs"
 
 	"github.com/joho/godotenv"
 	"golang.org/x/time/rate"
 )
 
-// @title Plany API
+// @title Pindrel API
 // @version 1.0
-// @description Plany API, self-hosted notes workspace
+// @description Pindrel API, self-hosted notes workspace
 // @BasePath /
 // @securityDefinitions.apikey BearerAuth
 // @in header

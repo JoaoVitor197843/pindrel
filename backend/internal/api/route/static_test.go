@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"plany/internal/auth"
-	"plany/internal/config"
-	AuthMiddleware "plany/internal/middleware"
+	"pindrel/internal/auth"
+	"pindrel/internal/config"
+	AuthMiddleware "pindrel/internal/middleware"
 )
 
 func newPublicDir(t *testing.T) string {
@@ -110,7 +110,7 @@ func TestSPAHandler_CannotEscapePublicDir(t *testing.T) {
 
 func TestSPAHandler_WithoutBuild(t *testing.T) {
 	h := spaHandler(t.TempDir())
-	if rec := get(h, "/"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Plany API is running") {
+	if rec := get(h, "/"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Pindrel API is running") {
 		t.Errorf("/: got %d %q", rec.Code, rec.Body.String())
 	}
 	if rec := get(h, "/notes"); rec.Code != http.StatusNotFound {

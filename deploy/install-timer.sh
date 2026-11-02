@@ -11,7 +11,7 @@ home=$(getent passwd "$user" | cut -d: -f6)
 service() {
   cat <<UNIT
 [Unit]
-Description=Atualiza o Plany a partir do registry
+Description=Atualiza o Pindrel a partir do registry
 Wants=network-online.target docker.service
 After=network-online.target docker.service
 
@@ -49,7 +49,7 @@ UNIT
 timer() {
   cat <<UNIT
 [Unit]
-Description=Procura uma versão nova do Plany
+Description=Procura uma versão nova do Pindrel
 
 [Timer]
 OnBootSec=2min
@@ -63,13 +63,13 @@ UNIT
 }
 
 if [ "${1:-}" = --print ]; then
-  echo "# plany-update.service"; service; echo; echo "# plany-update.timer"; timer
+  echo "# pindrel-update.service"; service; echo; echo "# pindrel-update.timer"; timer
   exit 0
 fi
 
 [ "$(id -u)" = 0 ] || { echo "rode com sudo" >&2; exit 1; }
-service >/etc/systemd/system/plany-update.service
-timer >/etc/systemd/system/plany-update.timer
+service >/etc/systemd/system/pindrel-update.service
+timer >/etc/systemd/system/pindrel-update.timer
 systemctl daemon-reload
-systemctl enable --now plany-update.timer
-systemctl list-timers plany-update.timer --no-pager
+systemctl enable --now pindrel-update.timer
+systemctl list-timers pindrel-update.timer --no-pager

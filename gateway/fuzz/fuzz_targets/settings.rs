@@ -2,7 +2,7 @@
 //! and never panic.
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use plany_gateway::{clientip, config::Config, pool::parse_targets};
+use pindrel_gateway::{clientip, config::Config, pool::parse_targets};
 
 fuzz_target!(|data: &[u8]| {
     let text = String::from_utf8_lossy(data).into_owned();

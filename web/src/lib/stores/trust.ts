@@ -3,7 +3,7 @@
  * network can call themselves "Casa"; the id the real server keeps is what lets us notice that the one answering now is
  * not the one opened before. Kept in the browser only, never sent anywhere.
  */
-const KEY = 'plany:servers'
+const KEY = 'pindrel:servers'
 const MAX_REMEMBERED = 64
 
 export type Trust = 'new' | 'same' | 'changed'

@@ -123,7 +123,7 @@ class _LogoMarkState extends State<LogoMark> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: 'Logo do Plany',
+      label: 'Logo do Pindrel',
       excludeSemantics: true,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
