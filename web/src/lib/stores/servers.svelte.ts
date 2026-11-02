@@ -1,5 +1,7 @@
 import { fetchDiscoveredServers } from '../api/servers'
 import type { DiscoveredServer } from '../../types/shared/protos/server'
+import { inspect } from '../api/serverCheck'
+import { manual } from './manual.svelte'
 import { toast } from './toast.svelte'
 import { remember, trustOf } from './trust'
 
@@ -12,6 +14,10 @@ export interface ServerOption {
   url: string
   /** What the server announced as its own id (empty or absent: it announces none). */
   serverId?: string
+  /** Typed in by the user (kept in `manual`), not found on the network. */
+  manual?: boolean
+  /** The name `trust` knows it by, when the list shows another one the user chose. */
+  trustName?: string
 }
 
 // The open page is always the embedded server's, and it is always the default.
@@ -281,6 +287,7 @@ class ServerSelection {
 
   async open(server: ServerOption, confirmed = false): Promise<void> {
     if (this.connecting || server.id === embedded.id) return
+    if (server.manual) return this.#openManual(server, confirmed)
     if (!confirmed) {
       if (this.pendingChange) return // the question is still open
       if (trustOf(server.name, server.serverId ?? '') === 'changed') {
@@ -297,6 +304,32 @@ class ServerSelection {
       this.connecting = null
       toast.show(`${server.name} não respondeu.`)
     }
+  }
+
+  /**
+   * A server typed in by the user is asked who it is again: it may have moved or been replaced since it was added.
+   * Another id under the name it had is the same "this server changed" question as on the network.
+   */
+  async #openManual(server: ServerOption, confirmed: boolean): Promise<void> {
+    if (!confirmed && this.pendingChange) return
+    this.pendingChange = null
+    this.connecting = server
+    const now = await inspect(server.url)
+    if (!now.ok) {
+      this.connecting = null
+      toast.show(`${server.name} não respondeu.`)
+      return
+    }
+    const trustName = server.trustName ?? server.name
+    if (!confirmed && trustOf(trustName, now.serverId) === 'changed') {
+      this.connecting = null
+      this.pendingChange = { ...server, serverId: now.serverId }
+      return
+    }
+    remember(trustName, now.serverId)
+    manual.update(server.id, now.serverId)
+    // a redirect may have moved it between http and https
+    navigation.go(now.origin)
   }
 
   /** The user accepted the change: go on to the server. */

@@ -235,6 +235,25 @@ async fn server_info_carries_the_id_of_this_server_also_through_a_tunnel_and_onl
 }
 
 #[tokio::test]
+async fn server_info_may_be_read_from_another_origin_and_nothing_else_may() {
+    let a = Backend::start("a").await;
+    let gw = gateway(&[&a]).await;
+    let r = send(gw.addr, "GET", "/server/info/", &[("origin", "http://10.0.0.7:8095")], "").await;
+    assert_eq!(r.header("access-control-allow-origin"), "*");
+    assert_eq!(r.header("access-control-expose-headers"), "x-plany-id");
+    for (method, path) in [
+        ("POST", "/server/info/"),
+        ("GET", "/server/info"),
+        ("GET", "/auth/me/"),
+        ("GET", "/server/discover/"),
+    ] {
+        let r = send(gw.addr, method, path, &[("origin", "http://evil.example")], "").await;
+        assert_eq!(r.header("access-control-allow-origin"), "", "{method} {path}");
+    }
+    gw.shutdown().await;
+}
+
+#[tokio::test]
 async fn the_id_is_the_same_after_a_restart_when_there_is_a_file() {
     let a = Backend::start("a").await;
     let file = std::env::temp_dir().join(format!("plany-gw-id-{}", std::process::id()));
