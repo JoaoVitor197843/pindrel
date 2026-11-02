@@ -173,10 +173,18 @@ async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incom
                 }
                 p.headers.remove(ADDRESS_HEADER);
                 p.headers.remove(ID_HEADER);
+                p.headers.remove(header::ACCESS_CONTROL_ALLOW_ORIGIN);
+                p.headers.remove(header::ACCESS_CONTROL_EXPOSE_HEADERS);
                 if parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     if let Ok(v) = header::HeaderValue::from_str(app.registry.id()) {
                         p.headers.insert(ID_HEADER, v);
                     }
+                    // Public and read-only, no credentials: a web page opened from another server may read it to check
+                    // that an address typed by the user is a Plany gateway. Only the id is exposed, never the address.
+                    p.headers
+                        .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, header::HeaderValue::from_static("*"));
+                    p.headers
+                        .insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, header::HeaderValue::from_static(ID_HEADER));
                 }
                 if !via_proxy && parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     let address = app.address.read().ok().and_then(|a| a.clone());

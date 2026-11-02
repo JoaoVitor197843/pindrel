@@ -155,14 +155,14 @@ describe('Login — seletor de servidor', () => {
     expect(selection.selected.address).toBe(window.location.host)
   })
 
-  it('"+ Adicionar servidor..." fecha o menu e avisa o usuário', async () => {
+  it('"+ Adicionar servidor..." fecha o menu e abre a janela de adicionar', async () => {
     render(Login)
     await openMenu()
 
     await click(screen.getByRole('menuitem', { name: '+ Adicionar servidor...' }))
 
     expect(screen.queryByRole('menu')).toBeNull()
-    expect(screen.getByRole('status').textContent).toContain('Adicionar servidor chega em breve.')
+    expect(screen.getByRole('dialog', { name: 'Adicionar servidor' })).toBeTruthy()
   })
 
   it('clicar fora ou apertar Escape fecha o menu', async () => {

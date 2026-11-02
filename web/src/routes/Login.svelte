@@ -1,10 +1,12 @@
 <script lang="ts">
   import { MediaQuery } from 'svelte/reactivity'
   import AuthForm from '../lib/components/auth/AuthForm.svelte'
+  import AddServerModal from '../lib/components/auth/AddServerModal.svelte'
   import ConfirmServerModal from '../lib/components/auth/ConfirmServerModal.svelte'
   import AuthHeader from '../lib/components/auth/AuthHeader.svelte'
   import DesktopPanel from '../lib/components/auth/DesktopPanel.svelte'
   import { directory, selection } from '../lib/stores/servers.svelte'
+  import { manual } from '../lib/stores/manual.svelte'
   import { fade as fadeTransition } from 'svelte/transition'
   import StatusDot from '../lib/components/auth/StatusDot.svelte'
   import { ms } from '../lib/motion'
@@ -23,11 +25,14 @@
   $effect(() => directory.start())
   // and this page's server, for the dot and the footer
   $effect(() => selection.watchHealth())
+  // and the servers the user added, each checked on its own
+  $effect(() => manual.start())
 
   // during the server switch the form fades and does not accept taps
   const fade = 'transition-opacity duration-300 motion-reduce:transition-none'
 
-  const addServer = () => toast.show('Adicionar servidor chega em breve.')
+  let adding = $state(false)
+  const addServer = () => (adding = true)
 </script>
 
 <main class="min-h-screen bg-bg">
@@ -60,6 +65,10 @@
     </div>
   {/if}
 </main>
+
+{#if adding}
+  <AddServerModal onclose={() => (adding = false)} />
+{/if}
 
 {#if selection.pendingChange}
   <ConfirmServerModal
