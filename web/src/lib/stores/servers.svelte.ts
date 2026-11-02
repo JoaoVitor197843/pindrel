@@ -167,7 +167,7 @@ const HEALTH_FAILURES = 2
 
 export type Health = 'connected' | 'disconnected'
 
-const ADDRESS_HEADER = 'x-plany-address'
+const ADDRESS_HEADER = 'x-pindrel-address'
 
 /** `ip:port` of the header if it looks like a usable LAN address (the value comes from the network: never trusted blindly). */
 export function lanAddress(value: string | null): string | null {
@@ -208,7 +208,7 @@ class ServerSelection {
   /** Whether this page's server responds: `disconnected` after consecutive failures, back to connected on the first success. */
   health = $state<Health>('connected')
   /**
-   * The address of this server, once known: what the gateway says the LAN uses (`x-plany-address` on `/server/info/`),
+   * The address of this server, once known: what the gateway says the LAN uses (`x-pindrel-address` on `/server/info/`),
    * or the page's own host when it says nothing or does not answer. `null` until the first check ends: the page's host
    * may be `localhost` or a VPN address, which is exactly what must not flash on screen before the right one arrives.
    */

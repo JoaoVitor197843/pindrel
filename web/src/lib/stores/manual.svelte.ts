@@ -7,7 +7,7 @@ import { remember, trustOf } from './trust'
  * Servers the user typed in (outside the LAN, or just not announced). Kept in the browser only. Each one is checked
  * on its own, from time to time: the network announces nothing about them.
  */
-const KEY = 'plany:manual-servers'
+const KEY = 'pindrel:manual-servers'
 export const MAX_MANUAL = 16
 const POLL_MS = 15_000
 /** Like the page's own server: one lost packet does not bring the dot down, two in a row do. */
@@ -83,7 +83,7 @@ export class ManualServers {
   #adding = false
 
   /**
-   * Checks that [input] is a Plany gateway and only then saves it. [name] replaces the server's own name when it has
+   * Checks that [input] is a Pindrel gateway and only then saves it. [name] replaces the server's own name when it has
    * text. One call at a time: a second tap on "Adicionar" while the first one is checking does nothing.
    */
   async add(input: string, name: string, signal?: AbortSignal): Promise<AddResult> {

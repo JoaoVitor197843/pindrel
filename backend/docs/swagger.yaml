@@ -46,8 +46,8 @@ definitions:
     type: object
 info:
   contact: {}
-  description: Plany API, self-hosted notes workspace
-  title: Plany API
+  description: Pindrel API, self-hosted notes workspace
+  title: Pindrel API
   version: "1.0"
 paths:
   /auth/login/:

@@ -33,7 +33,7 @@ async function taps(button: HTMLElement, n: number) {
 describe('LogoMark', () => {
   it('é um botão com o P', () => {
     const { getByRole } = render(LogoMark)
-    expect(getByRole('button', { name: 'Logo do Plany' }).textContent?.trim()).toBe('P')
+    expect(getByRole('button', { name: 'Logo do Pindrel' }).textContent?.trim()).toBe('P')
   })
 
   it('cinco toques rápidos mostram a cena e depois tudo some', async () => {

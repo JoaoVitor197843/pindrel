@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"plany/internal/clientip"
+	"pindrel/internal/clientip"
 )
 
 type SSLMode string
@@ -121,7 +121,7 @@ func Load() (*Config, error) {
 	jwtSecret := parseEnv(c, "JWT_SECRET", nil, parseString)
 	jwtAccessExpiry := parseEnv(c, "JWT_ACCESS_EXPIRY", nil, time.ParseDuration)
 	jwtRefreshExpiry := parseEnv(c, "JWT_REFRESH_EXPIRY", nil, time.ParseDuration)
-	serverName := parseEnv(c, "SERVER_NAME", ptr("Plany"), parseString)
+	serverName := parseEnv(c, "SERVER_NAME", ptr("Pindrel"), parseString)
 	registrationEnabled := parseEnv(c, "REGISTRATION_ENABLED", ptr(true), strconv.ParseBool)
 	inAppRateLimit := parseEnv(c, "IN_APP_RATE_LIMIT", ptr(true), strconv.ParseBool)
 	dbMaxConns := parseEnv(c, "DB_MAX_CONNS", ptr(4), parsePortRange(1, 100))

@@ -2,8 +2,8 @@ package database_test
 
 import (
 	"context"
-	"plany/internal/config"
-	"plany/internal/database"
+	"pindrel/internal/config"
+	"pindrel/internal/database"
 	"testing"
 	"time"
 

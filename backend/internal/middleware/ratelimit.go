@@ -2,8 +2,8 @@ package middleware
 
 import (
 	"net/http"
-	"plany/internal/api"
-	"plany/internal/clientip"
+	"pindrel/internal/api"
+	"pindrel/internal/clientip"
 	"sync"
 	"time"
 

@@ -36,10 +36,10 @@ cs, seq = [], 0
 if api:
     for _ in range(int(n)):
         seq += 1
-        cs.append({"id": "c%d" % seq, "svc": "plany", "image": api, "health": "healthy"})
+        cs.append({"id": "c%d" % seq, "svc": "pindrel", "image": api, "health": "healthy"})
     seq += 1
     cs.append({"id": "c%d" % seq, "svc": "gateway", "image": gw, "health": "healthy"})
-json.dump({"local": {"plany": api or rapi, "gateway": gw or rgw}, "registry": {"plany": rapi, "gateway": rgw},
+json.dump({"local": {"pindrel": api or rapi, "gateway": gw or rgw}, "registry": {"pindrel": rapi, "gateway": rgw},
            "containers": cs, "seq": seq, "bad": []}, open(s + "/world.json", "w"))
 PY
   : >"$S/calls"; : >"$S/ups"; : >"$S/tags"; : >"$S/env"; : >"$S/serving"
@@ -62,12 +62,12 @@ PY
 }
 bad() { w "w['bad'].append('$1')"; }
 run() {
-  STUB_DIR=$S PATH="$work/bin:$PATH" UPDATE_GIT=0 PLANY_STATE_DIR="$work/state" PLANY_REPLICAS="${REPLICAS-}" COMPOSE_FILE="${CF-}" \
+  STUB_DIR=$S PATH="$work/bin:$PATH" UPDATE_GIT=0 PINDREL_STATE_DIR="$work/state" PINDREL_REPLICAS="${REPLICAS-}" COMPOSE_FILE="${CF-}" \
     sh "$work/proj/deploy/update.sh" >"$work/out" 2>&1
   rc=$?
 }
-api_images() { w "' '.join(sorted(c['image'] for c in w['containers'] if c['svc']=='plany'))"; }
-api_ids() { w "' '.join(sorted(c['id'] for c in w['containers'] if c['svc']=='plany'))"; }
+api_images() { w "' '.join(sorted(c['image'] for c in w['containers'] if c['svc']=='pindrel'))"; }
+api_ids() { w "' '.join(sorted(c['id'] for c in w['containers'] if c['svc']=='pindrel'))"; }
 gw_image() { w "[c['image'] for c in w['containers'] if c['svc']=='gateway'][0]"; }
 unhealthy() { w "len([c for c in w['containers'] if c['health']!='healthy'])"; }
 ups() { wc -l <"$S/ups" | tr -d ' '; }
@@ -92,7 +92,7 @@ check "avisa que está atualizado" said "mais recente"
 reset A A B B; run
 check "versão nova saudável termina bem" test "$rc" = 0
 check "todas as réplicas e o gateway passam à versão nova" test "$(api_images)" = "B B" -a "$(gw_image)" = B
-check "continua com 2 réplicas" test "$(w "len([c for c in w['containers'] if c['svc']=='plany'])")" = 2
+check "continua com 2 réplicas" test "$(w "len([c for c in w['containers'] if c['svc']=='pindrel'])")" = 2
 check "rolling: nunca ficou sem réplica saudável" test "$(min_serving)" -ge 1
 check "rolling: as réplicas antigas foram trocadas uma por vez" test "$(grep -c 'no-recreate' "$S/calls")" = 2
 check "o log traz o tempo de cada etapa e o total" sh -c 'grep -q "pull das imagens: [0-9]*s" "$1" && grep -q "réplica nova saudável: [0-9]*s" "$1" && grep -q "atualizado em [0-9]*s" "$1"' _ "$work/out"
@@ -111,13 +111,13 @@ check "a versão que falhou não é tentada outra vez" test "$rc" = 0 -a "$(ups)
 check "avisa que espera uma nova" said "esperando uma nova"
 
 # 5. a fixed version after the failure goes in
-w "w['registry'].update({'plany':'C','gateway':'C'})"; run
+w "w['registry'].update({'pindrel':'C','gateway':'C'})"; run
 check "versão nova depois da falha é aplicada" test "$rc" = 0 -a "$(api_images)" = "C C"
 check "sucesso limpa a marca de falha" test ! -e "$work/state/failed"
 
 # 5b. only the whole pair counts as "the one that failed"
 reset A A B B; bad B; run
-w "w['bad'].clear(); w['registry'].update({'plany':'D'})"; run
+w "w['bad'].clear(); w['registry'].update({'pindrel':'D'})"; run
 check "mesma imagem do gateway, API nova: é outra versão" test "$rc" = 0 -a "$(api_images)" = "D D"
 
 # 6. failure in the middle of the switch (the 2nd new replica does not come up): everything goes back to the previous version, without cutting the service
@@ -167,9 +167,9 @@ check "COMPOSE_FILE do .env não é sobrescrito" test "$rc" = 0 -a -z "$(grep -v
 reset A A B B; CF=x.yml:y.yml run
 check "COMPOSE_FILE do ambiente é respeitado" grep -q "COMPOSE_FILE=x.yml:y.yml" "$S/env"
 
-# 14. PLANY_REPLICAS sets the final number of replicas
-reset A A A A; w "w['registry'].update({'plany':'B'})"; REPLICAS=3 run
-check "PLANY_REPLICAS=3 termina com 3 réplicas na versão nova" test "$(api_images)" = "B B B"
+# 14. PINDREL_REPLICAS sets the final number of replicas
+reset A A A A; w "w['registry'].update({'pindrel':'B'})"; REPLICAS=3 run
+check "PINDREL_REPLICAS=3 termina com 3 réplicas na versão nova" test "$(api_images)" = "B B B"
 
 # 15. the script survives being swapped while it runs (the body is in a function)
 check "o arquivo termina em exit (sh lê aos poucos)" test "$(tail -n 2 "$here/update.sh" | tr '\n' ' ')" = 'main "$@" exit $? '
@@ -183,8 +183,8 @@ check "service é restrito: sem privilégios novos, sistema só de leitura e só
 check "timer repete a cada 1 min e sobrevive a reinício" sh -c 'echo "$1" | grep -q "^OnUnitActiveSec=1min" && echo "$1" | grep -q "^Persistent=true"' _ "$out"
 if command -v systemd-analyze >/dev/null 2>&1; then
   mkdir -p "$work/units"
-  sh "$here/install-timer.sh" --print | awk -v d="$work/units" '/^# plany-update/{f=d"/"$2; next} f{print > f}'
-  check "systemd-analyze aprova as units" systemd-analyze verify "$work/units/plany-update.timer" "$work/units/plany-update.service"
+  sh "$here/install-timer.sh" --print | awk -v d="$work/units" '/^# pindrel-update/{f=d"/"$2; next} f{print > f}'
+  check "systemd-analyze aprova as units" systemd-analyze verify "$work/units/pindrel-update.timer" "$work/units/pindrel-update.service"
 fi
 
 echo

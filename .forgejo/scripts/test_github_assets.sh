@@ -52,8 +52,8 @@ quiet() { "$@" >/dev/null 2>&1; }
 fails_with() { ! quiet "$@"; }
 
 out="$work/out"
-check "downloads a file that is already there" quiet $G o/r v1.0.0 "$out" plany-app_v1.0.0_windows_amd64.zip
-check "the content is what the server sent" test "$(cat "$out/plany-app_v1.0.0_windows_amd64.zip")" = "content of plany-app_v1.0.0_windows_amd64.zip"
+check "downloads a file that is already there" quiet $G o/r v1.0.0 "$out" pindrel-app_v1.0.0_windows_amd64.zip
+check "the content is what the server sent" test "$(cat "$out/pindrel-app_v1.0.0_windows_amd64.zip")" = "content of pindrel-app_v1.0.0_windows_amd64.zip"
 check "waits for a file that shows up late" quiet $G o/r v1.0.0 "$out" late-one.zip
 check "the late file is complete" test "$(cat "$out/late-one.zip")" = "content of late-one.zip"
 check "several files in one call" quiet $G o/r v1.0.0 "$out" a.zip b.zip

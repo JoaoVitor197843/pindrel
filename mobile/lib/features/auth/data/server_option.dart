@@ -1,6 +1,6 @@
 import '../../../core/network/discovery/discovered_server.dart';
 
-/// Plany server the app can connect to.
+/// Pindrel server the app can connect to.
 class ServerOption {
   const ServerOption({
     required this.id,

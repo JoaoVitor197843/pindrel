@@ -2,7 +2,7 @@ import { DiscoveredServers, type DiscoveredServer } from '../../types/shared/pro
 import { ApiError, getProto } from './client'
 
 /**
- * Plany servers the gateway found on the network (`GET /server/discover/`). Without a gateway
+ * Pindrel servers the gateway found on the network (`GET /server/discover/`). Without a gateway
  * (simple deploy) the endpoint does not exist: 404 stands for "no other server".
  */
 export async function fetchDiscoveredServers(signal?: AbortSignal): Promise<DiscoveredServer[]> {

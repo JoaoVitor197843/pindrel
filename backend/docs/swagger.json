@@ -1,8 +1,8 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "Plany API, self-hosted notes workspace",
-        "title": "Plany API",
+        "description": "Pindrel API, self-hosted notes workspace",
+        "title": "Pindrel API",
         "contact": {},
         "version": "1.0"
     },

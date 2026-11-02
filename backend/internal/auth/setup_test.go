@@ -2,10 +2,10 @@ package auth_test
 
 import (
 	"context"
-	"plany/internal/auth"
-	"plany/internal/config"
-	"plany/internal/database"
-	"plany/internal/database/db"
+	"pindrel/internal/auth"
+	"pindrel/internal/config"
+	"pindrel/internal/database"
+	"pindrel/internal/database/db"
 	"testing"
 	"time"
 

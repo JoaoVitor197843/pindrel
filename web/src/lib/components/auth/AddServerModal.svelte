@@ -65,7 +65,7 @@
     <form novalidate onsubmit={submit}>
     <h2 id="add-server-title" class="font-serif text-2xl">Adicionar servidor</h2>
     <p class="mt-2 leading-[1.4] text-muted">
-      Digite o endereço de um servidor Plany: um IP, como 192.168.0.20:8095, ou um domínio. Sem http:// ou https://,
+      Digite o endereço de um servidor Pindrel: um IP, como 192.168.0.20:8095, ou um domínio. Sem http:// ou https://,
       testo os dois.
     </p>
     <label class="mt-4 block font-mono text-[11px] tracking-[1px] text-muted uppercase" for="add-server-address">

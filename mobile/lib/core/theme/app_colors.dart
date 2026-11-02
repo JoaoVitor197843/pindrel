@@ -1,6 +1,6 @@
 import 'package:flutter/painting.dart';
 
-/// Plany's Editorial Dark Variant palette. The app's only source of colors.
+/// Pindrel's Editorial Dark Variant palette. The app's only source of colors.
 abstract final class AppColors {
   static const background = Color(0xFF141412);
   static const surface = Color(0xFF1E1E1B);

@@ -1,5 +1,5 @@
 [package]
-name = "plany-gateway-fuzz"
+name = "pindrel-gateway-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2021"
@@ -12,7 +12,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 hyper = { version = "1", default-features = false }
 
-[dependencies.plany-gateway]
+[dependencies.pindrel-gateway]
 path = ".."
 
 # not part of the gateway workspace: it needs nightly and must not change the gateway's own build

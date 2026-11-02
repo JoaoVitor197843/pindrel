@@ -17,7 +17,7 @@ use hyper_util::{
     client::legacy::{connect::HttpConnector, Client},
     rt::{TokioExecutor, TokioIo},
 };
-use plany_gateway::{
+use pindrel_gateway::{
     config::Config,
     server::{self, Running},
 };
@@ -156,7 +156,7 @@ async fn backend_handler(id: &'static str, req: Request<Incoming>) -> Result<Res
     let mut res = Response::builder().status(status);
     if path == "/server/info/" {
         // a replica must not be able to speak for the gateway
-        res = res.header("x-plany-address", "6.6.6.6:1");
+        res = res.header("x-pindrel-address", "6.6.6.6:1");
     }
     Ok(res
         .header("x-backend", id)

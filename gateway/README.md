@@ -1,11 +1,11 @@
-# Plany Gateway
+# Pindrel Gateway
 
-A porta de entrada de uma instalação do Plany. Fica na frente das réplicas da API e faz quatro coisas:
+A porta de entrada de uma instalação do Pindrel. Fica na frente das réplicas da API e faz quatro coisas:
 
 1. **Balanceia** as requisições entre as réplicas que estão de pé (rodízio), com nova tentativa quando uma réplica recusa a conexão.
 2. **Limita** as requisições por IP (login, cadastro e geral), para que a API fique sem estado e possa ter várias réplicas.
-3. **Anuncia** o servidor na rede local por mDNS (`_plany._tcp`), para os aplicativos o acharem sozinhos.
-4. **Lista** os outros servidores Plany da rede em `GET /server/discover/`, porque o navegador não sabe fazer mDNS.
+3. **Anuncia** o servidor na rede local por mDNS (`_pindrel._tcp`), para os aplicativos o acharem sozinhos.
+4. **Lista** os outros servidores Pindrel da rede em `GET /server/discover/`, porque o navegador não sabe fazer mDNS.
 
 É o **único código em Rust** do projeto, escrito para gastar o mínimo de RAM: um binário estático de ~1,4 MB que usa de ~1 a 5 MB de memória (medido; veja [Consumo](#consumo)) e roda em Linux (x86 e ARM), Windows e macOS.
 
@@ -18,7 +18,7 @@ A porta de entrada de uma instalação do Plany. Fica na frente das réplicas da
  (app, web)  (porta     ├─► API (réplica 2) ──┼─► PostgreSQL
               8080)     └─► API (réplica N) ──┘
                  │
-                 └─ mDNS: anuncia "Plany" e acha os outros servidores da LAN
+                 └─ mDNS: anuncia "Pindrel" e acha os outros servidores da LAN
 ```
 
 - **Rodízio com teste de saúde.** A cada 3 s o gateway tenta abrir conexão com cada réplica possível (`UPSTREAMS`) e só envia tráfego às que respondem.
@@ -67,7 +67,7 @@ Timeout de 10 s para ler os cabeçalhos (derruba conexão lenta ou que nunca ter
 
 ## mDNS e descoberta
 
-O gateway anuncia `_plany._tcp` com o `SERVER_NAME` **só na interface de rede local** (a que tem a rota padrão, ou as de `MDNS_INTERFACES`), nunca nas pontes do Docker ou em VPNs, que anunciariam endereços inalcançáveis. Se o nome já existe na rede, ele se renomeia (`Plany (2)`); ao sair, avisa a rede. Não é necessário ter nem tirar o `avahi-daemon` do host: os dois convivem.
+O gateway anuncia `_pindrel._tcp` com o `SERVER_NAME` **só na interface de rede local** (a que tem a rota padrão, ou as de `MDNS_INTERFACES`), nunca nas pontes do Docker ou em VPNs, que anunciariam endereços inalcançáveis. Se o nome já existe na rede, ele se renomeia (`Pindrel (2)`); ao sair, avisa a rede. Não é necessário ter nem tirar o `avahi-daemon` do host: os dois convivem.
 
 Pontos que importam na prática:
 
@@ -87,7 +87,7 @@ Tudo por variáveis de ambiente.
 | --- | --- | --- |
 | `UPSTREAMS` | *(obrigatória)* | Réplicas possíveis, `ip:porta` ou `ip:porta-porta`, separadas por vírgula. Ex.: `127.0.0.1:9000-9099,10.0.0.5:8080` |
 | `GATEWAY_PORT` | `8080` | Porta em que o gateway escuta |
-| `SERVER_NAME` | `Plany` | Nome anunciado na rede (o que o app mostra) |
+| `SERVER_NAME` | `Pindrel` | Nome anunciado na rede (o que o app mostra) |
 | `MDNS_ENABLED` | `true` | Liga o anúncio e a descoberta |
 | `MDNS_INTERFACES` | *(a da rota padrão)* | Interfaces em que anunciar, separadas por vírgula (ex.: `eth0,wlan0`) |
 | `MDNS_REFRESH_SECS` | `15` | De quanto em quanto tempo reinicia a busca enquanto não achou ninguém. `0` desliga |
@@ -109,7 +109,7 @@ Todos os erros de configuração são mostrados de uma vez, e o gateway não sob
 Pelo `compose.lb.yml` da raiz do repositório, que sobe o gateway na rede do host e põe as réplicas da API atrás dele (veja o [README principal](../README.md#várias-réplicas-atrás-do-gateway)):
 
 ```bash
-docker compose -f compose.yml -f compose.lb.yml up -d --build --scale plany=2
+docker compose -f compose.yml -f compose.lb.yml up -d --build --scale pindrel=2
 ```
 
 A imagem (`gateway/Dockerfile`) é feita em dois estágios e termina em `scratch`, com só o binário (~2,5 MB), rodando sem root. O `HEALTHCHECK` usa o próprio binário: `/gateway healthcheck`.

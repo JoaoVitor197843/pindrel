@@ -9,7 +9,7 @@ import Login from '../../../routes/Login.svelte'
 
 const gateway = (name: string, id: string) =>
   new Response(ServerInfo.encode({ name, registrationEnabled: true }).finish(), {
-    headers: { 'content-type': 'application/x-protobuf', 'x-plany-id': id },
+    headers: { 'content-type': 'application/x-protobuf', 'x-pindrel-id': id },
   })
 
 /** `up`: hosts that answer as a gateway. Everything else refuses the connection. */
@@ -78,13 +78,13 @@ describe('janela de adicionar servidor', () => {
     await waitFor(() => expect(manual.list[0]?.name).toBe('Sítio'))
   })
 
-  it('um servidor que não é Plany mostra o motivo e a janela continua aberta', async () => {
+  it('um servidor que não é Pindrel mostra o motivo e a janela continua aberta', async () => {
     up = { 'web.com': new Response('<html>', { headers: { 'content-type': 'text/html' } }) }
     render(Login)
     await openDialog()
     await type('Endereço', 'web.com')
     await submit()
-    expect((await screen.findByRole('alert')).textContent).toContain('não é um servidor Plany')
+    expect((await screen.findByRole('alert')).textContent).toContain('não é um servidor Pindrel')
     expect(screen.getByRole('dialog')).toBeTruthy()
     expect(manual.list).toEqual([])
   })

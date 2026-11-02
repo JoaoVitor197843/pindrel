@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use hyper::header::{HeaderMap, HeaderName, HeaderValue};
 use libfuzzer_sys::fuzz_target;
-use plany_gateway::clientip::{parse_trusted, ClientIp};
+use pindrel_gateway::clientip::{parse_trusted, ClientIp};
 
 const HEADERS: [&str; 3] = ["x-forwarded-for", "forwarded", "cf-connecting-ip"];
 

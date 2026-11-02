@@ -5,12 +5,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"plany/internal/auth"
-	"plany/internal/clientip"
-	"plany/internal/config"
-	"plany/internal/database/db"
-	AuthMiddleware "plany/internal/middleware"
-	"plany/internal/server"
+	"pindrel/internal/auth"
+	"pindrel/internal/clientip"
+	"pindrel/internal/config"
+	"pindrel/internal/database/db"
+	AuthMiddleware "pindrel/internal/middleware"
+	"pindrel/internal/server"
 	"strings"
 	"time"
 
@@ -120,7 +120,7 @@ func spaHandler(dir string) http.HandlerFunc {
 		if _, err := os.Stat(index); err != nil {
 			// no web build next to the binary (e.g. running the API alone in development)
 			if clean == "/" {
-				w.Write([]byte("Plany API is running! 🚀"))
+				w.Write([]byte("Pindrel API is running! 🚀"))
 				return
 			}
 			http.NotFound(w, r)

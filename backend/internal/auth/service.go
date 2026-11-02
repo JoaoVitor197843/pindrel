@@ -3,8 +3,8 @@ package auth
 import (
 	"context"
 	"errors"
-	"plany/internal/database/db"
-	"plany/internal/validator"
+	"pindrel/internal/database/db"
+	"pindrel/internal/validator"
 	"sync"
 	"time"
 
@@ -25,7 +25,7 @@ const pgUniqueViolation = "23505"
 // dummyHash is verified when the e-mail does not exist so that login takes the same time (one
 // Argon2) whether or not the account exists. Computed once, on first use, to keep startup cheap.
 var dummyHash = sync.OnceValue(func() string {
-	h, err := HashPassword("plany-dummy-password-for-timing")
+	h, err := HashPassword("pindrel-dummy-password-for-timing")
 	if err != nil {
 		panic(err)
 	}

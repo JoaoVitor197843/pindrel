@@ -88,7 +88,7 @@ DiscoveredServer server(
 
 /// The three servers the login screen showed before the real discovery.
 final sampleServers = [
-  server('Casa', host: 'plany.casa'),
+  server('Casa', host: 'pindrel.casa'),
   server('Escritório', addresses: ['192.168.0.20']),
   server('Nuvem', host: 'notas.exemplo'),
 ];

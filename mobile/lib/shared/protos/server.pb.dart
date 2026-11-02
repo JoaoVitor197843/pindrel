@@ -84,7 +84,7 @@ class ServerInfo extends $pb.GeneratedMessage {
   void clearRegistrationEnabled() => $_clearField(2);
 }
 
-/// Plany servers found on the local network (answer of GET /server/discover/, built by the gateway).
+/// Pindrel servers found on the local network (answer of GET /server/discover/, built by the gateway).
 class DiscoveredServer extends $pb.GeneratedMessage {
   factory DiscoveredServer({
     $core.String? name,

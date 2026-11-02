@@ -73,7 +73,7 @@ func (x *ServerInfo) GetRegistrationEnabled() bool {
 	return false
 }
 
-// Plany servers found on the local network (answer of GET /server/discover/, built by the gateway).
+// Pindrel servers found on the local network (answer of GET /server/discover/, built by the gateway).
 type DiscoveredServer struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`

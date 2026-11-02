@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"plany/internal/api/dto"
-	"plany/internal/validator"
+	"pindrel/internal/api/dto"
+	"pindrel/internal/validator"
 )
 
 func TestValidateLogin_EmailSyntaxOnly(t *testing.T) {

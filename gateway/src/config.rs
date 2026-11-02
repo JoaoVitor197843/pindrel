@@ -42,7 +42,7 @@ impl Config {
         Self {
             port: 8080,
             upstreams,
-            server_name: "Plany".into(),
+            server_name: "Pindrel".into(),
             mdns: true,
             mdns_interfaces: Vec::new(),
             mdns_refresh: Duration::from_secs(15),
@@ -122,7 +122,7 @@ impl Config {
         Ok(Self {
             port,
             upstreams,
-            server_name: get("SERVER_NAME").unwrap_or_else(|| "Plany".into()),
+            server_name: get("SERVER_NAME").unwrap_or_else(|| "Pindrel".into()),
             mdns,
             mdns_interfaces: get("MDNS_INTERFACES")
                 .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
@@ -157,7 +157,7 @@ mod tests {
         let c = load(&[("UPSTREAMS", "127.0.0.1:9000-9002")]).unwrap();
         assert_eq!(
             (c.port, c.upstreams.len(), c.server_name.as_str(), c.mdns, c.rate_limit),
-            (8080, 3, "Plany", true, true)
+            (8080, 3, "Pindrel", true, true)
         );
         assert_eq!(
             (c.max_connections, c.max_connections_per_ip, c.max_body, c.probe_interval),
@@ -226,6 +226,6 @@ mod tests {
     #[test]
     fn blank_values_count_as_unset() {
         let c = load(&[("UPSTREAMS", "127.0.0.1:1"), ("SERVER_NAME", "   "), ("GATEWAY_PORT", "")]).unwrap();
-        assert_eq!((c.server_name.as_str(), c.port), ("Plany", 8080));
+        assert_eq!((c.server_name.as_str(), c.port), ("Pindrel", 8080));
     }
 }

@@ -5,11 +5,11 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"plany/internal/api"
-	"plany/internal/validator"
+	"pindrel/internal/api"
+	"pindrel/internal/validator"
 	"time"
 
-	"plany/internal/api/dto"
+	"pindrel/internal/api/dto"
 
 	"google.golang.org/protobuf/proto"
 )

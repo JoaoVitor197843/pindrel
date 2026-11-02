@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"plany/internal/api/dto"
-	"plany/internal/auth"
-	"plany/internal/database/db"
+	"pindrel/internal/api/dto"
+	"pindrel/internal/auth"
+	"pindrel/internal/database/db"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/uuid"

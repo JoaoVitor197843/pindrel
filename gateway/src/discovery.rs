@@ -1,4 +1,4 @@
-//! mDNS: announces this gateway as `_plany._tcp` and keeps the list of the other Plany servers
+//! mDNS: announces this gateway as `_pindrel._tcp` and keeps the list of the other Pindrel servers
 //! on the LAN, which the browser cannot do itself (GET /server/discover/).
 use std::{
     collections::{HashMap, HashSet},
@@ -13,7 +13,7 @@ use std::{
 use mdns_sd::{IfKind, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::{sync::Notify, time};
 
-pub const SERVICE_TYPE: &str = "_plany._tcp.local.";
+pub const SERVICE_TYPE: &str = "_pindrel._tcp.local.";
 
 /// Most servers kept from live announcements and from the memory of past ones. Anyone on the LAN
 /// can announce anything, so the tables must not grow with what they are told.

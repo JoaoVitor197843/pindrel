@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"plany/internal/config"
+	"pindrel/internal/config"
 )
 
 func setRequired(t *testing.T) {
@@ -25,7 +25,7 @@ func TestLoad_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.ServerName != "Plany" || !cfg.InAppRateLimit || cfg.Database.MaxConns != 4 {
+	if cfg.ServerName != "Pindrel" || !cfg.InAppRateLimit || cfg.Database.MaxConns != 4 {
 		t.Errorf("unexpected defaults: %+v", cfg)
 	}
 }
