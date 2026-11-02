@@ -1,6 +1,6 @@
 import 'discovered_server.dart';
 
-/// Looks for Plany servers on the local network.
+/// Looks for Pindrel servers on the local network.
 abstract interface class ServerDiscovery {
   /// Emits the complete list of known servers on every change (the
   /// first one, empty, right on subscription). The search starts on subscribe and ends on

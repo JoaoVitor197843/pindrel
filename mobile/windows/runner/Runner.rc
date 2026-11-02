@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Plany" "\0"
-            VALUE "FileDescription", "Plany" "\0"
+            VALUE "CompanyName", "Pindrel" "\0"
+            VALUE "FileDescription", "Pindrel" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "Plany" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 Plany. All rights reserved." "\0"
-            VALUE "OriginalFilename", "Plany.exe" "\0"
-            VALUE "ProductName", "Plany" "\0"
+            VALUE "InternalName", "Pindrel" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Pindrel. All rights reserved." "\0"
+            VALUE "OriginalFilename", "Pindrel.exe" "\0"
+            VALUE "ProductName", "Pindrel" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

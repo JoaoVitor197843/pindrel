@@ -22,7 +22,7 @@ const _cConf2 = Cubic(.4, 0, .8, .6);
 
 /// A whole scene, built once as data: the actors, each with its animations on a timeline in ms. Nothing here
 /// draws; `LogoStage` evaluates it frame by frame. Everything mirrors the reference prototype
-/// (docs/plany-easter-egg-prototype.html), a Web Animations `element.animate` per actor.
+/// (docs/pindrel-easter-egg-prototype.html), a Web Animations `element.animate` per actor.
 class LogoScene {
   LogoScene(this.theme, {required this.stageWidth, math.Random? random})
     : _rng = random ?? math.Random() {

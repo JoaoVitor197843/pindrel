@@ -1,4 +1,4 @@
-// SVG art of the logo scenes, as in the reference prototype (docs/plany-easter-egg-prototype.html).
+// SVG art of the logo scenes, as in the reference prototype (docs/pindrel-easter-egg-prototype.html).
 // Plain strings, read by `svg.dart`: nothing here comes from user input.
 const o = '#e2862c';
 const k = '#0a0710';

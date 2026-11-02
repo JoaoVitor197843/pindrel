@@ -1,11 +1,11 @@
 #!/bin/sh
-# Brings Plany up in Docker for local testing: Postgres + 2 API replicas + gateway (compose.yml + compose.lb.yml).
+# Brings Pindrel up in Docker for local testing: Postgres + 2 API replicas + gateway (compose.yml + compose.lb.yml).
 #   sh deploy/test-docker.sh              rebuilds and starts (the default)
 #   sh deploy/test-docker.sh up [N]       same, with N replicas (default 2)
 #   sh deploy/test-docker.sh reset        tears down, wipes the database (volumes) and starts again
 #   sh deploy/test-docker.sh down         tears down (the database stays)
 #   sh deploy/test-docker.sh status       containers, port and servers found on the network
-#   sh deploy/test-docker.sh logs [svc]   follows the logs (all, or one service: gateway, plany, postgres)
+#   sh deploy/test-docker.sh logs [svc]   follows the logs (all, or one service: gateway, pindrel, postgres)
 # The port comes from PORT in .env (or 8080). For tests only: it does not use the registry nor update.sh.
 set -eu
 cd "$(dirname "$0")/.."
@@ -19,7 +19,7 @@ port() {
 }
 
 up() {
-  compose up -d --build --scale "plany=${1:-2}"
+  compose up -d --build --scale "pindrel=${1:-2}"
   p=$(port)
   printf 'aguardando o gateway'
   for _ in $(seq 1 60); do

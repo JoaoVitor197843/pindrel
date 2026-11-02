@@ -50,7 +50,7 @@
   bind:this={button}
   type="button"
   {onclick}
-  aria-label="Logo do Plany"
+  aria-label="Logo do Pindrel"
   class="flex size-9 shrink-0 cursor-default items-center justify-center rounded-lg bg-accent font-serif text-xl select-none [-webkit-tap-highlight-color:transparent]"
 >
   P

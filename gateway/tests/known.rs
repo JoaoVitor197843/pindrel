@@ -10,7 +10,7 @@ use std::{
 };
 
 use common::*;
-use plany_gateway::{
+use pindrel_gateway::{
     discovery::{Lan, Server},
     proto,
     server::{self, Running},
@@ -21,7 +21,7 @@ static N: AtomicU32 = AtomicU32::new(0);
 
 fn temp_file() -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "plany-known-test-{}-{}",
+        "pindrel-known-test-{}-{}",
         std::process::id(),
         N.fetch_add(1, Ordering::Relaxed)
     ));
@@ -35,7 +35,7 @@ fn loopback_lan() -> Lan {
 }
 
 async fn gw(file: Option<PathBuf>, interval: Duration, lan: Lan) -> Running {
-    let mut cfg = plany_gateway::config::Config::new(vec!["127.0.0.1:1".parse().unwrap()]);
+    let mut cfg = pindrel_gateway::config::Config::new(vec!["127.0.0.1:1".parse().unwrap()]);
     cfg.port = 0;
     cfg.mdns = false; // the registry is fed by hand: what the network announced
     cfg.known_file = file;
@@ -205,7 +205,7 @@ async fn without_a_known_local_network_nothing_is_ever_tried() {
     let backend = Backend::start("other").await;
     let file = temp_file();
     std::fs::write(&file, proto::discovered_servers(&[other(backend.addr.port())])).unwrap();
-    let mut cfg = plany_gateway::config::Config::new(vec!["127.0.0.1:1".parse().unwrap()]);
+    let mut cfg = pindrel_gateway::config::Config::new(vec!["127.0.0.1:1".parse().unwrap()]);
     cfg.port = 0;
     cfg.mdns = false;
     cfg.known_file = Some(file);

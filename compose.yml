@@ -1,9 +1,9 @@
 # RAM budget (see CLAUDE.md "Project priorities"): hard ceiling 512 MB, recommended 256 MB
 # per instance, database included. The two limits below add up to the recommended 256 MB.
-# The API is stateless: scale `plany` behind a load balancer; each replica keeps its own
+# The API is stateless: scale `pindrel` behind a load balancer; each replica keeps its own
 # ceiling (the Postgres service is shared).
 services:
-  plany:
+  pindrel:
     build:
       context: .
       dockerfile: Dockerfile
@@ -19,12 +19,12 @@ services:
     environment:
       # port inside the container is fixed; ${PORT} above only picks the host port
       - PORT=8080
-      - SERVER_NAME=${SERVER_NAME:-Plany}
+      - SERVER_NAME=${SERVER_NAME:-Pindrel}
       - DB_USER=${DB_USER:-dev}
       - DB_PASSWORD=${DB_PASSWORD:?DB_PASSWORD is required (set it in .env)}
       - DB_HOST=${DB_HOST:-postgres}
       - DB_PORT=${DB_PORT:-5432}
-      - DB_NAME=${DB_NAME:-plany}
+      - DB_NAME=${DB_NAME:-pindrel}
       - SSL_MODE=${SSL_MODE:-disable}
       - JWT_SECRET=${JWT_SECRET:?JWT_SECRET is required (set it in .env)}
       - JWT_ACCESS_EXPIRY=${JWT_ACCESS_EXPIRY:-15m}
@@ -63,7 +63,7 @@ services:
         -c max_parallel_workers_per_gather=0
         -c autovacuum_max_workers=2
     environment:
-      POSTGRES_DB: ${DB_NAME:-plany}
+      POSTGRES_DB: ${DB_NAME:-pindrel}
       POSTGRES_USER: ${DB_USER:-dev} # if you want other username in your database change this
       POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required (set it in .env)}
     ports:

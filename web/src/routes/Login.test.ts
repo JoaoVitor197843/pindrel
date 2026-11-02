@@ -155,14 +155,14 @@ describe('Login — seletor de servidor', () => {
     expect(selection.selected.address).toBe(window.location.host)
   })
 
-  it('"+ Adicionar servidor..." fecha o menu e avisa o usuário', async () => {
+  it('"+ Adicionar servidor..." fecha o menu e abre a janela de adicionar', async () => {
     render(Login)
     await openMenu()
 
     await click(screen.getByRole('menuitem', { name: '+ Adicionar servidor...' }))
 
     expect(screen.queryByRole('menu')).toBeNull()
-    expect(screen.getByRole('status').textContent).toContain('Adicionar servidor chega em breve.')
+    expect(screen.getByRole('dialog', { name: 'Adicionar servidor' })).toBeTruthy()
   })
 
   it('clicar fora ou apertar Escape fecha o menu', async () => {
@@ -303,7 +303,7 @@ describe('Login — address of the server', () => {
   it('the footer and the menu show the LAN address when the gateway tells it', async () => {
     viewport.set(1200)
     vi.mocked(fetch).mockImplementation(
-      async () => new Response(null, { status: 200, headers: { 'x-plany-address': '192.168.1.163:8086' } }),
+      async () => new Response(null, { status: 200, headers: { 'x-pindrel-address': '192.168.1.163:8086' } }),
     )
     render(Login)
     expect(await screen.findByText(/192\.168\.1\.163:8086/)).toBeTruthy()
@@ -322,7 +322,7 @@ describe('Login — the address does not flash the wrong one', () => {
     await vi.waitFor(() => expect(answer).toBeTypeOf('function'))
     expect(screen.getByText(/Rodando em:/).textContent).toContain('…')
     expect(screen.queryByText(new RegExp(selection.selected.address.replace('.', '\\.')))).toBeNull()
-    answer(new Response(null, { status: 200, headers: { 'x-plany-address': '192.168.1.163:8086' } }))
+    answer(new Response(null, { status: 200, headers: { 'x-pindrel-address': '192.168.1.163:8086' } }))
     expect(await screen.findByText(/192\.168\.1\.163:8086/)).toBeTruthy()
   })
 })

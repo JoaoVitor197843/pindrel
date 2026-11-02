@@ -1,12 +1,12 @@
-# Plany
+# Pindrel
 
 **Um workspace de notas self-hosted que cabe em 256 MB de RAM.**
 
-O Plany é um espaço de notas e organização no estilo Notion que você roda no seu próprio servidor (um Raspberry Pi, um homelab, uma VPS ou a sua máquina) e no celular, com controle total sobre os seus dados. Ele foi pensado como os jogos de consoles antigos: tem um **orçamento de memória** e cada recurso precisa caber nele, sem abrir mão de funcionalidade nem de segurança.
+O Pindrel é um espaço de notas e organização no estilo Notion que você roda no seu próprio servidor (um Raspberry Pi, um homelab, uma VPS ou a sua máquina) e no celular, com controle total sobre os seus dados. Ele foi pensado como os jogos de consoles antigos: tem um **orçamento de memória** e cada recurso precisa caber nele, sem abrir mão de funcionalidade nem de segurança.
 
 > **Estado atual: alpha.** Hoje funcionam a autenticação, o gateway (balanceamento, limites por IP e anúncio na rede) e a descoberta de servidores no app. **Notas, cofre e sincronização ainda estão em desenvolvimento**, então não há uma versão estável para uso diário.
 
-## Por que o Plany
+## Por que o Pindrel
 
 - **Leve de propósito.** Meta de no máximo **512 MB de RAM** e recomendado de **256 MB**, contando tudo, inclusive o banco de dados. Num Raspberry Pi 4, cada réplica da API usa cerca de 60 MB e o gateway cerca de 1,6 MB.
 - **O app funciona sozinho.** O aplicativo (Android, iOS, Windows, macOS e Linux, feito em Flutter) guarda as notas no próprio aparelho e não precisa de servidor. O servidor só entra para nuvem e sincronização, e é opcional.
@@ -16,15 +16,15 @@ O Plany é um espaço de notas e organização no estilo Notion que você roda n
 
 ## Baixar
 
-Cada versão fica na página de **[Releases](https://github.com/JoaoVitor197843/plany/releases)**, com um arquivo `.sha256` ao lado de cada download:
+Cada versão fica na página de **[Releases](https://github.com/JoaoVitor197843/pindrel/releases)**, com um arquivo `.sha256` ao lado de cada download:
 
 | Arquivo | O que é |
 | --- | --- |
-| `plany_<versão>_android.apk` | app Android |
-| `plany-app_<versão>_windows_amd64.zip` | app Windows (descompacte e execute `Plany.exe`) |
-| `plany-app_<versão>_macos_universal.zip` | app macOS (Apple Silicon e Intel) |
-| `plany-app_<versão>_linux_amd64.tar.gz` | app Linux |
-| `plany-gateway_<versão>_linux_amd64.tar.gz` e `..._arm64.tar.gz` | gateway para Linux (x86_64 e Raspberry Pi de 64 bits) |
+| `pindrel_<versão>_android.apk` | app Android |
+| `pindrel-app_<versão>_windows_amd64.zip` | app Windows (descompacte e execute `Pindrel.exe`) |
+| `pindrel-app_<versão>_macos_universal.zip` | app macOS (Apple Silicon e Intel) |
+| `pindrel-app_<versão>_linux_amd64.tar.gz` | app Linux |
+| `pindrel-gateway_<versão>_linux_amd64.tar.gz` e `..._arm64.tar.gz` | gateway para Linux (x86_64 e Raspberry Pi de 64 bits) |
 
 Os apps **ainda não são assinados**: o Windows mostra o aviso do SmartScreen na primeira execução ("Mais informações" e "Executar assim mesmo"), e o macOS pede para abrir pelo menu de contexto (botão direito em "Abrir"). No Android, é preciso permitir a instalação de fontes desconhecidas.
 
@@ -43,10 +43,10 @@ O contrato de mensagens entre as partes fica em [`shared/protos/`](./shared/prot
 
 Na tela de login, os dois clientes têm uma aba superior para escolher (e, no futuro, adicionar) um servidor:
 
-- **Mobile:** descobre sozinho, por mDNS (`_plany._tcp`), os servidores da rede atual (com o plugin `nsd` no Android, iOS e macOS, e com um cliente mDNS próprio no Linux e no Windows) e sorteia um deles, testando se ele responde antes de entrar. A lista acompanha a rede **ao vivo**. Se o servidor escolhido sai da rede, ele **não some**: continua escolhido, a bolinha ao lado do nome passa de verde para vermelha, e ele aparece em "Desconectados". Quando volta, a bolinha volta a ser verde. Com o app em segundo plano, a busca é pausada.
+- **Mobile:** descobre sozinho, por mDNS (`_pindrel._tcp`), os servidores da rede atual (com o plugin `nsd` no Android, iOS e macOS, e com um cliente mDNS próprio no Linux e no Windows) e sorteia um deles, testando se ele responde antes de entrar. A lista acompanha a rede **ao vivo**. Se o servidor escolhido sai da rede, ele **não some**: continua escolhido, a bolinha ao lado do nome passa de verde para vermelha, e ele aparece em "Desconectados". Quando volta, a bolinha volta a ser verde. Com o app em segundo plano, a busca é pausada.
 - **Web:** o servidor padrão **é sempre o embutido** (o mesmo que serve a página). Como navegadores não fazem mDNS, a lista dos outros servidores da rede vem do **gateway**, em `GET /server/discover/`. A aba da web ainda não foi implementada.
 
-**mDNS e gateway:** quem anuncia o servidor na rede é o **gateway**, e não cada instância da API. Ele anuncia só na interface da rede local, resolve conflito de nomes (`Plany`, `Plany (2)`...), avisa quando sai e, como o Wi-Fi perde muitos pacotes multicast, refaz a busca de tempos em tempos e **lembra** dos servidores já vistos. Sem o gateway (um `docker compose up` simples) não há anúncio na rede. O mDNS só funciona com o gateway na **rede do host**: um container em rede bridge não enxerga a LAN.
+**mDNS e gateway:** quem anuncia o servidor na rede é o **gateway**, e não cada instância da API. Ele anuncia só na interface da rede local, resolve conflito de nomes (`Pindrel`, `Pindrel (2)`...), avisa quando sai e, como o Wi-Fi perde muitos pacotes multicast, refaz a busca de tempos em tempos e **lembra** dos servidores já vistos. Sem o gateway (um `docker compose up` simples) não há anúncio na rede. O mDNS só funciona com o gateway na **rede do host**: um container em rede bridge não enxerga a LAN.
 
 ### API stateless
 
@@ -67,8 +67,8 @@ A API é **explicitamente stateless**, para poder rodar atrás de um load balanc
 Pré-requisitos: Docker e Docker Compose instalados.
 
 ```bash
-git clone https://github.com/JoaoVitor197843/plany.git
-cd plany
+git clone https://github.com/JoaoVitor197843/pindrel.git
+cd pindrel
 cp .env.example .env
 # edite o .env: DB_PASSWORD e JWT_SECRET são obrigatórios
 docker compose up --build
@@ -76,12 +76,12 @@ docker compose up --build
 
 Isso sobe dois serviços:
 
-- `plany`: a API, que também serve o build da web em `http://localhost:8080`
+- `pindrel`: a API, que também serve o build da web em `http://localhost:8080`
 - `postgres`: o banco de dados (PostgreSQL 18)
 
 Por segurança, a senha do banco (`DB_PASSWORD`) e o segredo dos tokens (`JWT_SECRET`) **são obrigatórios e não têm valor padrão**: o compose não sobe enquanto não estiverem definidos no `.env`. Use valores longos e aleatórios (por exemplo, `openssl rand -base64 48`). As demais variáveis têm padrões seguros para uso inicial e podem ser ajustadas no mesmo arquivo. O banco é criado e atualizado sozinho: a API aplica as migrações ao iniciar.
 
-As imagens prontas (amd64 e arm64, também para Raspberry Pi) estão no Docker Hub: `joaovitor2753/plany` e `joaovitor2753/plany-gateway`.
+As imagens prontas (amd64 e arm64, também para Raspberry Pi) estão no Docker Hub: `joaovitor2753/pindrel` e `joaovitor2753/pindrel-gateway`.
 
 O `compose.yml` aplica o orçamento de RAM do projeto: 128 MB para a API e 128 MB para o Postgres (256 MB no total, o recomendado), com `GOMEMLIMIT=100MiB` na API. O Postgres só é publicado em `127.0.0.1`.
 
@@ -92,7 +92,7 @@ Para rodar o backend fora do Docker, copie também o exemplo dele: `cp backend/.
 Para rodar mais de uma instância da API com balanceamento, limite de requisições por IP e anúncio na rede, junte o overlay do gateway ao `compose.yml` (o `.env` continua obrigatório):
 
 ```bash
-docker compose -f compose.yml -f compose.lb.yml up -d --build --scale plany=2
+docker compose -f compose.yml -f compose.lb.yml up -d --build --scale pindrel=2
 ```
 
 O que muda com o overlay:
@@ -110,7 +110,7 @@ O desenvolvimento acontece num repositório próprio; **este repositório do Git
 
 Duas prioridades guiam as decisões do projeto:
 
-1. **Uso mínimo absoluto de RAM.** O Plany deve rodar em dispositivos fracos, como um Raspberry Pi ou um celular antigo, e o limite vale **por instância**. Na prática: bibliotecas pequenas, nada de manter dados inteiros em memória, conexões e picos de memória (como a derivação de chave) limitados. O espaço em disco importa bem menos que a RAM.
+1. **Uso mínimo absoluto de RAM.** O Pindrel deve rodar em dispositivos fracos, como um Raspberry Pi ou um celular antigo, e o limite vale **por instância**. Na prática: bibliotecas pequenas, nada de manter dados inteiros em memória, conexões e picos de memória (como a derivação de chave) limitados. O espaço em disco importa bem menos que a RAM.
 2. **Custo dividido entre cliente e servidor.** Nenhum lado deve receber todo o overhead por conta do outro. Onde ele é inevitável (segurança e criptografia), é o foco, com equilíbrio entre as partes.
 
 Todo componente novo nasce com testes automatizados, inclusive os que tentam quebrar o sistema de propósito: inundação de requisições, corpos enormes, entradas hostis e uso descuidado (toques repetidos, textos vazios ou gigantes).
@@ -126,7 +126,7 @@ O [`CLAUDE.md`](./CLAUDE.md) reúne o detalhamento técnico (arquitetura, conven
 
 ## Licença
 
-O Plany é software livre, licenciado sob a **GNU Affero General Public License, versão 3** (`AGPL-3.0-only`: somente essa versão). Na prática: você pode usar, estudar, modificar e redistribuir o Plany; se rodar uma versão modificada como serviço acessível pela rede, precisa oferecer o código-fonte dela aos usuários desse serviço.
+O Pindrel é software livre, licenciado sob a **GNU Affero General Public License, versão 3** (`AGPL-3.0-only`: somente essa versão). Na prática: você pode usar, estudar, modificar e redistribuir o Pindrel; se rodar uma versão modificada como serviço acessível pela rede, precisa oferecer o código-fonte dela aos usuários desse serviço.
 
 O texto completo está em [LICENSE](./LICENSE).
 

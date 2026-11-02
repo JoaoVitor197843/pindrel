@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// mDNS service type that the Plany gateway announces (`_plany._tcp`).
-const plannyServiceType = '_plany._tcp';
+/// mDNS service type that the Pindrel gateway announces (`_pindrel._tcp`).
+const plannyServiceType = '_pindrel._tcp';
 
-/// Plany server found on the local network.
+/// Pindrel server found on the local network.
 class DiscoveredServer {
   const DiscoveredServer({
     required this.name,

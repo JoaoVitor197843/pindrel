@@ -60,7 +60,7 @@ jobs:
         run: |
           $tag = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME } else { 'ci' }
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path 'mobile/build/windows/x64/runner/Release/*' -DestinationPath "dist/plany-app_${tag}_windows_amd64.zip"
+          Compress-Archive -Path 'mobile/build/windows/x64/runner/Release/*' -DestinationPath "dist/pindrel-app_${tag}_windows_amd64.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -98,7 +98,7 @@ jobs:
       # the file name promises both architectures: fail loudly if the build is not universal
       - name: Conferir as arquiteturas
         run: |
-          archs=$(lipo -archs build/macos/Build/Products/Release/Plany.app/Contents/MacOS/Plany)
+          archs=$(lipo -archs build/macos/Build/Products/Release/Pindrel.app/Contents/MacOS/Pindrel)
           echo "arquiteturas: $archs"
           case "$archs" in "x86_64 arm64"|"arm64 x86_64") ;; *) echo "o app não é universal"; exit 1 ;; esac
 
@@ -107,7 +107,7 @@ jobs:
         run: |
           case "$GITHUB_REF" in refs/tags/v*) tag=$GITHUB_REF_NAME ;; *) tag=ci ;; esac
           mkdir -p dist
-          ditto -c -k --keepParent mobile/build/macos/Build/Products/Release/Plany.app "dist/plany-app_${tag}_macos_universal.zip"
+          ditto -c -k --keepParent mobile/build/macos/Build/Products/Release/Pindrel.app "dist/pindrel-app_${tag}_macos_universal.zip"
 
       - uses: actions/upload-artifact@v4
         with:

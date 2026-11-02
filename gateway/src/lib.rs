@@ -1,4 +1,4 @@
-//! Plany gateway: the single front-facing process of a deployment (see CLAUDE.md).
+//! Pindrel gateway: the single front-facing process of a deployment (see CLAUDE.md).
 pub mod clientip;
 pub mod config;
 pub mod discovery;

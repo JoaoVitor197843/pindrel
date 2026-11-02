@@ -49,7 +49,7 @@ Future<FakeDiscovery> pumpApp(
         randomProvider.overrideWithValue(FixedRandom(0)),
         serverProbeProvider.overrideWithValue(probe ?? (_) async => true),
       ],
-      child: home == null ? const PlanyApp() : MaterialApp(home: home),
+      child: home == null ? const PindrelApp() : MaterialApp(home: home),
     ),
   );
   await tester.pump(); // delivers the discovery's first list
@@ -355,7 +355,7 @@ void main() {
         find.text('Entre para continuar de onde você parou.'),
         findsOneWidget,
       );
-      expect(find.text('→ Rodando em: plany.casa.local:8080'), findsOneWidget);
+      expect(find.text('→ Rodando em: pindrel.casa.local:8080'), findsOneWidget);
       expect(find.text('SELF-HOSTED'), findsNWidgets(2));
     });
 
@@ -885,7 +885,7 @@ void main() {
         await pumpApp(tester, width: 1300);
 
         expect(
-          find.text('→ Rodando em: plany.casa.local:8080'),
+          find.text('→ Rodando em: pindrel.casa.local:8080'),
           findsOneWidget,
         );
         expect(footerDot(tester).color, AppColors.accentBorder);
@@ -901,7 +901,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.text('→ Desconectado de: plany.casa.local:8080'),
+          find.text('→ Desconectado de: pindrel.casa.local:8080'),
           findsOneWidget,
         );
         expect(find.textContaining('Rodando em'), findsNothing);
@@ -936,7 +936,7 @@ void main() {
         ); // ~80% of a 12 pt text
         final gap =
             tester
-                .getTopLeft(find.text('→ Rodando em: plany.casa.local:8080'))
+                .getTopLeft(find.text('→ Rodando em: pindrel.casa.local:8080'))
                 .dx -
             tester.getTopRight(dotBox).dx;
         expect(gap, 10);

@@ -14,7 +14,7 @@ export interface ServerInfo {
   registrationEnabled: boolean;
 }
 
-/** Plany servers found on the local network (answer of GET /server/discover/, built by the gateway). */
+/** Pindrel servers found on the local network (answer of GET /server/discover/, built by the gateway). */
 export interface DiscoveredServer {
   name: string;
   host: string;

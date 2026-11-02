@@ -1,12 +1,12 @@
 [package]
-name = "plany-gateway"
+name = "pindrel-gateway"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-only"
-description = "Front-facing process of a Plany deployment: load balancer, rate limiter and mDNS announcer/discovery"
+description = "Front-facing process of a Pindrel deployment: load balancer, rate limiter and mDNS announcer/discovery"
 
 [lib]
-name = "plany_gateway"
+name = "pindrel_gateway"
 path = "src/lib.rs"
 
 [[bin]]

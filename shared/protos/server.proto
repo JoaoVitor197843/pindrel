@@ -9,7 +9,7 @@ message ServerInfo {
   bool registration_enabled = 2;
 }
 
-// Plany servers found on the local network (answer of GET /server/discover/, built by the gateway).
+// Pindrel servers found on the local network (answer of GET /server/discover/, built by the gateway).
 message DiscoveredServer {
   string name = 1;
   string host = 2;

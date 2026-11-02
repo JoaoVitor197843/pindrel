@@ -1,10 +1,10 @@
-# Plany — Mobile
+# Pindrel — Mobile
 
-Aplicativo mobile (e desktop) do Plany, construído em Flutter. É **autossuficiente**: guarda e cifra tudo no dispositivo e funciona sem nenhum servidor. A API Go serve apenas para nuvem e sincronização, e é opcional.
+Aplicativo mobile (e desktop) do Pindrel, construído em Flutter. É **autossuficiente**: guarda e cifra tudo no dispositivo e funciona sem nenhum servidor. A API Go serve apenas para nuvem e sincronização, e é opcional.
 
 ## Prioridades do projeto
 
-1. **Uso mínimo absoluto de RAM.** O Plany deve rodar em dispositivos fracos, como um Raspberry Pi antigo ou um celular antigo. Meta: **teto máximo de 512 MB de RAM** e **recomendado de 256 MB**, contando tudo o que é necessário para rodar, inclusive o banco de dados. O limite vale **por instância**; com load balancer, cada instância da API segue o mesmo teto individualmente. Na prática: preferir bibliotecas pequenas, evitar manter dados inteiros em memória, limitar conexões e picos de memória (por exemplo, derivação de chave).
+1. **Uso mínimo absoluto de RAM.** O Pindrel deve rodar em dispositivos fracos, como um Raspberry Pi antigo ou um celular antigo. Meta: **teto máximo de 512 MB de RAM** e **recomendado de 256 MB**, contando tudo o que é necessário para rodar, inclusive o banco de dados. O limite vale **por instância**; com load balancer, cada instância da API segue o mesmo teto individualmente. Na prática: preferir bibliotecas pequenas, evitar manter dados inteiros em memória, limitar conexões e picos de memória (por exemplo, derivação de chave).
 2. **Custo dividido entre cliente e servidor.** Nenhum lado deve receber todo o overhead por conta do outro. Onde o overhead é inevitável (segurança e criptografia), ele é o foco, mas com equilíbrio entre as partes.
 
 ## Stack
@@ -84,7 +84,7 @@ fvm flutter run -d linux   # ou -d windows / -d macos
 
 O app não depende de servidor nem de arquivo `.env` (não há `.env.example` no mobile).
 
-Na tela de login, uma aba superior permite adicionar um servidor novo, quando aplicável. Por padrão o app escolhe aleatoriamente um dos servidores disponíveis na rede atual, descobertos por mDNS (`_plany._tcp`). O serviço anunciado é o que está na linha de frente, ou seja, o load balancer quando houver, e não cada instância da API. As bibliotecas já estão instaladas, mas a descoberta ainda não está implementada.
+Na tela de login, uma aba superior permite adicionar um servidor novo, quando aplicável. Por padrão o app escolhe aleatoriamente um dos servidores disponíveis na rede atual, descobertos por mDNS (`_pindrel._tcp`). O serviço anunciado é o que está na linha de frente, ou seja, o load balancer quando houver, e não cada instância da API. As bibliotecas já estão instaladas, mas a descoberta ainda não está implementada.
 
 O app não tem plataforma web: os alvos são Android, iOS, Linux, macOS e Windows.
 

@@ -136,7 +136,7 @@ describe('selection.watchHealth', () => {
 
 describe('LAN address of the server', () => {
   const withHeader = (value: string | null) =>
-    vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 200, headers: value === null ? {} : { 'x-plany-address': value } }))
+    vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 200, headers: value === null ? {} : { 'x-pindrel-address': value } }))
 
   it('the page shows the address the gateway says the LAN uses', async () => {
     withHeader('192.168.1.163:8086')
@@ -197,7 +197,7 @@ describe('address before the first answer', () => {
     await selection.check()
     expect(selection.shownAddress).toBe(embedded.address)
     vi.mocked(fetch).mockImplementation(
-      async () => new Response(null, { status: 200, headers: { 'x-plany-address': '192.168.1.163:8086' } }),
+      async () => new Response(null, { status: 200, headers: { 'x-pindrel-address': '192.168.1.163:8086' } }),
     )
     await selection.check()
     expect(selection.shownAddress).toBe('192.168.1.163:8086')

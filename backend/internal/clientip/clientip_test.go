@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"plany/internal/clientip"
+	"pindrel/internal/clientip"
 )
 
 func resolver(t *testing.T, trusted, header string) *clientip.Resolver {

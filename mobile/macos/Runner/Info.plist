@@ -29,10 +29,10 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>O Plany procura na rede local os servidores Plany disponíveis.</string>
+	<string>O Pindrel procura na rede local os servidores Pindrel disponíveis.</string>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_plany._tcp</string>
+		<string>_pindrel._tcp</string>
 	</array>
 </dict>
 </plist>

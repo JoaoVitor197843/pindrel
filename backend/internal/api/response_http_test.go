@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"plany/internal/api"
-	"plany/internal/api/dto"
+	"pindrel/internal/api"
+	"pindrel/internal/api/dto"
 
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/proto"

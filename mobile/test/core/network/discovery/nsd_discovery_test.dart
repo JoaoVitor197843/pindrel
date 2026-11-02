@@ -43,7 +43,7 @@ class FakeNsdApi implements NsdApi {
     nsd.ServiceStatus.found,
     nsd.Service(
       name: name,
-      type: '_plany._tcp',
+      type: '_pindrel._tcp',
       host: host,
       port: port,
       addresses: [for (final ip in ips) InternetAddress(ip)],
@@ -53,7 +53,7 @@ class FakeNsdApi implements NsdApi {
 
   void lost(String name) => listener!(
     nsd.ServiceStatus.lost,
-    nsd.Service(name: name, type: '_plany._tcp'),
+    nsd.Service(name: name, type: '_pindrel._tcp'),
   );
 }
 
@@ -130,9 +130,9 @@ void main() {
     },
   );
 
-  test('procura _plany._tcp e já emite a lista vazia', () async {
+  test('procura _pindrel._tcp e já emite a lista vazia', () async {
     await listen();
-    expect(api.type, '_plany._tcp');
+    expect(api.type, '_pindrel._tcp');
     expect(api.starts, 1);
     expect(emitted, [<DiscoveredServer>[]]);
   });
@@ -142,7 +142,7 @@ void main() {
     () async {
       await listen();
       api.found(
-        'Plany',
+        'Pindrel',
         host: 'raspberry-joao.local.',
         port: 8095,
         ips: ['192.168.1.116'],
@@ -150,7 +150,7 @@ void main() {
       await settle();
       expect(emitted.last, [
         const DiscoveredServer(
-          name: 'Plany',
+          name: 'Pindrel',
           host: 'raspberry-joao',
           addresses: ['192.168.1.116'],
           port: 8095,

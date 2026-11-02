@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"plany/internal/api/dto"
-	"plany/internal/middleware"
+	"pindrel/internal/api/dto"
+	"pindrel/internal/middleware"
 
 	"google.golang.org/protobuf/proto"
 )

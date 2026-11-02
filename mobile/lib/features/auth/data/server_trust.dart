@@ -62,7 +62,7 @@ enum Trust {
 class ServerTrust {
   ServerTrust(this._store);
 
-  static const storageKey = 'plany.servers';
+  static const storageKey = 'pindrel.servers';
   static const maxRemembered = 64;
 
   final KeyValueStore _store;
