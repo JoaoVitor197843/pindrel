@@ -1,11 +1,11 @@
-// Package server exposes public information about this Plany instance.
+// Package server exposes public information about this Pindrel instance.
 package server
 
 import (
 	"net/http"
 
-	"plany/internal/api"
-	"plany/internal/api/dto"
+	"pindrel/internal/api"
+	"pindrel/internal/api/dto"
 )
 
 type Handler struct {

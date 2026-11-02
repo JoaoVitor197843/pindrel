@@ -84,7 +84,7 @@ jobs:
           for pair in x86_64-unknown-linux-musl:amd64 aarch64-unknown-linux-musl:arm64; do
             target=${pair%:*} arch=${pair#*:}
             cargo build --release --locked --target "$target"
-            tar -czf "/tmp/assets/plany-gateway_${GITHUB_REF_NAME}_linux_${arch}.tar.gz" \
+            tar -czf "/tmp/assets/pindrel-gateway_${GITHUB_REF_NAME}_linux_${arch}.tar.gz" \
               -C "target/$target/release" gateway
           done
 
@@ -121,7 +121,7 @@ jobs:
           flutter build linux --release \
             --build-name="${GITHUB_REF_NAME#v}" --build-number="$(git rev-list --count HEAD)"
           mkdir -p /tmp/assets
-          tar -czf "/tmp/assets/plany-app_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
+          tar -czf "/tmp/assets/pindrel-app_${GITHUB_REF_NAME}_linux_amd64.tar.gz" \
             -C build/linux/x64/release/bundle .
 
       - name: Anexar à release
@@ -157,12 +157,12 @@ jobs:
         run: |
           [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] \
             || { echo "faltam os secrets ANDROID_KEYSTORE_BASE64 e ANDROID_KEYSTORE_PASSWORD"; exit 1; }
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/app/plany-release.jks
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > mobile/android/app/pindrel-release.jks
           {
             echo "storePassword=$ANDROID_KEYSTORE_PASSWORD"
             echo "keyPassword=$ANDROID_KEYSTORE_PASSWORD"
             echo "keyAlias=plany"
-            echo "storeFile=plany-release.jks"
+            echo "storeFile=pindrel-release.jks"
           } > mobile/android/key.properties
 
       - name: Compilar (APK)
@@ -173,14 +173,14 @@ jobs:
           flutter build apk --release \
             --build-name="${GITHUB_REF_NAME#v}" --build-number="$(git rev-list --count HEAD)"
           mkdir -p /tmp/assets
-          cp build/app/outputs/flutter-apk/app-release.apk "/tmp/assets/plany_${GITHUB_REF_NAME}_android.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "/tmp/assets/pindrel_${GITHUB_REF_NAME}_android.apk"
 
       # the build falls back to the debug key when key.properties is wrong; such an APK must never be released
       - name: Conferir a assinatura
         run: |
           apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n 1)
-          "$apksigner" verify --print-certs "/tmp/assets/plany_${GITHUB_REF_NAME}_android.apk" | tee /tmp/certs.txt
-          grep -q 'CN=Plany' /tmp/certs.txt
+          "$apksigner" verify --print-certs "/tmp/assets/pindrel_${GITHUB_REF_NAME}_android.apk" | tee /tmp/certs.txt
+          grep -q 'CN=Pindrel' /tmp/certs.txt
           ! grep -qi 'Android Debug' /tmp/certs.txt
 
       - name: Anexar à release
@@ -219,7 +219,7 @@ jobs:
           # 1.2.3 -> also 1.2; a pre-release (1.2.3-rc1) only gets its own tag
           extra=""
           case $version in *-*) ;; *) extra="${version%.*}" ;; esac
-          for name in plany plany-gateway; do
+          for name in pindrel pindrel-gateway; do
             docker buildx imagetools inspect "$REGISTRY/$OWNER/$name:$sha" >/dev/null 2>&1 \
               || { echo "não há imagem $name:$sha: rode o release.yml na main antes de marcar a versão"; exit 1; }
             for repo in "$REGISTRY/$OWNER/$name" "$DOCKERHUB_OWNER/$name"; do
@@ -251,14 +251,14 @@ jobs:
     timeout-minutes: 60
     continue-on-error: true
     env:
-      MIRROR_REPO: JoaoVitor197843/plany
+      MIRROR_REPO: JoaoVitor197843/pindrel
     steps:
       - uses: actions/checkout@v4
       - name: Windows e macOS (construídos no GitHub)
         run: |
           mkdir -p /tmp/assets
           sh .forgejo/scripts/github-assets.sh "$MIRROR_REPO" "$GITHUB_REF_NAME" /tmp/assets \
-            "plany-app_${GITHUB_REF_NAME}_windows_amd64.zip" "plany-app_${GITHUB_REF_NAME}_macos_universal.zip"
+            "pindrel-app_${GITHUB_REF_NAME}_windows_amd64.zip" "pindrel-app_${GITHUB_REF_NAME}_macos_universal.zip"
           sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.zip
 
   # The public downloads page is the GitHub release: it gets a copy of everything the Forgejo release holds (notes and
@@ -272,7 +272,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     env:
-      GH_REPO: JoaoVitor197843/plany
+      GH_REPO: JoaoVitor197843/pindrel
       GH_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
     steps:
       - uses: actions/checkout@v4

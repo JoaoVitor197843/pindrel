@@ -13,7 +13,7 @@ beforeEach(() => {
   selection.pendingChange = null
 })
 
-/** Plany gateways by host, with their id and name; anything else refuses the connection. */
+/** Pindrel gateways by host, with their id and name; anything else refuses the connection. */
 function network(table: Record<string, { id: string; name?: string } | 'web'>) {
   vi.mocked(fetch).mockImplementation((async (url: string, init?: RequestInit) => {
     const u = new URL(url)
@@ -22,7 +22,7 @@ function network(table: Record<string, { id: string; name?: string } | 'web'>) {
     if (init?.mode === 'no-cors') return new Response(null)
     if (entry === 'web') return new Response('<html></html>', { headers: { 'content-type': 'text/html' } })
     return new Response(ServerInfo.encode({ name: entry.name ?? 'Casa', registrationEnabled: true }).finish(), {
-      headers: { 'content-type': 'application/x-protobuf', 'x-plany-id': entry.id },
+      headers: { 'content-type': 'application/x-protobuf', 'x-pindrel-id': entry.id },
     })
   }) as typeof fetch)
 }
@@ -34,7 +34,7 @@ describe('adicionar', () => {
     const r = await m.add('casa.com', '')
     expect(r).toMatchObject({ ok: true, server: { name: 'Casa', url: 'http://casa.com', address: 'casa.com', serverId: 'aaa' } })
     expect(m.list).toHaveLength(1)
-    expect(JSON.parse(data.get('plany:manual-servers')!)).toHaveLength(1)
+    expect(JSON.parse(data.get('pindrel:manual-servers')!)).toHaveLength(1)
     expect(trustOf('Casa', 'aaa')).toBe('same')
     expect(new ManualServers().list).toEqual(m.list) // survives a reload
   })
@@ -51,11 +51,11 @@ describe('adicionar', () => {
   it('um servidor web comum, ou um que não responde, não é adicionado', async () => {
     network({ 'web.com': 'web' })
     const m = new ManualServers()
-    expect(await m.add('web.com', '')).toMatchObject({ ok: false, error: expect.stringContaining('não é um servidor Plany') })
+    expect(await m.add('web.com', '')).toMatchObject({ ok: false, error: expect.stringContaining('não é um servidor Pindrel') })
     expect(await m.add('fora.com', '')).toMatchObject({ ok: false, error: expect.stringContaining('Não foi possível conectar') })
     expect(await m.add('a b', '')).toMatchObject({ ok: false })
     expect(m.list).toEqual([])
-    expect(data.get('plany:manual-servers')).toBeUndefined()
+    expect(data.get('pindrel:manual-servers')).toBeUndefined()
   })
 
   it('recusa repetido, o mesmo servidor por outro endereço e a própria página', async () => {
@@ -124,7 +124,7 @@ describe('remover e carregar', () => {
     m.remove('http://a.com')
     m.remove('http://a.com') // twice: nothing happens
     expect(m.list).toEqual([])
-    expect(JSON.parse(data.get('plany:manual-servers')!)).toEqual([])
+    expect(JSON.parse(data.get('pindrel:manual-servers')!)).toEqual([])
     expect(m.health).toEqual({})
   })
 
@@ -136,7 +136,7 @@ describe('remover e carregar', () => {
     ['url com caminho', JSON.stringify([{ id: 'http://a.com/x', name: 'x', trustName: 'x', serverId: 'a', url: 'http://a.com/x', address: 'a.com' }])],
     ['nome vazio', JSON.stringify([{ id: 'http://a.com', name: '', trustName: 'x', serverId: 'a', url: 'http://a.com', address: 'a.com' }])],
   ])('armazenamento estragado (%s) vira lista vazia', (_, raw) => {
-    data.set('plany:manual-servers', raw)
+    data.set('pindrel:manual-servers', raw)
     expect(new ManualServers().list).toEqual([])
   })
 
@@ -270,7 +270,7 @@ describe('abrir um servidor adicionado', () => {
     const { option } = await added()
     vi.mocked(fetch).mockImplementation((async () => {
       const res = new Response(ServerInfo.encode({ name: 'Casa', registrationEnabled: true }).finish(), {
-        headers: { 'content-type': 'application/x-protobuf', 'x-plany-id': 'aaa' },
+        headers: { 'content-type': 'application/x-protobuf', 'x-pindrel-id': 'aaa' },
       })
       Object.defineProperty(res, 'url', { value: 'https://a.com/server/info/' })
       return res

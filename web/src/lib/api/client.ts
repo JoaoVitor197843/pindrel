@@ -1,4 +1,4 @@
-/** A response bigger than this is not from a Plany server: it is discarded without decoding. */
+/** A response bigger than this is not from a Pindrel server: it is discarded without decoding. */
 const MAX_BODY_BYTES = 64 * 1024
 
 export class ApiError extends Error {

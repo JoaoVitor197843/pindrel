@@ -6,10 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"plany/internal/auth"
-	"plany/internal/clientip"
-	"plany/internal/config"
-	AuthMiddleware "plany/internal/middleware"
+	"pindrel/internal/auth"
+	"pindrel/internal/clientip"
+	"pindrel/internal/config"
+	AuthMiddleware "pindrel/internal/middleware"
 )
 
 // infoFrom sends GET /server/info/ from `peer` with an X-Forwarded-For and returns the status.

@@ -49,11 +49,11 @@ const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", 
 /// The page of a server may be opened by `localhost` or a VPN address; this header on `GET /server/info/` tells
 /// the web the address the other devices of the LAN use. It is not sent when the request came through a declared
 /// proxy (a tunnel): those clients are not on the LAN and have no use for its private address.
-pub const ADDRESS_HEADER: &str = "x-plany-address";
+pub const ADDRESS_HEADER: &str = "x-pindrel-address";
 
 /// Also on `GET /server/info/`: the id of this server (see `identity`), which a client that remembers servers by id can
 /// read from the page it is on. Unlike the address it is harmless for anyone to see, so a tunnel gets it too.
-pub const ID_HEADER: &str = "x-plany-id";
+pub const ID_HEADER: &str = "x-pindrel-id";
 
 const HOP_BY_HOP: [&str; 8] = [
     "connection",
@@ -180,7 +180,7 @@ async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incom
                         p.headers.insert(ID_HEADER, v);
                     }
                     // Public and read-only, no credentials: a web page opened from another server may read it to check
-                    // that an address typed by the user is a Plany gateway. Only the id is exposed, never the address.
+                    // that an address typed by the user is a Pindrel gateway. Only the id is exposed, never the address.
                     p.headers
                         .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, header::HeaderValue::from_static("*"));
                     p.headers

@@ -1,9 +1,9 @@
-# Overlay: several stateless API replicas behind the Plany gateway (load balancer, per-IP rate
+# Overlay: several stateless API replicas behind the Pindrel gateway (load balancer, per-IP rate
 # limit, mDNS announcement and discovery of other servers on the LAN).
-#   docker compose -f compose.yml -f compose.lb.yml up -d --build --scale plany=2
+#   docker compose -f compose.yml -f compose.lb.yml up -d --build --scale pindrel=2
 # Extra RAM on top of the API replicas: the gateway, a few MB (16m cap).
 services:
-  plany:
+  pindrel:
     # loopback only, one port of the range per replica (up to 100 with --scale; widen both ranges for more)
     ports: !override
       - "127.0.0.1:9000-9099:8080"
@@ -28,7 +28,7 @@ services:
     pids_limit: 64
     environment:
       - GATEWAY_PORT=${PORT:-8080}
-      - SERVER_NAME=${SERVER_NAME:-Plany}
+      - SERVER_NAME=${SERVER_NAME:-Pindrel}
       - UPSTREAMS=127.0.0.1:9000-9099
       # behind a tunnel or proxy on this host (cloudflared, tailscale serve): TRUSTED_PROXIES=127.0.0.1,::1 in .env
       - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
@@ -38,7 +38,7 @@ services:
     volumes:
       - gateway-data:/data
     depends_on:
-      - plany
+      - pindrel
 
 volumes:
   gateway-data:

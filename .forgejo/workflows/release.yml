@@ -1,4 +1,4 @@
-# Release: on push to main, builds Plany's images (API + embedded web) and the gateway for amd64 and arm64
+# Release: on push to main, builds Pindrel's images (API + embedded web) and the gateway for amd64 and arm64
 # and publishes them to the Forgejo registry. The Raspberry Pi pulls them by itself (deploy/update.sh, systemd timer).
 #
 # - Runs on the PC's runner (label `build`): it has the host's Docker, RAM and CPU. The Pi compiles nothing.
@@ -107,13 +107,13 @@ jobs:
               -t "$REGISTRY/$OWNER/$1:$sha" -t "$REGISTRY/$OWNER/$1:latest" \
               -f "$3" "$2"
           }
-          build plany . Dockerfile
-          build plany-gateway gateway gateway/Dockerfile
+          build pindrel . Dockerfile
+          build pindrel-gateway gateway gateway/Dockerfile
           echo "publicado: $sha"
 
       - name: Conferir as duas arquiteturas no registry
         run: |
-          for name in plany plany-gateway; do
+          for name in pindrel pindrel-gateway; do
             docker buildx imagetools inspect "$REGISTRY/$OWNER/$name:latest" | tee /tmp/inspect.txt
             grep -q 'linux/amd64' /tmp/inspect.txt && grep -q 'linux/arm64' /tmp/inspect.txt
           done
@@ -127,7 +127,7 @@ jobs:
           [ -n "$DOCKERHUB_TOKEN" ] || { echo "falta o secret DOCKERHUB_TOKEN"; exit 1; }
           echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_OWNER" --password-stdin
           sha=$(git rev-parse --short=12 HEAD)
-          for name in plany plany-gateway; do
+          for name in pindrel pindrel-gateway; do
             docker buildx imagetools create \
               -t "$DOCKERHUB_OWNER/$name:$sha" -t "$DOCKERHUB_OWNER/$name:latest" \
               "$REGISTRY/$OWNER/$name:$sha"

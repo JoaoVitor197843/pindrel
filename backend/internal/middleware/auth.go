@@ -4,10 +4,10 @@ package middleware
 import (
 	"context"
 	"net/http"
-	"plany/internal/api"
-	"plany/internal/auth"
-	"plany/internal/database/db"
-	contextkeys "plany/pkg/context"
+	"pindrel/internal/api"
+	"pindrel/internal/auth"
+	"pindrel/internal/database/db"
+	contextkeys "pindrel/pkg/context"
 )
 
 func AuthMiddleware(secret string, repo *db.Queries, debugMode bool) func(http.Handler) http.Handler {

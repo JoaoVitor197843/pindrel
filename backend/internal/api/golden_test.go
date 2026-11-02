@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"plany/internal/api/dto"
+	"pindrel/internal/api/dto"
 
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/proto"

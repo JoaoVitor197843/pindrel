@@ -1,4 +1,4 @@
-// SVG art of the logo scenes, as in the reference prototype (docs/plany-easter-egg-prototype.html).
+// SVG art of the logo scenes, as in the reference prototype (docs/pindrel-easter-egg-prototype.html).
 // Static strings only: nothing here comes from user input.
 export const O='#e2862c',K='#0a0710';
 export const STAR = 'M0 -6 L1.6 -1.6 L6 0 L1.6 1.6 L0 6 L-1.6 1.6 L-6 0 L-1.6 -1.6Z';

@@ -19,7 +19,7 @@ Arquivos de teste vazios (placeholders) são ignorados pelo CI até terem conte�
 
 ## Orçamento de RAM do Raspberry Pi (3,8 GB)
 
-Serviços ligados: Forgejo, runner, Vaultwarden e (quando hospedado) o Plany. Ferramentas de
+Serviços ligados: Forgejo, runner, Vaultwarden e (quando hospedado) o Pindrel. Ferramentas de
 diagnóstico e utilitários (prometheus, grafana, cadvisor, node-exporter, portainer, homepage,
 it-tools, stirling-pdf) estão desligados e sem restart automático; os containers de sandbox
 (parados) foram mantidos.
@@ -31,7 +31,7 @@ it-tools, stirling-pdf) estão desligados e sem restart automático; os containe
 | Vaultwarden | 256 MiB | ~13 MiB |
 | Runner (daemon) | 128 MiB | ~16 MiB |
 | Job de CI (um por vez, `capacity: 1`) | 1536 MiB | pico 1,0–1,5 GB (inclui cache) |
-| **Plany** (API + Postgres) | **512 MiB teto** (recomendado 256: 128 + 128, como no `compose.yml`) | — |
+| **Pindrel** (API + Postgres) | **512 MiB teto** (recomendado 256: 128 + 128, como no `compose.yml`) | — |
 
 Soma dos limites: ~3,5 GB de 3,8 GB, com 2 GB de swap de rede de segurança. Se subir outro
 serviço, tire a folga daqui antes.
@@ -53,7 +53,7 @@ caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar e
 | `gateway` | PC (`build`, imagem `ci-pc:1`) | rustfmt, clippy, `cargo test` (o Pi não tem Rust) |
 | `mobile` | PC (`flutter`, imagem `ci-flutter:1` do PC) | `flutter analyze` e `flutter test` |
 | `release` / `prebuild` | PC (`build`, imagem `ci-docker:1`) | compila as imagens sem publicar, **enquanto os testes rodam**, para o cache do buildkit estar quente |
-| `release` / `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem; empurra as camadas já prontas para o registry do Forgejo e, por último, copia as imagens (mesmo digest) para o Docker Hub (`joaovitor2753/plany` e `plany-gateway`; secret `DOCKERHUB_TOKEN`) |
+| `release` / `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem; empurra as camadas já prontas para o registry do Forgejo e, por último, copia as imagens (mesmo digest) para o Docker Hub (`joaovitor2753/pindrel` e `pindrel-gateway`; secret `DOCKERHUB_TOKEN`) |
 
 Tudo roda no PC, em paralelo (`capacity: 4`). O runner do Pi (`ci`, `ci-flutter`) tem um slot só e era o gargalo:
 backend (~5 min) + web (~2 min) + mobile (~6 min) rodavam em fila, ~13 min no total; no PC cada um leva segundos a
@@ -111,15 +111,15 @@ Cada arquivo sobe com o seu `.sha256`. O build number do app é a contagem de co
 
 O Flutter não compila para Windows nem macOS a partir do runner Linux do PC, então esses dois saem do **GitHub Actions**
 (`.github/workflows/release-desktop.yml`; o Forgejo lê só `.forgejo/workflows`, o GitHub só `.github`). O repositório
-público `JoaoVitor197843/plany` é um **espelho de push** do Forgejo: ele leva só o git (branches e tags), nunca issues, PRs nem releases.
+público `JoaoVitor197843/pindrel` é um **espelho de push** do Forgejo: ele leva só o git (branches e tags), nunca issues, PRs nem releases.
 
 1. Em push na `main` que mexe no app: o GitHub só compila Windows, macOS e iOS (sem assinatura), para pegar quebra cedo.
-2. Em tag `v*`: o espelho leva a tag, o GitHub compila e publica `plany-app_<tag>_windows_amd64.zip` e `plany-app_<tag>_macos_universal.zip` numa release dele.
+2. Em tag `v*`: o espelho leva a tag, o GitHub compila e publica `pindrel-app_<tag>_windows_amd64.zip` e `pindrel-app_<tag>_macos_universal.zip` numa release dele.
 3. No Forgejo, o job `desktop` do `release-tag.yml` roda **depois** do `publish`, espera esses arquivos aparecerem (até 45 min cada) e os anexa à release (`github-assets.sh` + `release.sh upload`). Se o GitHub atrasar ou cair, só esse job falha (`continue-on-error`) e a release principal já está pública.
 4. Sem assinatura: o Windows mostra o SmartScreen na primeira execução, e o macOS exige "Abrir" pelo menu de contexto. O iOS só compila; sem conta Apple paga não há o que instalar.
 
 Configurar o espelho (uma vez, pelo navegador): Forgejo > repositório > Configurações > Repositório > **Espelhos de push**: URL
-`https://github.com/JoaoVitor197843/plany.git`, usuário `JoaoVitor197843` e, como senha, um token do GitHub **restrito a este repositório** (fine-grained, só *Contents: Read and write*). Marcar "sincronizar ao fazer commit".
+`https://github.com/JoaoVitor197843/pindrel.git`, usuário `JoaoVitor197843` e, como senha, um token do GitHub **restrito a este repositório** (fine-grained, só *Contents: Read and write*). Marcar "sincronizar ao fazer commit".
 
 Testes do script que baixa do GitHub: `sh .forgejo/scripts/test_github_assets.sh` (contra um GitHub falso, sem rede).
 
@@ -132,7 +132,7 @@ Windows e macOS já estão lá, vêm do próprio GitHub). O Forgejo continua sen
 porque criar uma release para uma tag inexistente faz o GitHub criar a tag a partir da branch padrão.
 
 Precisa do secret **`GH_RELEASE_TOKEN`** no Forgejo (Configurações > Actions > Secrets): um token do GitHub *fine-grained* restrito ao repositório
-`plany`, com **Contents: Read and write** (cobre releases e envio de arquivos). O nome não pode começar com `GITHUB_`. Se o secret faltar ou o GitHub cair,
+`pindrel`, com **Contents: Read and write** (cobre releases e envio de arquivos). O nome não pode começar com `GITHUB_`. Se o secret faltar ou o GitHub cair,
 só esse job falha (`continue-on-error`) e a release do Forgejo já está pública.
 
 Além de compilar, o GitHub **abre o app** em cada plataforma: `.github/workflows/smoke.yml` roda o teste de integração

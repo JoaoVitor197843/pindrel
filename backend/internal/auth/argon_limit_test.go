@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"plany/internal/api/dto"
-	"plany/internal/auth"
+	"pindrel/internal/api/dto"
+	"pindrel/internal/auth"
 )
 
 func resetArgon(t *testing.T) {

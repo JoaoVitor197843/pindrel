@@ -35,9 +35,9 @@ jobs:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_USER: plany
+          POSTGRES_USER: pindrel
           POSTGRES_PASSWORD: ci-only-password
-          POSTGRES_DB: plany
+          POSTGRES_DB: pindrel
     defaults:
       run:
         working-directory: backend
@@ -46,9 +46,9 @@ jobs:
       PORT: "8080"
       DB_HOST: postgres
       DB_PORT: "5432"
-      DB_USER: plany
+      DB_USER: pindrel
       DB_PASSWORD: ci-only-password
-      DB_NAME: plany
+      DB_NAME: pindrel
       SSL_MODE: disable
       JWT_SECRET: ci-only-secret-not-used-anywhere-else
       JWT_ACCESS_EXPIRY: 15m
@@ -95,7 +95,7 @@ jobs:
           echo "o Postgres não respondeu em 60 s"; exit 1
 
       - name: Aplicar as migrations (golang-migrate, o mesmo que a API usa ao iniciar)
-        run: migrate -path internal/database/migrations -database "postgres://plany:ci-only-password@postgres:5432/plany?sslmode=disable" up
+        run: migrate -path internal/database/migrations -database "postgres://pindrel:ci-only-password@postgres:5432/pindrel?sslmode=disable" up
 
       - name: Todos os testes, com banco
         run: go test ./... -count=1

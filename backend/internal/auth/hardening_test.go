@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"plany/internal/auth"
+	"pindrel/internal/auth"
 )
 
 // Stress: a corrupted/malformed hash string must return an error, never panic the request goroutine.

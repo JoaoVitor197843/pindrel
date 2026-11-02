@@ -232,7 +232,7 @@ class PluginMdnsApi implements MdnsApi {
       ResourceRecordQuery.text(instance),
       timeout,
     )).firstOrNull;
-    // "Plany._plany._tcp.local" -> "Plany"
+    // "Pindrel._pindrel._tcp.local" -> "Pindrel"
     final name = instance.endsWith('.$domain')
         ? instance.substring(0, instance.length - domain.length - 1)
         : instance;

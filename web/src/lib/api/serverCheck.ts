@@ -1,9 +1,9 @@
 import { ServerInfo } from '../../types/shared/protos/server'
 
 /**
- * Checks an address typed by the user: is there a Plany gateway behind it? The gateway lets any page read
+ * Checks an address typed by the user: is there a Pindrel gateway behind it? The gateway lets any page read
  * `GET /server/info/` (CORS `*`, only the id exposed), which is how a page opened from another server can tell a real
- * Plany from any web server that happens to answer.
+ * Pindrel from any web server that happens to answer.
  */
 
 export const MAX_INPUT_LENGTH = 300
@@ -63,7 +63,7 @@ export type Inspection =
 /**
  * Why it failed, as far as a browser lets us know. `blocked`: something answers but the page may not read it (CORS,
  * which is what an older gateway does); `timeout`: no answer in time; `unreachable`: refused, unknown name, or an
- * https certificate the browser does not trust; `invalid`: it answered and is not a Plany gateway.
+ * https certificate the browser does not trust; `invalid`: it answered and is not a Pindrel gateway.
  */
 export type Failure = 'invalid' | 'blocked' | 'timeout' | 'unreachable'
 
@@ -114,7 +114,7 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array | null
 }
 
 /**
- * Asks `origin` who it is. `invalid`: it answered but is not a Plany gateway (wrong status or type, body that is not
+ * Asks `origin` who it is. `invalid`: it answered but is not a Pindrel gateway (wrong status or type, body that is not
  * a `ServerInfo`, no id, a redirect to another host); `unreachable`: no answer at all.
  */
 export async function inspect(origin: string, signal?: AbortSignal): Promise<Inspection> {
@@ -145,7 +145,7 @@ export async function inspect(origin: string, signal?: AbortSignal): Promise<Ins
       }
       final = got
     }
-    const id = res.headers.get('x-plany-id') ?? ''
+    const id = res.headers.get('x-pindrel-id') ?? ''
     if (res.status !== 200 || !res.headers.get('content-type')?.startsWith('application/x-protobuf') || !SERVER_ID.test(id)) {
       return { ok: false, reason: 'invalid' }
     }
@@ -206,7 +206,7 @@ export function errorText(r: Extract<FindResult, { ok: false }>): string {
     case 'mixed':
       return 'Esta página usa https e o navegador bloqueia servidores http. Use o endereço https do servidor.'
     case 'invalid-server':
-      return `${r.host} respondeu, mas não é um servidor Plany (gateway) válido.`
+      return `${r.host} respondeu, mas não é um servidor Pindrel (gateway) válido.`
     case 'blocked':
       return `${r.host} respondeu, mas o navegador não deixou a página ler a resposta (CORS). Provavelmente o gateway desse servidor é de uma versão antiga: atualize-o.`
     case 'timeout':

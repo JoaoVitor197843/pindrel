@@ -13,7 +13,7 @@ const body = (name = 'Casa') => ServerInfo.encode({ name, registrationEnabled: t
 function reply(over: { status?: number; type?: string | null; id?: string | null; bytes?: Uint8Array; url?: string } = {}) {
   const headers = new Headers()
   if (over.type !== null) headers.set('content-type', over.type ?? 'application/x-protobuf')
-  if (over.id !== null) headers.set('x-plany-id', over.id ?? 'abc123')
+  if (over.id !== null) headers.set('x-pindrel-id', over.id ?? 'abc123')
   const res = new Response((over.bytes ?? body()) as BodyInit, { status: over.status ?? 200, headers })
   if (over.url) Object.defineProperty(res, 'url', { value: over.url })
   return res

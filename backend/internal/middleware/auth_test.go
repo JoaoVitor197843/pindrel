@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"plany/internal/api/dto"
-	"plany/internal/auth"
-	"plany/internal/middleware"
+	"pindrel/internal/api/dto"
+	"pindrel/internal/auth"
+	"pindrel/internal/middleware"
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
