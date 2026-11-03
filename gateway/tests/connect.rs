@@ -415,6 +415,11 @@ async fn the_page_tells_whose_machine_it_is_and_what_it_does_not_do() {
     assert!(body.contains("<details class=\"choice\" id=\"web\" name=\"conexao\">\n<summary>Vou usar no navegador"));
     assert!(body.contains("<details class=\"choice\" id=\"app\" name=\"conexao\">\n<summary>Tenho o app Pindrel"));
     assert!(!body.contains("class=\"choice\" open"));
+    // the trust check has a time limit: a port that drops packets must not leave "Verificando..." on screen for minutes
+    assert!(
+        body.contains("AbortController") && body.contains("abort()"),
+        "the trust check needs a timeout"
+    );
     assert!(
         body.contains("prefers-reduced-motion: no-preference"),
         "motion must respect the system setting"
