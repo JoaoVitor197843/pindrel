@@ -495,5 +495,10 @@ async fn the_app_choice_leads_with_the_six_digits_and_keeps_the_qr_as_a_second_w
     assert!(body.contains("/server/pair/sas") && body.contains("textContent") && body.contains("clearInterval"));
     assert!(!body.contains("innerHTML"), "what the server sends is shown as text");
     assert!(body.contains("Nenhum aparelho está pareando agora"));
+    // a device that already trusts the server is sent to HTTPS, but not while somebody is pairing: the numbers are here
+    assert!(
+        body.contains("Há um aparelho pareando agora") && body.contains("pairing"),
+        "the redirect must wait for a pairing"
+    );
     gw.shutdown().await;
 }

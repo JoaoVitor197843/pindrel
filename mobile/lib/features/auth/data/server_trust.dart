@@ -18,17 +18,20 @@ class MemoryKeyValueStore implements KeyValueStore {
   Future<void> write(String key, String value) async => data[key] = value;
 }
 
-/// On the device's secure storage. A device where it does not work (no keyring) simply remembers nothing.
+/// On the device's secure storage. By default a device where it does not work (no keyring) simply remembers nothing; with
+/// [throwOnError] the failure is passed on, so something else (see `DurableKeyValueStore`) can take over.
 class SecureKeyValueStore implements KeyValueStore {
-  const SecureKeyValueStore([this._storage = const FlutterSecureStorage()]);
+  const SecureKeyValueStore([this._storage = const FlutterSecureStorage(), this.throwOnError = false]);
 
   final FlutterSecureStorage _storage;
+  final bool throwOnError;
 
   @override
   Future<String?> read(String key) async {
     try {
       return await _storage.read(key: key);
     } catch (_) {
+      if (throwOnError) rethrow;
       return null;
     }
   }
@@ -38,6 +41,7 @@ class SecureKeyValueStore implements KeyValueStore {
     try {
       await _storage.write(key: key, value: value);
     } catch (_) {
+      if (throwOnError) rethrow;
       // nothing is remembered; nobody is warned, which is how it was
     }
   }

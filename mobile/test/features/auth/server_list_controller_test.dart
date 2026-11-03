@@ -738,6 +738,31 @@ void main() {
       expect(controller.current.available.map((s) => s.name), ['Casa']);
     });
 
+    test('o nome dado pela pessoa aparece, mas o servidor continua lembrado pelo nome que ele anuncia', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      build(trust: trust, initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      await flush();
+      await controller.completePairing(ServerOption.fromPaired(paired('10.0.0.1:8443').withLabel('Sala de estar')));
+      expect(controller.current.selected?.name, 'Sala de estar');
+      expect(trust.trustOf('Casa', 'aaa'), Trust.same);
+      expect(trust.trustOf('Sala de estar', 'aaa'), Trust.unknown);
+      expect(controller.current.available.single.name, 'Sala de estar', reason: 'the announced one takes the given name');
+      discovery.emit([server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      expect(controller.current.available.single.name, 'Sala de estar', reason: 'and keeps it when the list is refreshed');
+    });
+
+    test('limpar o nome: controle, espaços repetidos e tamanho', () {
+      expect(cleanLabel('  a\u0000b\n\tc   d  '), 'a b c d');
+      expect(cleanLabel(''), '');
+      expect(cleanLabel('   '), '');
+      expect(cleanLabel('x' * 100).length, PairingCode.maxNameLength);
+      expect(cleanLabel('${'x' * 63}  y'), 'x' * 63, reason: 'cut at the limit, no trailing space');
+      expect(paired('1.2.3.4:8443').withLabel('Meu').shownName, 'Meu');
+      expect(paired('1.2.3.4:8443').shownName, 'Casa');
+    });
+
     testWidgets('um armazenamento que nunca responde não impede a lista de aparecer (depois do limite)', (tester) async {
       discovery = FakeDiscovery(sampleServers);
       controller = ServerListController(discovery: discovery, paired: _HangingStore());

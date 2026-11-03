@@ -157,10 +157,18 @@ class ServerListController {
   bool _isTrusted(String name, String id) =>
       _trust == null || _trust.trustOf(name, id) == Trust.same;
 
+  ServerOption _withGivenName(ServerOption d) {
+    for (final m in _manual) {
+      if (m.id == d.id && m.name != m.trustName) return d.withName(m.name);
+    }
+    return d;
+  }
+
   /// The list the screen shows: what the network announces, then the paired servers it does not.
   void _rebuild() {
     _available = [
-      ..._discovered,
+      // an announced server the person has named keeps the name they gave it
+      for (final d in _discovered) _withGivenName(d),
       for (final m in _manual)
         if (!_discovered.any((d) => d.id == m.id || d.address == m.address))
           m,
@@ -173,7 +181,7 @@ class ServerListController {
     await _ready;
     final trusted = server.withTrusted(true);
     final trust = _trust;
-    if (trust != null) await trust.remember(trusted.name, trusted.serverId);
+    if (trust != null) await trust.remember(trusted.trustName, trusted.serverId);
     _manual = [
       for (final m in _manual)
         if (m.id != trusted.id) m,

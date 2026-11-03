@@ -6,6 +6,10 @@ import '../../../../core/network/discovery/server_discovery.dart';
 import '../../../../core/network/pairing.dart';
 import '../../../../core/network/server_probe.dart';
 import '../../../../core/network/server_security.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../../data/durable_store.dart';
 import '../../data/secure_paired_store.dart';
 import '../../data/server_list_controller.dart';
 import '../../data/server_trust.dart';
@@ -20,14 +24,23 @@ final serverDiscoveryProvider = Provider<ServerDiscovery>(
 /// function.
 final serverProbeProvider = Provider<ServerProbe>((ref) => httpServerProbe);
 
-/// Where the servers the user opened are remembered. Tests swap it for a memory store.
+/// Where what the device remembers lives: the secure storage, and a file of the app's own when that does not work (a Linux
+/// keyring that is locked). Tests swap it for a memory store.
+final keyValueStoreProvider = Provider<KeyValueStore>(
+  (ref) => DurableKeyValueStore(
+    const SecureKeyValueStore(FlutterSecureStorage(), true),
+    FileKeyValueStore(getApplicationSupportDirectory),
+  ),
+);
+
+/// Where the servers the user opened are remembered.
 final serverTrustProvider = Provider<ServerTrust>(
-  (ref) => ServerTrust(const SecureKeyValueStore()),
+  (ref) => ServerTrust(ref.watch(keyValueStoreProvider)),
 );
 
 /// Where the servers this device paired with are kept (their CA, trusted for that server only).
 final pairedStoreProvider = Provider<PairedStore>(
-  (ref) => SecurePairedStore(const SecureKeyValueStore()),
+  (ref) => SecurePairedStore(ref.watch(keyValueStoreProvider)),
 );
 
 /// How a server's TLS port is found, and how the digits pairing runs. Tests swap them for fakes.

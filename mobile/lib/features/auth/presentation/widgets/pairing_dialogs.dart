@@ -151,18 +151,27 @@ mixin _FlowHost<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 
   void onBegin() {}
 
+  /// The name the person gave the server, if the screen asks for one.
+  String givenName() => '';
+
   void _changed() {
     final f = flow;
     if (f == null || !mounted) return;
     if (f.state.phase == FlowPhase.paired && !_closed) {
       _closed = true;
-      final paired = f.state.paired!;
       final controller = ref.read(serverListControllerProvider);
-      unawaited(
-        controller.completePairing(ServerOption.fromPaired(paired)).then((_) {
-          if (mounted) Navigator.of(context).pop(true);
-        }),
-      );
+      final store = ref.read(pairedStoreProvider);
+      final label = givenName();
+      unawaited(() async {
+        var paired = f.state.paired!;
+        if (label.isNotEmpty) {
+          // the name the person gave it is kept with the pairing
+          paired = paired.withLabel(label);
+          await store.save(paired);
+        }
+        await controller.completePairing(ServerOption.fromPaired(paired));
+        if (mounted) Navigator.of(context).pop(true);
+      }());
     }
     onChanged(f.state);
     setState(() {});
@@ -283,7 +292,8 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
           body: [
             Text(
               'Abra a página de conexão do servidor (no navegador, em '
-              'http://${server.address}/) ou veja o registro do gateway. '
+              'http://${server.address}/server/connect/?ficar) ou, se você já usa o Pindrel no navegador, '
+              'o botão "Parear um aparelho" da tela de login. '
               'Confira se os números abaixo são os mesmos que aparecem lá.',
               style: _muted,
             ),
@@ -369,6 +379,7 @@ class AddServerDialog extends ConsumerStatefulWidget {
 
   static const title = 'Adicionar servidor';
   static const addressLabel = 'Endereço do servidor';
+  static const nameLabel = 'Nome do servidor (opcional)';
   static const codeLabel = 'Código de 6 dígitos (obrigatório)';
 
   @override
@@ -378,6 +389,7 @@ class AddServerDialog extends ConsumerStatefulWidget {
 class _AddServerDialogState extends ConsumerState<AddServerDialog>
     with _FlowHost<AddServerDialog> {
   final _address = TextEditingController();
+  final _name = TextEditingController();
   final _code = TextEditingController();
   String? _addressError;
   String? _codeError;
@@ -386,8 +398,12 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
   int _lastWrong = 0;
 
   @override
+  String givenName() => cleanLabel(_name.text);
+
+  @override
   void dispose() {
     _address.dispose();
+    _name.dispose();
     _code.dispose();
     super.dispose();
   }
@@ -460,6 +476,20 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
         ),
         const SizedBox(height: 14),
         TextField(
+          key: const ValueKey('server-name-field'),
+          controller: _name,
+          enabled: !locked,
+          maxLength: PairingCode.maxNameLength,
+          textInputAction: TextInputAction.next,
+          style: const TextStyle(color: AppColors.text),
+          decoration: const InputDecoration(
+            labelText: AddServerDialog.nameLabel,
+            hintText: 'Se vazio, usa o nome que o servidor informa',
+            counterText: '',
+          ),
+        ),
+        const SizedBox(height: 14),
+        TextField(
           key: const ValueKey('pairing-code-field'),
           controller: _code,
           enabled: showing,
@@ -506,7 +536,13 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
         ],
         if (showing) ...[
           const SizedBox(height: 14),
-          _Countdown(until: state!.prompt!.expiresAt, total: sasConfirmTimeout),
+          Text(
+            'Servidor encontrado: ${state!.prompt!.name} (${state.prompt!.hostPort})',
+            key: const ValueKey('found-server'),
+            style: _muted,
+          ),
+          const SizedBox(height: 10),
+          _Countdown(until: state.prompt!.expiresAt, total: sasConfirmTimeout),
         ],
         if (noTls) ...[
           const SizedBox(height: 14),
