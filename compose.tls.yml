@@ -1,0 +1,26 @@
+# Overlay: HTTPS with the gateway's own certificate authority (no domain, no account, nothing to buy).
+#   docker compose -f compose.yml -f compose.lb.yml -f compose.tls.yml up -d --build --scale pindrel=2
+# The gateway creates a CA and its server certificate on the first start (kept in the `gateway-data` volume: keep it, or
+# every paired device has to pair again), serves HTTP/1.1, HTTP/2 and HTTP/3 on TLS_PORT and turns the plain port into a
+# page that explains how to connect securely (see CLAUDE.md, "TLS"). Open http://<this machine>:${PORT:-8080}/ to start.
+services:
+  gateway:
+    build:
+      context: ./gateway
+      args:
+        # cargo features of the gateway: HTTPS + HTTP/3 + its own CA. (They need a C compiler for `ring`: amd64 builds
+        # work; cross-building arm64 for the Raspberry Pi from another machine does not yet, build it on the Pi.)
+        FEATURES: http3,selfcert
+    # 1000 open WebSockets measured 28 MiB; the default 16m of compose.lb.yml is for a gateway without TLS
+    mem_limit: 48m
+    memswap_limit: 48m
+    environment:
+      - TLS_PORT=${TLS_PORT:-8443}
+      - TLS_AUTO=true
+      - TLS_DIR=/data/tls
+      # names or addresses to add to the certificate (a domain of your own, a second address); comma-separated
+      - TLS_SANS=${TLS_SANS:-}
+      # redirect: the plain port only serves the connection page; full: as without TLS
+      - HTTP_MODE=${HTTP_MODE:-redirect}
+      # origins, besides the server's own, whose pages may open a WebSocket (comma-separated)
+      - WS_ALLOWED_ORIGINS=${WS_ALLOWED_ORIGINS:-}
