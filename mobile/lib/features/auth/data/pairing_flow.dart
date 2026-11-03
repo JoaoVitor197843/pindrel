@@ -142,7 +142,13 @@ class PairingFlow extends ChangeNotifier {
     if (base.scheme == 'https') {
       offer = TlsOffer(port: base.port);
     } else {
-      offer = await offerFor(base);
+      try {
+        offer = await offerFor(base);
+      } on ServerLookupFailed catch (e) {
+        // nothing answered, or what answered is not a Pindrel server: not the same as a server without HTTPS
+        if (!_stopped) _set(_state.copy(phase: FlowPhase.failed, failure: e.reason));
+        return;
+      }
     }
     if (_stopped) return;
     if (offer == null) {

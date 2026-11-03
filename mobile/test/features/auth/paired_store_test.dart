@@ -101,6 +101,15 @@ void main() {
 
     Uri base(HttpServer s) => Uri.parse('http://127.0.0.1:${s.port}');
 
+    Future<PairingFailure?> lookupFailure(Uri uri, {Duration timeout = const Duration(seconds: 2)}) async {
+      try {
+        await fetchTlsOffer(uri, timeout: timeout);
+        return null;
+      } on ServerLookupFailed catch (e) {
+        return e.reason;
+      }
+    }
+
     test('lê a porta segura e o id que o servidor anuncia', () async {
       final s = await serve({tlsHeader: '8443', idHeader: 'a1b2c3'});
       addTearDown(() => s.close(force: true));
@@ -108,35 +117,58 @@ void main() {
       expect((offer!.port, offer.serverId), (8443, 'a1b2c3'));
     });
 
-    test('sem o cabeçalho, ou com um valor que não é porta, não há oferta', () async {
+    test('um servidor Pindrel sem lado seguro, ou com um valor que não é porta, não oferece HTTPS (e não é erro)', () async {
       for (final value in ['', 'abc', '0', '-1', '65536', '99999999999', '8.4']) {
-        final s = await serve({tlsHeader: value});
+        final s = await serve({tlsHeader: value, idHeader: 'a1b2c3'});
         expect(await fetchTlsOffer(base(s)), isNull, reason: '"$value"');
         await s.close(force: true);
       }
-      final none = await serve({});
-      expect(await fetchTlsOffer(base(none)), isNull);
-      await none.close(force: true);
+      final plain = await serve({idHeader: 'a1b2c3'});
+      expect(await fetchTlsOffer(base(plain)), isNull);
+      await plain.close(force: true);
     });
 
-    test('um id esquisito é ignorado, a porta vale', () async {
-      final s = await serve({tlsHeader: '8443', idHeader: 'x y/<script>'});
+    test('o que responde mas não é um servidor Pindrel (um site, outro programa) não é "sem HTTPS": é "não é Pindrel"', () async {
+      // no id header, whatever else it says; or an error page; or a redirect that leads nowhere useful
+      for (final (headers, status) in <(Map<String, String>, int)>[
+        ({}, 200),
+        ({tlsHeader: '8443'}, 200), // a port without the id: it is not a gateway
+        ({idHeader: 'a1b2c3'}, 404),
+        ({idHeader: 'a1b2c3'}, 500),
+        ({idHeader: ''}, 200),
+        ({idHeader: 'x y/<script>'}, 200),
+        ({idHeader: 'a' * 65}, 200),
+        ({'server': 'gws', 'content-type': 'text/html'}, 404),
+      ]) {
+        final s = await serve(headers, status: status);
+        expect(await lookupFailure(base(s)), PairingFailure.notPindrel, reason: '$headers $status');
+        await s.close(force: true);
+      }
+    });
+
+    test('um servidor de verdade que não é o Pindrel (resposta HTML grande) também não é', () async {
+      final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      s.listen((req) async {
+        req.response.headers.contentType = ContentType.html;
+        req.response.write('<html>${'x' * 200000}</html>');
+        await req.response.close();
+      });
       addTearDown(() => s.close(force: true));
-      final offer = await fetchTlsOffer(base(s));
-      expect(offer!.port, 8443);
-      expect(offer.serverId, isEmpty);
+      expect(await lookupFailure(base(s)), PairingFailure.notPindrel);
     });
 
-    test('servidor mudo, recusando ou fora do ar: null, sem exceção e sem esperar para sempre', () async {
-      final mute = await serve({tlsHeader: '8443'}, delay: const Duration(seconds: 5));
+    test('ninguém na porta, ou mudo: "sem resposta", sem exceção solta e sem esperar para sempre', () async {
+      final mute = await serve({tlsHeader: '8443', idHeader: 'abc'}, delay: const Duration(seconds: 5));
       final sw = Stopwatch()..start();
-      expect(await fetchTlsOffer(base(mute), timeout: const Duration(milliseconds: 300)), isNull);
+      expect(await lookupFailure(base(mute), timeout: const Duration(milliseconds: 300)), PairingFailure.unreachable);
       expect(sw.elapsed, lessThan(const Duration(seconds: 3)));
       await mute.close(force: true);
       final closed = await serve({});
       final gone = base(closed);
       await closed.close(force: true);
-      expect(await fetchTlsOffer(gone), isNull);
+      expect(await lookupFailure(gone), PairingFailure.unreachable);
+      // a name that does not exist is the same: nobody answered
+      expect(await lookupFailure(Uri.parse('http://nome-que-nao-existe.invalid:8080')), PairingFailure.unreachable);
     });
   });
 }

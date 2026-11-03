@@ -286,4 +286,58 @@ void main() {
       expect(f.state.phase, FlowPhase.cancelled);
     });
   });
+
+  group('o endereço não é um servidor Pindrel, ou não responde', () {
+    PairingFlow lookup(Object error) => PairingFlow(
+          base: Uri.parse('http://google.com:80'),
+          mode: FlowMode.type,
+          room: '4821',
+          store: MemoryPairedStore(),
+          pairer: FakePairer(['123456']).call,
+          offerFor: (_) async => throw error,
+        );
+
+    test('"não é Pindrel" não vira "sem HTTPS": é uma falha dita como tal, sem tentar parear', () async {
+      final p = FakePairer(['123456']);
+      final f = PairingFlow(
+        base: Uri.parse('http://google.com:80'),
+        mode: FlowMode.type,
+        room: '4821',
+        store: MemoryPairedStore(),
+        pairer: p.call,
+        offerFor: (_) async => throw const ServerLookupFailed(PairingFailure.notPindrel),
+      )..start();
+      await until(f, FlowPhase.failed);
+      expect(f.state.failure, PairingFailure.notPindrel);
+      expect(f.state.phase, isNot(FlowPhase.noTls));
+      expect(p.calls, 0);
+    });
+
+    test('sem resposta é "sem resposta"', () async {
+      final f = lookup(const ServerLookupFailed(PairingFailure.unreachable))..start();
+      await until(f, FlowPhase.failed);
+      expect(f.state.failure, PairingFailure.unreachable);
+    });
+
+    test('e só um servidor Pindrel que não oferece HTTPS cai em "sem HTTPS"', () async {
+      final f = flow(FakePairer(['123456']), offer: null)..start();
+      await until(f, FlowPhase.noTls);
+    });
+
+    test('fechar a tela antes de a resposta chegar não muda nada depois', () async {
+      final slow = Completer<TlsOffer?>();
+      final f = PairingFlow(
+        base: Uri.parse('http://google.com:80'),
+        mode: FlowMode.type,
+        room: '4821',
+        store: MemoryPairedStore(),
+        pairer: FakePairer(['123456']).call,
+        offerFor: (_) => slow.future,
+      )..start();
+      f.cancel();
+      slow.completeError(const ServerLookupFailed(PairingFailure.notPindrel));
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(f.state.phase, FlowPhase.cancelled);
+    });
+  });
 }

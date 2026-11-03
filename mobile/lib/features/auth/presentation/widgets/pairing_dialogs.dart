@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/network/pairing.dart';
+import '../../../../core/network/server_security.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../data/pairing_flow.dart';
@@ -28,10 +29,12 @@ String pairingFailureText(PairingFailure reason) => switch (reason) {
     'Esse código de sala não existe (mais): pode ter vencido, ter sido digitado errado ou já ter outro aparelho. Gere um novo na página do servidor.',
   PairingFailure.badCode =>
     'O código mestre foi recusado, ou este servidor não provou conhecê-lo. Ele vale uma vez e pode já ter sido trocado: veja a linha mais recente "código mestre" no registro (log) do gateway.',
+  PairingFailure.notPindrel =>
+    'Esse endereço respondeu, mas não parece ser um servidor Pindrel (pode ser um site ou outro programa). Confira o endereço e a porta.',
   PairingFailure.fingerprintMismatch ||
   PairingFailure.notACertificate ||
   PairingFailure.protocol =>
-    'Este servidor respondeu algo inesperado. Ele pode ser de outra versão do Pindrel.',
+    'Esse endereço respondeu algo que o Pindrel não entende. Pode ser outro tipo de servidor, ou uma versão diferente do Pindrel.',
 };
 
 ButtonStyle _primary() => FilledButton.styleFrom(
@@ -251,6 +254,9 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
   /// Whether the server has a secure side (`null` while asking).
   bool? _tls;
 
+  /// Why the server could not even be asked (it did not answer, or is not a Pindrel server).
+  PairingFailure? _lookupFailure;
+
   @override
   void initState() {
     super.initState();
@@ -261,8 +267,12 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
     final base = widget.server.baseUri;
     if (base == null) return setState(() => _tls = false);
     if (base.scheme == 'https') return setState(() => _tls = true);
-    final offer = await ref.read(tlsOfferProvider)(base);
-    if (mounted) setState(() => _tls = offer != null);
+    try {
+      final offer = await ref.read(tlsOfferProvider)(base);
+      if (mounted) setState(() => _tls = offer != null);
+    } on ServerLookupFailed catch (e) {
+      if (mounted) setState(() => _lookupFailure = e.reason);
+    }
   }
 
   @override
@@ -319,6 +329,30 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
       ],
       actions: [cancel],
     );
+    if (_lookupFailure != null) {
+      return _frame(
+        title: title,
+        body: [Text(pairingFailureText(_lookupFailure!), style: _muted)],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Fechar', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          FilledButton(
+            autofocus: true,
+            style: _primary(),
+            onPressed: () {
+              setState(() {
+                _lookupFailure = null;
+                _tls = null;
+              });
+              unawaited(_checkTls());
+            },
+            child: const Text('Tentar de novo'),
+          ),
+        ],
+      );
+    }
     if (_tls == null) return loading;
     if (_tls == false) {
       return _frame(
@@ -531,6 +565,9 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
   String? _roomError;
   String? _codeError;
   bool _useMaster = false;
+
+  /// Asking whether the typed address is a Pindrel server at all.
+  bool _looking = false;
   int _lastRound = 0;
   int _lastWrong = 0;
 
@@ -564,7 +601,8 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
     _lastWrong = state.wrongTries;
   }
 
-  void _search() {
+  Future<void> _search() async {
+    if (_looking) return;
     final uri = parseServerAddress(_address.text);
     if (uri == null) {
       setState(
@@ -576,6 +614,24 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
     }
     _addressError = null;
     _roomError = null;
+    if (uri.scheme == 'http') {
+      // Is it a Pindrel server at all? Told before anything else is asked of the person (the codes below mean nothing for a
+      // site that is not one). A Pindrel server that has no HTTPS is told later, by the flow.
+      setState(() => _looking = true);
+      try {
+        await ref.read(tlsOfferProvider)(uri);
+      } on ServerLookupFailed catch (e) {
+        if (mounted) {
+          setState(() {
+            _looking = false;
+            _addressError = pairingFailureText(e.reason);
+          });
+        }
+        return;
+      }
+      if (!mounted) return;
+      setState(() => _looking = false);
+    }
     if (_useMaster) {
       if (parseMasterCode(_master.text) == null) {
         setState(() => _roomError = 'O código mestre tem 16 letras e números (XXXX-XXXX-XXXX-XXXX).');
@@ -601,11 +657,11 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
   Widget build(BuildContext context) {
     final state = flow?.state;
     final phase = state?.phase;
-    final searching = phase == FlowPhase.looking || phase == FlowPhase.renewing;
+    final searching = _looking || phase == FlowPhase.looking || phase == FlowPhase.renewing;
     final showing = phase == FlowPhase.showing;
     final failed = phase == FlowPhase.failed;
     final noTls = phase == FlowPhase.noTls;
-    final locked = flow != null && !failed && !noTls; // what was typed is fixed once the search started
+    final locked = _looking || (flow != null && !failed && !noTls); // what was typed is fixed once the search started
     return _frame(
       title: AddServerDialog.title,
       body: [
@@ -622,6 +678,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
             labelText: AddServerDialog.addressLabel,
             hintText: '192.168.1.5:8080',
             errorText: _addressError,
+            errorMaxLines: 4,
           ),
         ),
         const SizedBox(height: 14),
@@ -715,9 +772,11 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
             children: [
               const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
               const SizedBox(width: 12),
-              Text(
-                phase == FlowPhase.renewing ? 'Gerando novos números…' : 'Procurando o servidor…',
-                style: _muted,
+              Expanded(
+                child: Text(
+                  phase == FlowPhase.renewing ? 'Gerando novos números…' : 'Procurando o servidor…',
+                  style: _muted,
+                ),
               ),
             ],
           ),
