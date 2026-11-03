@@ -51,6 +51,8 @@ pub const TTL: Duration = Duration::from_secs(60);
 pub const ROOM_TTL: Duration = Duration::from_secs(180);
 /// Rooms open at the same time unless configured otherwise.
 pub const DEFAULT_ROOMS: usize = 6;
+/// Master codes good at the same time unless configured otherwise.
+pub const DEFAULT_MASTERS: usize = 6;
 /// Failed attempts (an unknown room code, a commitment that does not match, a wrong proof) before an address must wait.
 const MAX_FAILS: u8 = 3;
 const LOCKOUT: Duration = Duration::from_secs(300);
@@ -96,19 +98,22 @@ struct Room {
     session: Option<Session>,
 }
 
+/// One master code: 10 random bytes and when it was made. A hundred of them are a few kilobytes.
 struct Master {
     code: [u8; 10],
     born: Instant,
-    fails: u32,
 }
 
 struct State {
     rooms: Vec<Room>,
     /// Sessions that will be proven with the master code instead of compared.
     master_sessions: Vec<Session>,
-    master: Master,
-    /// A new master code the log has not shown yet.
-    notice: Option<String>,
+    /// Several codes are good at the same time (one per person who reads the log); each works once.
+    masters: Vec<Master>,
+    /// Wrong proofs from anyone since the codes were last all replaced.
+    master_fails: u32,
+    /// New master codes the log has not shown yet.
+    notices: Vec<String>,
     fails: HashMap<IpAddr, (u8, Instant)>,
 }
 
@@ -240,7 +245,6 @@ fn new_master(now: Instant) -> Master {
     Master {
         code: random::<10>(),
         born: now,
-        fails: 0,
     }
 }
 
@@ -277,24 +281,46 @@ impl State {
         self.master_sessions.retain(|s| now.duration_since(s.started) < TTL);
     }
 
-    fn rotate_master(&mut self, now: Instant) {
-        self.master = new_master(now);
-        self.master_sessions.clear();
-        self.notice = Some(master_text(&self.master.code));
+    /// Replaces one code (it was used, or is too old) and queues the new one for the log. The sessions waiting for a proof are
+    /// left alone: they belong to other people, and a session proves nothing without a code.
+    fn rotate_master(&mut self, i: usize, now: Instant) {
+        self.masters[i] = new_master(now);
+        self.notices.push(master_text(&self.masters[i].code));
+    }
+
+    fn rotate_all_masters(&mut self, now: Instant) {
+        for i in 0..self.masters.len() {
+            self.rotate_master(i, now);
+        }
+        self.master_fails = 0;
+    }
+
+    fn expire_masters(&mut self, now: Instant) {
+        for i in 0..self.masters.len() {
+            if now.duration_since(self.masters[i].born) >= MASTER_TTL {
+                self.rotate_master(i, now);
+            }
+        }
     }
 }
 
 impl Pairing {
     pub fn new(max_rooms: usize) -> Self {
+        Self::with_codes(max_rooms, DEFAULT_MASTERS)
+    }
+
+    /// `max_rooms` pages may pair at once, and `codes` master codes are good at the same time.
+    pub fn with_codes(max_rooms: usize, codes: usize) -> Self {
         let now = Instant::now();
-        let master = new_master(now);
+        let masters: Vec<Master> = (0..codes.max(1)).map(|_| new_master(now)).collect();
         Self {
             max_rooms: max_rooms.max(1),
             state: Mutex::new(State {
                 rooms: Vec::new(),
                 master_sessions: Vec::new(),
-                notice: Some(master_text(&master.code)),
-                master,
+                notices: masters.iter().map(|m| master_text(&m.code)).collect(),
+                masters,
+                master_fails: 0,
                 fails: HashMap::new(),
             }),
         }
@@ -438,9 +464,7 @@ impl Pairing {
             return Err(PairError::Locked);
         }
         st.expire(now);
-        if now.duration_since(st.master.born) >= MASTER_TTL {
-            st.rotate_master(now);
-        }
+        st.expire_masters(now);
         st.master_sessions.retain(|s| s.peer != ip);
         if st.master_sessions.len() >= MAX_MASTER_SESSIONS {
             return Err(PairError::Busy);
@@ -482,36 +506,42 @@ impl Pairing {
             return Err(PairError::Invalid);
         };
         let session = st.master_sessions.remove(at); // one try per session
-        let code = st.master.code;
-        let expected = master_proof(&code, b"pindrel-master-a", ca, &nonce_a, &session.nonce);
-        if !same(&expected, proof) {
+                                                     // Every live code is checked, whichever matches, and none is skipped once one does: the time taken does not say
+                                                     // which code (or how many) the app used.
+        let mut hit = None;
+        for (i, m) in st.masters.iter().enumerate() {
+            let expected = master_proof(&m.code, b"pindrel-master-a", ca, &nonce_a, &session.nonce);
+            if same(&expected, proof) && hit.is_none() {
+                hit = Some(i);
+            }
+        }
+        let Some(i) = hit else {
             st.fail(ip, now);
-            st.master.fails += 1;
-            if st.master.fails >= MASTER_MAX_FAILS {
-                st.rotate_master(now);
+            st.master_fails += 1;
+            if st.master_fails >= MASTER_MAX_FAILS {
+                st.rotate_all_masters(now);
             }
             return Err(PairError::Denied);
-        }
-        let answer = master_proof(&code, b"pindrel-master-s", ca, &nonce_a, &session.nonce);
-        st.rotate_master(now);
+        };
+        let answer = master_proof(&st.masters[i].code, b"pindrel-master-s", ca, &nonce_a, &session.nonce);
+        st.rotate_master(i, now); // this one only: the others are for other people
         Ok(answer)
     }
 
     // ---- the log -------------------------------------------------------------------------------------------------
 
-    /// Replaces an expired master code. Returns a code the log has not shown yet (the first one, a replacement), once.
-    pub fn tick(&self, now: Instant) -> Option<String> {
+    /// Replaces the master codes that are too old. Returns the codes the log has not shown yet (the first ones, replacements),
+    /// each only once.
+    pub fn tick(&self, now: Instant) -> Vec<String> {
         let mut st = self.state.lock().unwrap();
         st.expire(now);
-        if now.duration_since(st.master.born) >= MASTER_TTL {
-            st.rotate_master(now);
-        }
-        st.notice.take()
+        st.expire_masters(now);
+        std::mem::take(&mut st.notices)
     }
 
-    /// A master code that was created since the log last showed one.
-    pub fn take_notice(&self) -> Option<String> {
-        self.state.lock().unwrap().notice.take()
+    /// The master codes that were created since the log last showed any.
+    pub fn take_notices(&self) -> Vec<String> {
+        std::mem::take(&mut self.state.lock().unwrap().notices)
     }
 
     /// Rooms open right now (for the tests and the log).
@@ -521,10 +551,16 @@ impl Pairing {
         st.rooms.len()
     }
 
-    /// The current master code, for the tests of the protocol: what an administrator reads in the log.
+    /// The master codes that are good now, for the tests of the protocol: what an administrator reads in the log.
+    #[doc(hidden)]
+    pub fn masters_for_tests(&self) -> Vec<[u8; 10]> {
+        self.state.lock().unwrap().masters.iter().map(|m| m.code).collect()
+    }
+
+    /// The first one.
     #[doc(hidden)]
     pub fn master_for_tests(&self) -> [u8; 10] {
-        self.state.lock().unwrap().master.code
+        self.masters_for_tests()[0]
     }
 }
 
@@ -854,15 +890,15 @@ mod tests {
     #[test]
     fn the_master_code_works_once_and_a_new_one_takes_its_place() {
         let (p, t0) = (Pairing::default(), Instant::now());
-        assert!(p.take_notice().is_some(), "the first code is for the log");
-        assert!(p.take_notice().is_none(), "shown once");
+        assert_eq!(p.take_notices().len(), DEFAULT_MASTERS, "the first codes are for the log");
+        assert!(p.take_notices().is_empty(), "shown once");
         let old = p.master_for_tests();
         let (id, a, s) = master_session(&p, 5, t0);
         let proof = master_proof(&old, b"pindrel-master-a", &CA, &a, &s);
         p.master_finish(ip(5), id, a, &proof, &CA, t0).unwrap();
         let new = p.master_for_tests();
         assert_ne!(old, new);
-        assert_eq!(p.take_notice(), Some(master_text(&new)), "the replacement is for the log");
+        assert_eq!(p.take_notices(), vec![master_text(&new)], "only the replacement is for the log");
         // the old code is worthless now
         let (id, a, s) = master_session(&p, 6, t0);
         let proof = master_proof(&old, b"pindrel-master-a", &CA, &a, &s);
@@ -880,17 +916,18 @@ mod tests {
     }
 
     #[test]
-    fn five_wrong_master_proofs_from_anyone_replace_the_code() {
+    fn five_wrong_master_proofs_from_anyone_replace_every_code() {
         let (p, t0) = (Pairing::default(), Instant::now());
-        let _ = p.take_notice();
-        let original = p.master_for_tests();
+        let _ = p.take_notices();
+        let original = p.masters_for_tests();
         for i in 0..MASTER_MAX_FAILS as u8 {
             let phone = 10 + i; // different devices, so the per-address lock does not stop the count
             let (id, a, _) = master_session(&p, phone, t0);
             assert_eq!(p.master_finish(ip(phone), id, a, &[0u8; 32], &CA, t0), Err(PairError::Denied));
         }
-        assert_ne!(p.master_for_tests(), original);
-        assert!(p.take_notice().is_some(), "and the new one is for the log");
+        let now = p.masters_for_tests();
+        assert!(now.iter().all(|c| !original.contains(c)), "all of them are new");
+        assert_eq!(p.take_notices().len(), DEFAULT_MASTERS, "and all the new ones are for the log");
     }
 
     #[test]
@@ -913,14 +950,121 @@ mod tests {
     #[test]
     fn the_master_code_expires_and_is_replaced_by_the_clock() {
         let (p, t0) = (Pairing::default(), Instant::now());
-        let _ = p.take_notice();
-        let old = p.master_for_tests();
-        assert!(p.tick(t0 + MASTER_TTL - Duration::from_secs(1)).is_none());
-        let shown = p.tick(t0 + MASTER_TTL).expect("a new code is announced");
-        let new = p.master_for_tests();
-        assert_ne!(old, new);
-        assert_eq!(shown, master_text(&new));
-        assert!(p.tick(t0 + MASTER_TTL).is_none(), "announced once");
+        let _ = p.take_notices();
+        let old = p.masters_for_tests();
+        assert!(p.tick(t0 + MASTER_TTL - Duration::from_secs(1)).is_empty());
+        let shown = p.tick(t0 + MASTER_TTL);
+        let new = p.masters_for_tests();
+        assert!(new.iter().all(|c| !old.contains(c)));
+        assert_eq!(
+            shown,
+            new.iter().map(master_text).collect::<Vec<_>>(),
+            "every new code is announced"
+        );
+        assert!(p.tick(t0 + MASTER_TTL).is_empty(), "announced once");
+    }
+
+    #[test]
+    fn several_master_codes_are_good_at_once_each_works_once_and_the_others_stay() {
+        let (p, t0) = (Pairing::with_codes(6, 4), Instant::now());
+        let codes = p.masters_for_tests();
+        assert_eq!(codes.len(), 4);
+        assert_eq!(p.take_notices().len(), 4, "all four are for the log at the start");
+        let distinct: std::collections::HashSet<_> = codes.iter().collect();
+        assert_eq!(distinct.len(), 4, "they are different");
+        // four people, each with a code of their own, pair one after the other
+        for (n, code) in codes.iter().enumerate() {
+            let phone = 40 + n as u8;
+            let (id, a, s) = master_session(&p, phone, t0);
+            let proof = master_proof(code, b"pindrel-master-a", &CA, &a, &s);
+            let answer = p.master_finish(ip(phone), id, a, &proof, &CA, t0).unwrap();
+            assert_eq!(
+                answer,
+                master_proof(code, b"pindrel-master-s", &CA, &a, &s),
+                "the proof is for the code that was used"
+            );
+        }
+        // using a code replaced it and nothing else: the four new ones are different, and the log shows exactly those
+        let after = p.masters_for_tests();
+        assert!(after.iter().all(|c| !codes.contains(c)));
+        assert_eq!(p.take_notices().len(), 4);
+    }
+
+    #[test]
+    fn using_one_code_leaves_the_others_valid() {
+        let (p, t0) = (Pairing::with_codes(6, 3), Instant::now());
+        let codes = p.masters_for_tests();
+        let (id, a, s) = master_session(&p, 5, t0);
+        p.master_finish(ip(5), id, a, &master_proof(&codes[1], b"pindrel-master-a", &CA, &a, &s), &CA, t0)
+            .unwrap();
+        let now = p.masters_for_tests();
+        assert_eq!((now[0], now[2]), (codes[0], codes[2]), "the other two are untouched");
+        assert_ne!(now[1], codes[1]);
+        // and they still work, while the used one does not
+        for (phone, code, ok) in [(6u8, codes[0], true), (7, codes[2], true), (8, codes[1], false)] {
+            let (id, a, s) = master_session(&p, phone, t0);
+            let r = p.master_finish(ip(phone), id, a, &master_proof(&code, b"pindrel-master-a", &CA, &a, &s), &CA, t0);
+            assert_eq!(r.is_ok(), ok, "code {phone}");
+        }
+    }
+
+    #[test]
+    fn sessions_waiting_for_their_proof_survive_another_persons_pairing() {
+        let (p, t0) = (Pairing::with_codes(6, 2), Instant::now());
+        let codes = p.masters_for_tests();
+        let (slow_id, slow_a, slow_s) = master_session(&p, 5, t0); // somebody still typing their code
+        let (id, a, s) = master_session(&p, 6, t0);
+        p.master_finish(ip(6), id, a, &master_proof(&codes[0], b"pindrel-master-a", &CA, &a, &s), &CA, t0)
+            .unwrap();
+        let proof = master_proof(&codes[1], b"pindrel-master-a", &CA, &slow_a, &slow_s);
+        assert!(
+            p.master_finish(ip(5), slow_id, slow_a, &proof, &CA, t0).is_ok(),
+            "the slow one was not thrown out"
+        );
+    }
+
+    #[test]
+    fn a_code_that_is_none_of_them_is_refused_however_many_there_are() {
+        let (p, t0) = (Pairing::with_codes(6, 50), Instant::now());
+        let (id, a, s) = master_session(&p, 5, t0);
+        let wrong = master_proof(&[0xEE; 10], b"pindrel-master-a", &CA, &a, &s);
+        assert_eq!(p.master_finish(ip(5), id, a, &wrong, &CA, t0), Err(PairError::Denied));
+        // a proof made with the SERVER's tag instead of the app's is no code either
+        let (id, a, s) = master_session(&p, 6, t0);
+        let code = p.master_for_tests();
+        let mixed = master_proof(&code, b"pindrel-master-s", &CA, &a, &s);
+        assert_eq!(p.master_finish(ip(6), id, a, &mixed, &CA, t0), Err(PairError::Denied));
+    }
+
+    #[test]
+    fn the_codes_expire_one_by_one() {
+        let (p, t0) = (Pairing::with_codes(6, 3), Instant::now());
+        let _ = p.take_notices();
+        let codes = p.masters_for_tests();
+        // use one halfway through the day: it is replaced then, so it expires later than the other two
+        let half = t0 + MASTER_TTL / 2;
+        let (id, a, s) = master_session(&p, 5, half);
+        p.master_finish(ip(5), id, a, &master_proof(&codes[0], b"pindrel-master-a", &CA, &a, &s), &CA, half)
+            .unwrap();
+        let _ = p.take_notices();
+        let shown = p.tick(t0 + MASTER_TTL);
+        assert_eq!(shown.len(), 2, "only the two that are a day old are replaced");
+        assert_eq!(p.tick(t0 + MASTER_TTL + MASTER_TTL / 2 - Duration::from_secs(1)).len(), 0);
+        assert_eq!(p.tick(t0 + MASTER_TTL + MASTER_TTL / 2).len(), 1, "the one made halfway goes later");
+    }
+
+    #[test]
+    fn the_number_of_codes_is_at_least_one() {
+        assert_eq!(Pairing::with_codes(6, 0).masters_for_tests().len(), 1);
+    }
+
+    #[test]
+    fn a_hundred_codes_take_next_to_no_memory() {
+        // a code is 10 bytes and a time: the whole table is a few kilobytes, whatever the number
+        assert!(std::mem::size_of::<Master>() <= 32, "{}", std::mem::size_of::<Master>());
+        let p = Pairing::with_codes(6, 100);
+        assert_eq!(p.masters_for_tests().len(), 100);
+        assert_eq!(p.take_notices().len(), 100);
     }
 
     #[test]
