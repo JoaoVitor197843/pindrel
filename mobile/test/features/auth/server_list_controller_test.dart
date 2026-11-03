@@ -763,6 +763,99 @@ void main() {
       expect(paired('1.2.3.4:8443').shownName, 'Casa');
     });
 
+    test('retirar a confiança: esquece o pareamento e o nome, deixa de ser o escolhido e volta a pedir pareamento', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      final store = MemoryPairedStore();
+      await trust.remember('Casa', 'aaa');
+      await store.save(paired('10.0.0.1:8443'));
+      build(trust: trust, store: store, initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      await flush();
+      final casa = controller.current.available.single;
+      expect(casa.trusted, isTrue);
+      await controller.select(casa);
+      expect(controller.current.selected?.name, 'Casa');
+
+      await controller.revokeTrust(casa);
+      expect(controller.current.selected, isNull, reason: 'it is not the chosen one any more');
+      expect(controller.current.available.single.trusted, isFalse, reason: 'announced: stays, as a new server');
+      expect(trust.trustOf('Casa', 'aaa'), Trust.unknown);
+      expect(await store.all(), isEmpty, reason: 'its CA is forgotten');
+      expect(controller.isChanged(controller.current.available.single), isFalse);
+    });
+
+    test('retirar a confiança vale para sempre: um controlador novo sobre o mesmo armazenamento não confia', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      final store = MemoryPairedStore();
+      await trust.remember('Casa', 'aaa');
+      await store.save(paired('10.0.0.1:8443'));
+      build(trust: trust, store: store, initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      await flush();
+      await controller.revokeTrust(controller.current.available.single);
+      await controller.dispose();
+      final again = ServerListController(discovery: FakeDiscovery([server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]), trust: trust, paired: store);
+      addTearDown(again.dispose);
+      await flush();
+      await flush();
+      expect(again.current.available.single.trusted, isFalse);
+    });
+
+    test('um servidor só conhecido pelo pareamento (não anunciado) some ao retirar a confiança', () async {
+      final store = MemoryPairedStore();
+      await store.save(paired('192.168.1.50:8443', name: 'Sítio', id: 'sss'));
+      build(store: store, initial: const []);
+      await flush();
+      await flush();
+      final sitio = controller.current.available.single;
+      await controller.select(sitio);
+      expect(controller.current.selected?.name, 'Sítio');
+      await controller.revokeTrust(sitio);
+      expect(controller.current.available, isEmpty);
+      expect(controller.current.selected, isNull);
+      expect(await store.all(), isEmpty);
+    });
+
+    test('depois de retirar a confiança dá para parear de novo', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      final store = MemoryPairedStore();
+      await trust.remember('Casa', 'aaa');
+      await store.save(paired('10.0.0.1:8443'));
+      build(trust: trust, store: store, initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      await flush();
+      await controller.revokeTrust(controller.current.available.single);
+      await controller.completePairing(ServerOption.fromPaired(paired('10.0.0.1:8443')));
+      expect(controller.current.selected?.trusted, isTrue);
+      expect(trust.trustOf('Casa', 'aaa'), Trust.same);
+    });
+
+    test('retirar a confiança só do que se pediu: os outros continuam confiáveis', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      await trust.remember('Casa', 'aaa');
+      await trust.remember('Nuvem', 'nnn');
+      build(
+        trust: trust,
+        initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa'), server('Nuvem', addresses: ['10.0.0.9'], id: 'nnn')],
+      );
+      await flush();
+      await flush();
+      final casa = controller.current.available.firstWhere((s) => s.name == 'Casa');
+      await controller.revokeTrust(casa);
+      final byName = {for (final s in controller.current.available) s.name: s.trusted};
+      expect(byName, {'Casa': false, 'Nuvem': true});
+    });
+
+    test('retirar duas vezes, ou de quem nunca foi confiável, ou com o armazenamento falhando, não quebra', () async {
+      build(initial: [server('Casa', addresses: ['10.0.0.1'])], store: _FailingStore());
+      await flush();
+      await flush();
+      final casa = controller.current.available.single;
+      await Future.wait([controller.revokeTrust(casa), controller.revokeTrust(casa)]);
+      await controller.revokeTrust(ServerOption.fromDiscovered(server('Fantasma', addresses: ['10.9.9.9'])));
+      expect(controller.current.available, hasLength(1));
+    });
+
     testWidgets('um armazenamento que nunca responde não impede a lista de aparecer (depois do limite)', (tester) async {
       discovery = FakeDiscovery(sampleServers);
       controller = ServerListController(discovery: discovery, paired: _HangingStore());
@@ -893,4 +986,19 @@ class _HangingStore implements PairedStore {
 
   @override
   Future<void> forget(String hostPort) => Completer<void>().future;
+}
+
+/// A paired-servers store that fails when asked.
+class _FailingStore implements PairedStore {
+  @override
+  Future<List<PairedServer>> all() async => throw StateError('no storage');
+
+  @override
+  Future<PairedServer?> find(String hostPort) async => throw StateError('no storage');
+
+  @override
+  Future<void> save(PairedServer server) async => throw StateError('no storage');
+
+  @override
+  Future<void> forget(String hostPort) async => throw StateError('no storage');
 }

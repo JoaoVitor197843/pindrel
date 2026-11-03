@@ -105,6 +105,17 @@ class ServerTrust {
     if (_entries.length > maxRemembered) {
       _entries = _entries.sublist(_entries.length - maxRemembered);
     }
+    await _persist();
+  }
+
+  /// The person no longer trusts [name]: it becomes a server never opened before (pairing is asked for again).
+  Future<void> forget(String name) async {
+    if (!_entries.any((e) => e.$1 == name)) return;
+    _entries = [..._entries.where((e) => e.$1 != name)];
+    await _persist();
+  }
+
+  Future<void> _persist() async {
     try {
       await _store.write(
         storageKey,
