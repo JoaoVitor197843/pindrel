@@ -38,6 +38,12 @@ pub struct Config {
     pub max_connections: usize,
     /// Open connections one client may hold (not counted for the declared proxies, which carry many clients).
     pub max_connections_per_ip: usize,
+    /// Open WebSocket tunnels in total, and per client (a tunnel outlives the HTTP connection that opened it, so the
+    /// connection limits above do not count it).
+    pub max_websockets: usize,
+    pub max_websockets_per_ip: usize,
+    /// A tunnel with no byte in either direction for this long is closed (clients ping, so a live one never idles).
+    pub ws_idle: Duration,
     pub rate_limit: bool,
     /// Who counts as the client behind a trusted proxy (`TRUSTED_PROXIES`, `CLIENT_IP_HEADER`); by default the peer.
     pub client_ip: ClientIp,
@@ -64,6 +70,9 @@ impl Config {
             server_id_file: None,
             max_connections: 1024,
             max_connections_per_ip: 64,
+            max_websockets: 1024,
+            max_websockets_per_ip: 32,
+            ws_idle: Duration::from_secs(600),
             rate_limit: true,
             client_ip: ClientIp::direct(),
             max_body: 1 << 20,
@@ -97,6 +106,9 @@ impl Config {
         let max_connections = parse("MAX_CONNECTIONS", "1024", 1, 100_000) as usize;
         let max_connections_per_ip = parse("MAX_CONNECTIONS_PER_IP", "64", 1, 100_000) as usize;
         let max_body = parse("MAX_BODY_BYTES", "1048576", 1, 64 << 20) as usize;
+        let max_websockets = parse("MAX_WEBSOCKETS", "1024", 0, 100_000) as usize;
+        let max_websockets_per_ip = parse("MAX_WEBSOCKETS_PER_IP", "32", 1, 100_000) as usize;
+        let ws_idle = parse("WS_IDLE_SECS", "600", 0, 86_400);
         let mut flag = |key: &str, default: bool| -> bool {
             match get(key) {
                 None => default,
@@ -177,6 +189,9 @@ impl Config {
             server_id_file: get("SERVER_ID_FILE").map(std::path::PathBuf::from),
             max_connections,
             max_connections_per_ip,
+            max_websockets,
+            max_websockets_per_ip,
+            ws_idle: Duration::from_secs(ws_idle),
             rate_limit,
             client_ip,
             max_body,

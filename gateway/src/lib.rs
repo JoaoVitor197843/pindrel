@@ -13,3 +13,4 @@ pub mod proto;
 pub mod server;
 #[cfg(feature = "tls")]
 pub mod tls;
+pub mod websocket;

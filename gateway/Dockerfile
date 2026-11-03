@@ -6,6 +6,8 @@
 
 FROM --platform=$BUILDPLATFORM rust:1-alpine AS builder
 ARG TARGETARCH
+# experiment: `--build-arg FEATURES=http3` builds the TLS/HTTP/2/HTTP/3 variant (needs a C compiler for `ring`)
+ARG FEATURES=""
 RUN apk add --no-cache musl-dev
 WORKDIR /app
 # .cargo/config.toml carries the flags of the aarch64 target (static + pic + rust-lld). The x86_64 target gets
@@ -23,10 +25,10 @@ ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-sta
 COPY Cargo.toml Cargo.lock ./
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     mkdir src && echo '' > src/lib.rs && echo 'fn main() {}' > src/main.rs \
-    && cargo build --release --locked --target "$(cat /rust-target)" && rm -rf src
+    && cargo build --release --locked --target "$(cat /rust-target)" ${FEATURES:+--features "$FEATURES"} && rm -rf src
 COPY src ./src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    touch src/lib.rs src/main.rs && cargo build --release --locked --target "$(cat /rust-target)" \
+    touch src/lib.rs src/main.rs && cargo build --release --locked --target "$(cat /rust-target)" ${FEATURES:+--features "$FEATURES"} \
     && cp "target/$(cat /rust-target)/release/gateway" /gateway
 
 # /data holds the id of this server (and the servers it remembers) between restarts; the volume mounted there starts

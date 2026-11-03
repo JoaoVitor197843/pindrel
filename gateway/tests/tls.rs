@@ -110,6 +110,35 @@ async fn http1_over_tls_still_works_and_the_plain_port_is_unchanged() {
 }
 
 #[tokio::test]
+async fn websocket_works_over_tls_and_survives_a_large_exchange() {
+    let a = Backend::start("a").await;
+    let port = free_port();
+    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port, false))).await;
+    // browsers open WebSockets with an HTTP/1.1 upgrade even on a TLS connection that could speak HTTP/2
+    let mut s = tls_stream(port, &[b"http/1.1"]).await;
+    s.write_all(b"GET /ws HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
+    let mut head = Vec::new();
+    let mut b = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        s.read_exact(&mut b).await.unwrap();
+        head.push(b[0]);
+    }
+    assert!(String::from_utf8_lossy(&head).starts_with("HTTP/1.1 101"));
+    let (mut r, mut w) = tokio::io::split(s);
+    let data: Vec<u8> = (0..500_000u32).map(|i| (i % 251) as u8).collect();
+    let sent = data.clone();
+    let writer = tokio::spawn(async move {
+        w.write_all(&sent).await.unwrap();
+        w
+    });
+    let mut back = vec![0u8; data.len()];
+    r.read_exact(&mut back).await.unwrap();
+    assert!(back == data);
+    let _ = writer.await;
+    gw.shutdown().await;
+}
+
+#[tokio::test]
 async fn many_concurrent_http2_streams_on_one_connection() {
     let a = Backend::start("a").await;
     let port = free_port();

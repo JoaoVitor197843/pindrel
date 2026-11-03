@@ -34,7 +34,7 @@ quinn = { version = "0.11", default-features = false, features = ["runtime-tokio
 h3 = { version = "0.0.8", optional = true }
 h3-quinn = { version = "0.0.10", optional = true }
 mdns-sd = { version = "0.21", default-features = false, features = ["async"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros", "signal", "sync"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros", "signal", "sync", "io-util"] }
 # interfaces with their flags (tunnel, point-to-point, virtual), to find the real LAN and never a VPN such as Tailscale
 netdev = { version = "0.46", default-features = false }
 getrandom = "0.3"

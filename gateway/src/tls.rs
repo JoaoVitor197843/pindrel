@@ -92,7 +92,7 @@ pub async fn accept_loop(
                         Ok::<_, Infallible>(resp)
                     }
                 });
-                let conn = builder.serve_connection(TokioIo::new(tls), service);
+                let conn = builder.serve_connection_with_upgrades(TokioIo::new(tls), service);
                 tokio::pin!(conn);
                 tokio::select! {
                     _ = conn.as_mut() => {}

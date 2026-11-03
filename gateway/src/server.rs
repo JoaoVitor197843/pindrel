@@ -2,10 +2,7 @@
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 
 use hyper::service::service_fn;
-use hyper_util::{
-    rt::{TokioIo, TokioTimer},
-    server::graceful::GracefulShutdown,
-};
+use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::{
     net::TcpListener,
     sync::{oneshot, watch, Semaphore},
@@ -37,6 +34,7 @@ impl Running {
     /// announced by connecting to it, and must not find it still open.
     pub async fn shutdown(self) {
         let _ = self.shutdown.send(true);
+        let _ = self.app.ws_stop.send(true); // open tunnels are closed too
         let _ = time::timeout(Duration::from_secs(2), self.closed).await;
         if let Some(d) = &self.mdns {
             let _ = d.shutdown();
@@ -52,6 +50,7 @@ pub async fn start(cfg: Config) -> io::Result<Running> {
 
 /// Like `start`, with the local network given (tests use one that contains loopback).
 pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Running> {
+    warn_if_few_descriptors(&cfg);
     let listener = TcpListener::bind(("0.0.0.0", cfg.port)).await?;
     let addr = listener.local_addr()?;
     let lan = discovery::lan_ip();
@@ -141,7 +140,7 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
 
 async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Receiver<bool>, closed: oneshot::Sender<()>) {
     let permits = Arc::new(Semaphore::new(app.cfg.max_connections));
-    let graceful = GracefulShutdown::new();
+    let mut conns = tokio::task::JoinSet::new();
     let per_ip = ConnLimit::new(app.cfg.max_connections_per_ip);
     loop {
         // a permit per open connection bounds the memory a flood of connections can take
@@ -164,21 +163,31 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
         };
         let _ = stream.set_nodelay(true);
         let app2 = app.clone();
+        let mut stop2 = stop.clone();
         let conn = hyper::server::conn::http1::Builder::new()
             .timer(TokioTimer::new())
             .header_read_timeout(app.cfg.header_timeout)
-            .serve_connection(TokioIo::new(stream), service_fn(move |req| handle(app2.clone(), peer, req)));
-        let conn = graceful.watch(conn);
-        tokio::spawn(async move {
-            let _ = conn.await;
+            .serve_connection(TokioIo::new(stream), service_fn(move |req| handle(app2.clone(), peer, req)))
+            .with_upgrades();
+        conns.spawn(async move {
+            tokio::pin!(conn);
+            tokio::select! {
+                _ = conn.as_mut() => {}
+                _ = stop2.changed() => {
+                    // finish the request in flight, then close
+                    conn.as_mut().graceful_shutdown();
+                    let _ = conn.as_mut().await;
+                }
+            }
             drop((permit, slot));
         });
+        while conns.try_join_next().is_some() {} // forget the ones that ended
     }
     drop(listener); // nobody can connect any more, even while the open requests finish
     let _ = closed.send(());
-    tokio::select! {
-        _ = graceful.shutdown() => {}
-        _ = time::sleep(Duration::from_secs(5)) => eprintln!("shutdown: some connections were still open after 5 s"),
+    let drained = async { while conns.join_next().await.is_some() {} };
+    if time::timeout(Duration::from_secs(5), drained).await.is_err() {
+        eprintln!("shutdown: some connections were still open after 5 s");
     }
 }
 
@@ -198,4 +207,25 @@ async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Re
         eprintln!("TLS: HTTP/3 on udp port {}", t.port);
     }
     Ok(())
+}
+
+/// Each connection takes a file descriptor here and one more towards the replica, and a WebSocket tunnel keeps two for as
+/// long as it lives. Docker starts containers with a soft limit of 1024: with the defaults the gateway would run out
+/// (accept fails, new clients are refused) long before its own limits are reached, so say so at the start.
+fn warn_if_few_descriptors(cfg: &Config) {
+    let Ok(limits) = std::fs::read_to_string("/proc/self/limits") else {
+        return;
+    };
+    let soft: Option<u64> = limits
+        .lines()
+        .find(|l| l.starts_with("Max open files"))
+        .and_then(|l| l.split_whitespace().nth(3))
+        .and_then(|v| v.parse().ok());
+    let wanted = 2 * (cfg.max_connections + cfg.max_websockets) as u64 + 64;
+    if let Some(soft) = soft.filter(|s| *s < wanted) {
+        eprintln!(
+            "warning: the limit of open files is {soft} but MAX_CONNECTIONS and MAX_WEBSOCKETS can use up to {wanted}; \
+             raise it (docker: ulimits nofile) or lower those settings"
+        );
+    }
 }

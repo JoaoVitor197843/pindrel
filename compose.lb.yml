@@ -26,6 +26,9 @@ services:
     security_opt:
       - no-new-privileges:true
     pids_limit: 64
+    # each connection and each WebSocket tunnel takes descriptors (two per tunnel); Docker's default soft limit is 1024
+    ulimits:
+      nofile: 8192
     environment:
       - GATEWAY_PORT=${PORT:-8080}
       - SERVER_NAME=${SERVER_NAME:-Pindrel}
