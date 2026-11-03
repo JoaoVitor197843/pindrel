@@ -1,4 +1,4 @@
-//! TLS listener (HTTP/1.1 + HTTP/2) and, with `--features http3`, HTTP/3, against fake replicas.
+//! TLS listener (HTTP/1.1 + HTTP/2) against fake replicas.
 #![cfg(feature = "tls")]
 mod common;
 
@@ -23,18 +23,11 @@ fn dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/tls")
 }
 
-/// A port free on both TCP and UDP (the gateway uses the same number for HTTP/3).
 fn free_port() -> u16 {
-    loop {
-        let tcp = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = tcp.local_addr().unwrap().port();
-        if std::net::UdpSocket::bind(("127.0.0.1", port)).is_ok() {
-            return port;
-        }
-    }
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
 }
 
-fn tls_cfg(port: u16, http3: bool) -> TlsConfig {
+fn tls_cfg(port: u16) -> TlsConfig {
     TlsConfig {
         port,
         cert: dir().join("cert.pem"),
@@ -42,7 +35,6 @@ fn tls_cfg(port: u16, http3: bool) -> TlsConfig {
         auto_dir: None,
         extra_sans: Vec::new(),
         refresh: Duration::ZERO,
-        http3,
     }
 }
 
@@ -89,10 +81,10 @@ async fn h2_request(port: u16, method: &str, path: &str, body: &str) -> (StatusC
 async fn http2_over_tls_reaches_the_replica_with_method_path_and_body() {
     let a = Backend::start("a").await;
     let port = free_port();
-    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port, false))).await;
+    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port))).await;
     let (status, backend, body, alt_svc) = h2_request(port, "PUT", "/notes/7?x=1", "payload").await;
     assert_eq!((status, backend.as_str(), body.as_str()), (StatusCode::OK, "a", "payload"));
-    assert_eq!(alt_svc, None, "no HTTP/3 offered when it is off");
+    assert_eq!(alt_svc, None, "HTTP/3 is not offered");
     gw.shutdown().await;
 }
 
@@ -101,7 +93,7 @@ async fn http1_over_tls_still_works_and_the_plain_port_is_unchanged() {
     let a = Backend::start("a").await;
     let port = free_port();
     let gw = gateway_with(&[&a], |c| {
-        c.tls = Some(tls_cfg(port, false));
+        c.tls = Some(tls_cfg(port));
         c.http_mode = pindrel_gateway::config::HttpMode::Full; // the default would send the plain port to HTTPS
     })
     .await;
@@ -120,7 +112,7 @@ async fn http1_over_tls_still_works_and_the_plain_port_is_unchanged() {
 async fn websocket_works_over_tls_and_survives_a_large_exchange() {
     let a = Backend::start("a").await;
     let port = free_port();
-    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port, false))).await;
+    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port))).await;
     // browsers open WebSockets with an HTTP/1.1 upgrade even on a TLS connection that could speak HTTP/2
     let mut s = tls_stream(port, &[b"http/1.1"]).await;
     s.write_all(b"GET /ws HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").await.unwrap();
@@ -150,7 +142,7 @@ async fn many_concurrent_http2_streams_on_one_connection() {
     let a = Backend::start("a").await;
     let port = free_port();
     let gw = gateway_with(&[&a], |c| {
-        c.tls = Some(tls_cfg(port, false));
+        c.tls = Some(tls_cfg(port));
         c.rate_limit = false;
     })
     .await;
@@ -187,7 +179,7 @@ async fn garbage_and_silent_clients_on_the_tls_port_are_dropped_and_do_not_hold_
     let a = Backend::start("a").await;
     let port = free_port();
     let gw = gateway_with(&[&a], |c| {
-        c.tls = Some(tls_cfg(port, false));
+        c.tls = Some(tls_cfg(port));
         c.header_timeout = Duration::from_millis(300);
         c.max_connections = 4;
         c.max_connections_per_ip = 100;
@@ -216,106 +208,11 @@ async fn garbage_and_silent_clients_on_the_tls_port_are_dropped_and_do_not_hold_
 #[tokio::test]
 async fn an_unreadable_certificate_stops_the_start_with_a_clear_error() {
     let a = Backend::start("a").await;
-    let mut cfg = tls_cfg(free_port(), false);
+    let mut cfg = tls_cfg(free_port());
     cfg.cert = dir().join("missing.pem");
     let mut c = pindrel_gateway::config::Config::new(vec![a.addr]);
     c.port = 0;
     c.mdns = false;
     c.tls = Some(cfg);
     assert!(pindrel_gateway::server::start_with(c, None).await.is_err());
-}
-
-#[cfg(feature = "http3")]
-mod http3 {
-    use super::*;
-    use bytes::Buf;
-    use quinn::crypto::rustls::QuicClientConfig;
-    use std::net::SocketAddr;
-
-    async fn h3_request(port: u16, method: &str, path: &str, body: &str) -> (StatusCode, String, String) {
-        let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
-        let quic = QuicClientConfig::try_from(client_config(&[b"h3"])).unwrap();
-        endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(quic)));
-        let conn = endpoint
-            .connect(([127, 0, 0, 1], port).into(), "localhost")
-            .unwrap()
-            .await
-            .expect("QUIC handshake");
-        let (mut driver, mut send) = h3::client::new(h3_quinn::Connection::new(conn)).await.unwrap();
-        let drive = tokio::spawn(async move { std::future::poll_fn(|cx| driver.poll_close(cx)).await });
-        let req = Request::builder()
-            .method(method)
-            .uri(format!("https://localhost:{port}{path}"))
-            .body(())
-            .unwrap();
-        let mut stream = send.send_request(req).await.unwrap();
-        if !body.is_empty() {
-            stream.send_data(Bytes::from(body.to_string())).await.unwrap();
-        }
-        stream.finish().await.unwrap();
-        let resp = stream.recv_response().await.unwrap();
-        let mut text = Vec::new();
-        while let Some(mut chunk) = stream.recv_data().await.unwrap() {
-            text.extend_from_slice(&chunk.copy_to_bytes(chunk.remaining()));
-        }
-        let backend = resp
-            .headers()
-            .get("x-backend")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default()
-            .to_string();
-        drive.abort();
-        (resp.status(), backend, String::from_utf8(text).unwrap())
-    }
-
-    #[tokio::test]
-    async fn http3_reaches_the_replica_and_http2_advertises_it() {
-        let a = Backend::start("a").await;
-        let port = free_port();
-        let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port, true))).await;
-        let (status, backend, body) = h3_request(port, "PUT", "/notes/7?x=1", "payload").await;
-        assert_eq!((status, backend.as_str(), body.as_str()), (StatusCode::OK, "a", "payload"));
-        let (_, _, _, alt_svc) = h2_request(port, "GET", "/x", "").await;
-        assert_eq!(alt_svc.as_deref(), Some(format!("h3=\":{port}\"; ma=86400").as_str()));
-        gw.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn http3_body_over_the_limit_is_refused_and_a_flood_of_requests_works() {
-        let a = Backend::start("a").await;
-        let port = free_port();
-        let gw = gateway_with(&[&a], |c| {
-            c.tls = Some(tls_cfg(port, true));
-            c.max_body = 1024;
-            c.rate_limit = false;
-        })
-        .await;
-        let (status, _, _) = h3_request(port, "POST", "/big", &"x".repeat(4096)).await;
-        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
-        let mut tasks = Vec::new();
-        for i in 0..30 {
-            tasks.push(tokio::spawn(
-                async move { h3_request(port, "POST", "/echo", &format!("n{i}")).await },
-            ));
-        }
-        for (i, t) in tasks.into_iter().enumerate() {
-            let (status, _, body) = t.await.unwrap();
-            assert_eq!((status, body), (StatusCode::OK, format!("n{i}")));
-        }
-        gw.shutdown().await;
-    }
-
-    #[tokio::test]
-    async fn udp_junk_on_the_quic_port_is_ignored() {
-        let a = Backend::start("a").await;
-        let port = free_port();
-        let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port, true))).await;
-        let sock = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        for n in [0usize, 1, 20, 1200, 1500] {
-            let _ = sock.send_to(&vec![0xAB; n], ("127.0.0.1", port)).await;
-        }
-        let (status, backend, _) = h3_request(port, "GET", "/x", "").await;
-        assert_eq!((status, backend.as_str()), (StatusCode::OK, "a"));
-        gw.shutdown().await;
-    }
 }

@@ -1,5 +1,5 @@
 //! Optional TLS listener: HTTP/1.1 and HTTP/2 over TCP (negotiated by ALPN). Build feature `tls`.
-use std::{convert::Infallible, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use hyper::service::service_fn;
 use hyper_util::{
@@ -19,13 +19,7 @@ use crate::{
     limiter::ConnLimit,
 };
 
-pub async fn accept_loop(
-    app: Arc<App>,
-    listener: TcpListener,
-    config: Arc<ServerConfig>,
-    alt_svc: Option<String>,
-    mut stop: watch::Receiver<bool>,
-) {
+pub async fn accept_loop(app: Arc<App>, listener: TcpListener, config: Arc<ServerConfig>, mut stop: watch::Receiver<bool>) {
     let acceptor = TlsAcceptor::from(config);
     let permits = Arc::new(Semaphore::new(app.cfg.max_connections));
     let per_ip = ConnLimit::new(app.cfg.max_connections_per_ip);
@@ -39,7 +33,6 @@ pub async fn accept_loop(
         .keep_alive_interval(Some(Duration::from_secs(30)))
         .keep_alive_timeout(Duration::from_secs(20));
     let builder: &'static auto::Builder<TokioExecutor> = Box::leak(Box::new(builder));
-    let alt_svc: Option<&'static str> = alt_svc.map(|s| &*Box::leak(s.into_boxed_str()));
     loop {
         let permit = tokio::select! {
             p = permits.clone().acquire_owned() => p.unwrap(),
@@ -65,13 +58,7 @@ pub async fn accept_loop(
             if let Ok(Ok(tls)) = time::timeout(handshake_budget, acceptor.accept(stream)).await {
                 let service = service_fn(move |req| {
                     let app = app2.clone();
-                    async move {
-                        let mut resp = handle(app, peer, true, req).await.unwrap_or_else(|e: Infallible| match e {});
-                        if let Some(v) = alt_svc {
-                            resp.headers_mut().insert("alt-svc", hyper::header::HeaderValue::from_static(v));
-                        }
-                        Ok::<_, Infallible>(resp)
-                    }
+                    async move { handle(app, peer, true, req).await }
                 });
                 let conn = builder.serve_connection_with_upgrades(TokioIo::new(tls), service);
                 tokio::pin!(conn);

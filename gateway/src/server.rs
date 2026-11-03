@@ -123,7 +123,7 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
     }
     #[cfg(not(feature = "tls"))]
     if app.cfg.tls.is_some() {
-        eprintln!("TLS_PORT is set but this build has no TLS (build with --features tls or http3)");
+        eprintln!("TLS_PORT is set but this build has no TLS (build with --features tls)");
     }
 
     let (closed_tx, closed) = oneshot::channel();
@@ -226,19 +226,10 @@ async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Re
             eprintln!("TLS: pairing code  pindrel://pair?host={ip}:{}&ca={fp}", t.port);
         }
     }
-    let h3 = cfg!(feature = "http3") && t.http3;
     let tcp = TcpListener::bind(("0.0.0.0", t.port)).await?;
     let tcp_cfg = certs::server_config(resolver.clone(), &[b"h2", b"http/1.1"])?;
-    let alt_svc = h3.then(|| format!("h3=\":{}\"; ma=86400", t.port));
-    tokio::spawn(crate::tls::accept_loop(app.clone(), tcp, tcp_cfg, alt_svc, stop.clone()));
+    tokio::spawn(crate::tls::accept_loop(app.clone(), tcp, tcp_cfg, stop.clone()));
     eprintln!("TLS: HTTP/1.1 + HTTP/2 on port {}", t.port);
-    #[cfg(feature = "http3")]
-    if h3 {
-        let quic_cfg = certs::server_config(resolver.clone(), &[b"h3"])?;
-        let endpoint = crate::h3::endpoint(quic_cfg, ([0, 0, 0, 0], t.port).into())?;
-        tokio::spawn(crate::h3::accept_loop(app.clone(), endpoint, stop.clone()));
-        eprintln!("TLS: HTTP/3 on udp port {}", t.port);
-    }
     if !t.refresh.is_zero() {
         let (every, mut stop, app) = (t.refresh, stop, app.clone());
         tokio::spawn(async move {

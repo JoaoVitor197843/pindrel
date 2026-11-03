@@ -6,7 +6,7 @@ use crate::{
     pool::parse_targets,
 };
 
-/// TLS listener (HTTP/1.1 + HTTP/2 over TCP, and HTTP/3 over UDP on the same port number when `http3`).
+/// TLS listener (HTTP/1.1 + HTTP/2 over TCP). HTTP/3 was measured and left out: no gain worth its code on a LAN.
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
     pub port: u16,
@@ -19,7 +19,6 @@ pub struct TlsConfig {
     pub extra_sans: Vec<String>,
     /// How often the certificate is looked at again (renewed files, a changed address); zero turns it off.
     pub refresh: Duration,
-    pub http3: bool,
 }
 
 /// What the plain-HTTP port does when TLS is on. `Redirect`: only the public bootstrap routes answer (`/server/info/`,
@@ -175,7 +174,6 @@ impl Config {
                     .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
                     .unwrap_or_default(),
                 refresh: Duration::from_secs(tls_refresh),
-                http3: true,
             }
         });
         let http_mode = match get("HTTP_MODE").as_deref() {
@@ -214,16 +212,6 @@ impl Config {
             errs.push(format!("CLIENT_IP_HEADER: {e}"));
             ClientIp::direct()
         });
-        if !errs.is_empty() {
-            return Err(errs);
-        }
-        let mut tls = tls;
-        if let (Some(t), Some(v)) = (tls.as_mut(), get("HTTP3_ENABLED")) {
-            t.http3 = v.parse::<bool>().unwrap_or_else(|_| {
-                errs.push(format!("HTTP3_ENABLED: invalid value {v:?} (expected true or false)"));
-                true
-            });
-        }
         if !errs.is_empty() {
             return Err(errs);
         }
@@ -357,7 +345,7 @@ mod tests {
         .unwrap()
         .tls
         .unwrap();
-        assert_eq!((t.port, t.http3), (8443, true));
+        assert_eq!(t.port, 8443);
     }
 
     #[test]
@@ -366,14 +354,5 @@ mod tests {
             let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TLS_PORT", port)]).unwrap_err();
             assert!(errs.iter().any(|e| e.starts_with("TLS_PORT")), "{port}: {errs:?}");
         }
-        let errs = load(&[
-            ("UPSTREAMS", "127.0.0.1:1"),
-            ("TLS_PORT", "8443"),
-            ("TLS_CERT_FILE", "/c"),
-            ("TLS_KEY_FILE", "/k"),
-            ("HTTP3_ENABLED", "maybe"),
-        ])
-        .unwrap_err();
-        assert!(errs.iter().any(|e| e.starts_with("HTTP3_ENABLED")), "{errs:?}");
     }
 }

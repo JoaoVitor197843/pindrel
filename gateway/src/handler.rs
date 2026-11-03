@@ -114,7 +114,7 @@ fn rate_limited(retry_after: Duration) -> Response<Body> {
     r
 }
 
-/// Works for any request body: hyper's own `Incoming` (HTTP/1.1, HTTP/2) and the ones the HTTP/3 side builds. `secure`:
+/// Works for any request body: hyper's own `Incoming` (HTTP/1.1, HTTP/2). `secure`:
 /// the request arrived over TLS (any version of HTTP).
 pub async fn handle<B>(app: Arc<App>, peer: SocketAddr, secure: bool, mut req: Request<B>) -> Result<Response<Body>, Infallible>
 where

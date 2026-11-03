@@ -1,5 +1,7 @@
 # Resultados (segunda rodada: carga mista, perda de pacotes, Flutter, WebSocket, RAM)
 
+> Nota: o HTTP/3 medido aqui foi removido do gateway depois (decisão do dono: sem ganho que compense numa LAN). O código está no histórico do git (`gateway/src/h3.rs`, até o commit aae0cbd).
+
 Máquina de desenvolvimento, Chrome 156 headless, gateway Rust do branch, réplicas Go reais. Latência e perda vêm de
 `latproxy.mjs` (TCP: perda vira atraso por timeout com a ordem mantida, ou seja, bloqueio de cabeça de fila, sem
 colapso da janela de congestionamento, então o TCP aparece **otimista** sob perda; UDP: o datagrama é descartado).

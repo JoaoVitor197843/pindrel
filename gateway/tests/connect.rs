@@ -24,7 +24,6 @@ fn auto(port: u16, dir: &std::path::Path) -> TlsConfig {
         auto_dir: Some(dir.to_path_buf()),
         extra_sans: Vec::new(),
         refresh: Duration::ZERO,
-        http3: false,
     }
 }
 
