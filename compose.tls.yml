@@ -1,16 +1,12 @@
 # Overlay: HTTPS with the gateway's own certificate authority (no domain, no account, nothing to buy).
 #   docker compose -f compose.yml -f compose.lb.yml -f compose.tls.yml up -d --build --scale pindrel=2
+# On a host that runs the released images (the Raspberry Pi) the same file goes after compose.registry.yml: it only sets
+# environment and memory, the gateway image already carries the TLS code (the Dockerfile builds it for amd64 and arm64).
 # The gateway creates a CA and its server certificate on the first start (kept in the `gateway-data` volume: keep it, or
 # every paired device has to pair again), serves HTTP/1.1 and HTTP/2 on TLS_PORT and turns the plain port into a
 # page that explains how to connect securely (see CLAUDE.md, "TLS"). Open http://<this machine>:${PORT:-8080}/ to start.
 services:
   gateway:
-    build:
-      context: ./gateway
-      args:
-        # cargo features of the gateway: HTTPS (HTTP/2) + its own CA. (They need a C compiler for `ring`: amd64 builds
-        # work; cross-building arm64 for the Raspberry Pi from another machine does not yet, build it on the Pi.)
-        FEATURES: selfcert
     # 1000 open WebSockets measured 28 MiB; the default 16m of compose.lb.yml is for a gateway without TLS
     mem_limit: 48m
     memswap_limit: 48m

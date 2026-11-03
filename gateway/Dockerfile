@@ -6,9 +6,16 @@
 
 FROM --platform=$BUILDPLATFORM rust:1-alpine AS builder
 ARG TARGETARCH
-# experiment: `--build-arg FEATURES=selfcert` builds the TLS/HTTP/2 variant (needs a C compiler for `ring`)
-ARG FEATURES=""
-RUN apk add --no-cache musl-dev
+# What the gateway can do besides the plain proxy: `selfcert` is HTTPS with its own certificate authority (+ the pairing
+# page), off until TLS_AUTO is set. `--build-arg FEATURES=` builds the plain gateway (no TLS code at all).
+ARG FEATURES=selfcert
+# `ring` (TLS) has C and assembly parts, so the TARGET needs a C compiler. zig carries the musl headers and libraries of
+# every target, which lets the arm64 build (a Raspberry Pi) run on the amd64 builder with no emulation and no cross gcc.
+RUN apk add --no-cache musl-dev zig
+ENV ZIG_GLOBAL_CACHE_DIR=/tmp/zig-global ZIG_LOCAL_CACHE_DIR=/tmp/zig-local
+# The compiler and archiver the arm64 build uses (see cross/zigcc-aarch64).
+COPY cross/zigcc-aarch64 cross/zigar /usr/local/bin/
+ENV CC_aarch64_unknown_linux_musl=/usr/local/bin/zigcc-aarch64 AR_aarch64_unknown_linux_musl=/usr/local/bin/zigar
 WORKDIR /app
 # .cargo/config.toml carries the flags of the aarch64 target (static + pic + rust-lld). The x86_64 target gets
 # the same static flag through the environment; RUSTFLAGS is NOT set globally because it would override the

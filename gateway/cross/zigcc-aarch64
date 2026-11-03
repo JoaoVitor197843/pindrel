@@ -1,0 +1,10 @@
+#!/bin/sh
+# A C compiler for aarch64-linux-musl made of zig, for the build of the TLS code (`ring` has C and assembly parts) from
+# another machine. Used by the Dockerfile as CC_aarch64_unknown_linux_musl.
+#  - cc-rs adds `--target=<rust triple>` when the compiler looks like clang; zig names its targets its own way, so it is dropped.
+#  - UBSan is off: zig turns it on for unoptimised C, and a trap in the TLS code would only show up on the Pi.
+for a in "$@"; do
+  shift
+  case "$a" in --target=*) ;; *) set -- "$@" "$a" ;; esac
+done
+exec zig cc -target aarch64-linux-musl -fno-sanitize=undefined "$@"
