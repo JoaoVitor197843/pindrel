@@ -4,6 +4,7 @@
 //   dart run tool/pair_digits.dart 192.168.1.163:8443 --compare-with http://192.168.1.163:8086/server/pair/sas
 // Without --compare-with it asks you to compare the digits with the server's connection page; with it, it plays the person
 // and compares with what that page serves (useful in scripts).
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:mobile/core/network/pairing.dart';
@@ -35,7 +36,9 @@ Future<void> main(List<String> args) async {
         return shown == p.digits;
       }
       stdout.write('São iguais aos da página de conexão do servidor? [s/N] ');
-      return (stdin.readLineSync() ?? '').trim().toLowerCase() == 's';
+      // not readLineSync: it would freeze the whole program (sockets included) while the person compares
+      final line = await stdin.transform(const SystemEncoding().decoder).transform(const LineSplitter()).first.catchError((_) => '');
+      return line.trim().toLowerCase() == 's';
     },
   );
   switch (result) {
