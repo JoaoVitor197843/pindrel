@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/core/network/pairing.dart';
 import 'package:mobile/features/auth/data/server_trust.dart';
 import 'package:mobile/features/auth/presentation/providers/servers_provider.dart';
 import 'package:mobile/features/auth/presentation/widgets/auth_header.dart';
 import 'package:mobile/features/auth/presentation/widgets/pulsing_dot.dart';
 import 'package:mobile/features/auth/presentation/widgets/server_dropdown_selector.dart';
 
+import '../../support/choose_first.dart';
 import '../../support/discovery_fakes.dart';
 
 void main() {
@@ -55,6 +57,7 @@ void main() {
             serverTrustProvider.overrideWithValue(
               ServerTrust(MemoryKeyValueStore()),
             ),
+            pairedStoreProvider.overrideWithValue(MemoryPairedStore()),
             serverDiscoveryProvider.overrideWithValue(
               FakeDiscovery([
                 server(
@@ -63,7 +66,6 @@ void main() {
                 ),
               ]),
             ),
-            randomProvider.overrideWithValue(FixedRandom(0)),
           ],
           child: MaterialApp(
             home: Scaffold(
@@ -81,6 +83,7 @@ void main() {
         ),
       );
       await tester.pump();
+      await chooseFirst(tester);
       return tester
           .getSize(
             find

@@ -9,6 +9,7 @@ import '../../data/server_list_controller.dart';
 import '../../data/server_list_state.dart';
 import '../../data/server_option.dart';
 import '../providers/servers_provider.dart';
+import 'pairing_dialogs.dart';
 import 'pulsing_dot.dart';
 import 'skeleton_bar.dart';
 
@@ -18,6 +19,21 @@ Color connectionColor(ServerConnection connection) => switch (connection) {
   ServerConnection.disconnected => AppColors.offline,
   ServerConnection.none => AppColors.textMuted,
 };
+
+/// What the button says: the chosen server, or (nothing is chosen on its own) how many are available.
+String selectorLabel(ServerListState state) {
+  final connecting = state.connecting;
+  if (connecting != null) return 'Abrindo ${connecting.name}…';
+  final selected = state.selected;
+  if (selected != null) return selected.name;
+  if (!state.loaded) return 'Buscando';
+  final n = state.available.length;
+  return switch (n) {
+    0 => 'Nenhum servidor',
+    1 => '1 disponível',
+    _ => '$n disponíveis',
+  };
+}
 
 /// The dot is the size of a letter of the text beside it.
 double dotDiameterFor(double fontSize) => (fontSize * 0.8).roundToDouble();
@@ -92,20 +108,15 @@ class _ServerDropdownSelectorState
     ServerOption server,
   ) async {
     _asking = true;
-    final messenger = ScaffoldMessenger.maybeOf(context);
     final go = await showDialog<bool>(
       context: context,
       builder: (_) => _ChangedServerDialog(name: server.name),
     );
     _asking = false;
-    if (go == true) {
-      if (!await controller.confirmChange()) {
-        messenger?.showSnackBar(
-          SnackBar(content: Text('${server.name} não respondeu.')),
-        );
-      }
-    } else {
-      controller.cancelChange();
+    // "go on" leads to pairing (the numbers), never straight into the server: it is not the one the person knew
+    controller.cancelChange();
+    if (go == true && mounted) {
+      await PairingDialog.show(context, server);
     }
   }
 
@@ -138,6 +149,18 @@ class _ServerDropdownSelectorState
           onSelected: (value) async {
             _setOpen(false);
             if (value is ServerOption) {
+              // a server never opened before is paired first (the digits), not chosen at a tap
+              if (!value.trusted &&
+                  value.baseUri != null &&
+                  value != state.selected) {
+                if (controller.isChanged(value)) {
+                  // the name is one the person knows, with another id: warn first (the listener below asks), pair after
+                  await controller.select(value);
+                } else {
+                  await PairingDialog.show(context, value);
+                }
+                return;
+              }
               final messenger = ScaffoldMessenger.maybeOf(context);
               if (!await controller.select(value)) {
                 messenger?.showSnackBar(
@@ -210,10 +233,7 @@ class _SelectorButton extends StatelessWidget {
           const SizedBox(width: 10),
           Flexible(
             child: Text(
-              (state.connecting != null
-                      ? 'Abrindo ${state.connecting!.name}…'
-                      : state.selected?.name ?? 'Buscando')
-                  .toUpperCase(),
+              selectorLabel(state).toUpperCase(),
               overflow: TextOverflow.ellipsis,
               style: AppText.mono(
                 _fontSize,
@@ -270,8 +290,10 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (disconnected.isNotEmpty)
-              const _SectionLabel(ServerDropdownSelector.availableLabel),
+            if (state.loaded && state.available.isNotEmpty)
+              _SectionLabel(
+                '${ServerDropdownSelector.availableLabel} (${state.available.length})',
+              ),
             if (!state.loaded)
               const _ServersSkeleton()
             else if (state.available.isEmpty)
@@ -415,6 +437,25 @@ class _ServerItem extends StatelessWidget {
                   ],
                 ),
               ),
+              if (connected && !selected)
+                Semantics(
+                  label: server.trusted
+                      ? 'Servidor confiável'
+                      : 'Servidor novo, precisa parear',
+                  child: ExcludeSemantics(
+                    child: Text(
+                      server.trusted ? 'CONFIÁVEL' : 'PAREAR',
+                      key: ValueKey('server-badge-${server.id}'),
+                      style: AppText.mono(
+                        9,
+                        color: server.trusted
+                            ? AppColors.accentBorder
+                            : AppColors.textMuted,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ),
+                ),
               if (selected) Icon(Icons.check, size: 18, color: highlight),
             ],
           ),

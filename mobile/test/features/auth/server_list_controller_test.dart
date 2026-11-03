@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/network/discovery/discovered_server.dart';
 import 'package:mobile/core/network/discovery/server_discovery.dart';
+import 'package:mobile/core/network/pairing.dart';
 import 'package:mobile/features/auth/data/server_list_controller.dart';
 import 'package:mobile/features/auth/data/server_list_state.dart';
 import 'package:mobile/features/auth/data/server_option.dart';
@@ -23,16 +25,24 @@ Future<void> flush() => Future<void>.delayed(Duration.zero);
 ServerOption option(String name, {String ip = '10.0.0.1'}) =>
     ServerOption.fromDiscovered(server(name, addresses: [ip]));
 
+/// The person of these tests: taps the first server that shows up (the app itself chooses nothing).
+void pickFirst(ServerListController c) {
+  final sub = c.stream.listen((s) {
+    if (s.selected == null && s.connecting == null && s.pendingChange == null && s.available.isNotEmpty) {
+      unawaited(c.select(s.available.first));
+    }
+  });
+  addTearDown(sub.cancel);
+}
+
 void main() {
   late FakeDiscovery discovery;
   late ServerListController controller;
 
-  ServerListController make({int random = 0, List<DiscoveredServer>? initial}) {
+  ServerListController make({List<DiscoveredServer>? initial, bool tap = true}) {
     discovery = FakeDiscovery(initial ?? sampleServers);
-    controller = ServerListController(
-      discovery: discovery,
-      random: FixedRandom(random),
-    );
+    controller = ServerListController(discovery: discovery);
+    if (tap) pickFirst(controller);
     addTearDown(controller.dispose);
     return controller;
   }
@@ -53,22 +63,12 @@ void main() {
       expect(controller.current.connection, ServerConnection.none);
     });
 
-    test('sorteia um dos achados, e o sorteio decide qual', () async {
-      for (final (random, name) in [
-        (0, 'Casa'),
-        (1, 'Escritório'),
-        (2, 'Nuvem'),
-        (4, 'Escritório'),
-      ]) {
-        make(random: random);
-        await flush();
-        expect(
-          controller.current.selected?.name,
-          name,
-          reason: 'sorteio $random',
-        );
-        expect(controller.current.connection, ServerConnection.connected);
-      }
+    test('nada é escolhido sozinho: a lista chega e a escolha espera a pessoa', () async {
+      make(tap: false);
+      await flush();
+      expect(controller.current.available, hasLength(3));
+      expect(controller.current.selected, isNull);
+      expect(controller.current.connection, ServerConnection.none);
     });
 
     test('a lista chega ordenada como a descoberta a entrega', () async {
@@ -143,15 +143,15 @@ void main() {
     });
 
     test('novos servidores não mudam a escolha já feita', () async {
-      make(random: 1);
+      make();
       await flush();
-      expect(controller.current.selected?.name, 'Escritório');
+      expect(controller.current.selected?.name, 'Casa');
       discovery.emit([
         server('Aaa', addresses: ['10.0.0.1']),
         ...sampleServers,
       ]);
       await flush();
-      expect(controller.current.selected?.name, 'Escritório');
+      expect(controller.current.selected?.name, 'Casa');
     });
 
     test(
@@ -302,7 +302,8 @@ void main() {
   group('erros da busca', () {
     test('o erro fica no estado e a lista anterior é mantida', () async {
       final d = ErrorDiscovery();
-      final c = ServerListController(discovery: d, random: FixedRandom(0));
+      final c = ServerListController(discovery: d);
+      pickFirst(c);
       addTearDown(c.dispose);
       d.controller.add(sampleServers);
       await flush();
@@ -315,7 +316,8 @@ void main() {
 
     test('o erro some quando a busca volta a responder', () async {
       final d = ErrorDiscovery();
-      final c = ServerListController(discovery: d, random: FixedRandom(0));
+      final c = ServerListController(discovery: d);
+      pickFirst(c);
       addTearDown(c.dispose);
       d.controller.addError(StateError('x'));
       await flush();
@@ -327,13 +329,13 @@ void main() {
   });
 
   group('teste de conexão ao escolher', () {
-    ServerListController makeProbed(Future<bool> Function(Uri) probe) {
+    ServerListController makeProbed(Future<bool> Function(Uri) probe, {bool tap = true}) {
       discovery = FakeDiscovery(sampleServers);
       controller = ServerListController(
         discovery: discovery,
-        random: FixedRandom(0),
         probe: probe,
       );
+      if (tap) pickFirst(controller);
       addTearDown(controller.dispose);
       return controller;
     }
@@ -344,7 +346,7 @@ void main() {
       makeProbed((uri) {
         asked = uri;
         return gate.future;
-      });
+      }, tap: false);
       await flush();
       final other = controller.current.available.last;
       final result = controller.select(other);
@@ -440,13 +442,13 @@ void main() {
       discovery = FakeDiscovery(initial);
       controller = ServerListController(
         discovery: discovery,
-        random: FixedRandom(random),
         trust: trust,
         probe: (uri) async {
           probed.add(uri);
           return answer;
         },
       );
+      pickFirst(controller);
       addTearDown(controller.dispose);
       await flush();
       autoProbed = List.of(probed);
@@ -583,38 +585,19 @@ void main() {
       expect(probed, isEmpty);
     });
 
-    test(
-      'o sorteio inicial nunca escolhe sozinho um nome que mudou de id',
-      () async {
-        trust = ServerTrust(MemoryKeyValueStore());
-        await trust.remember('Casa', 'aaa');
-        discovery = FakeDiscovery([
-          casa('bbb'),
-          server('Nuvem', addresses: ['10.0.0.9']),
-        ]);
-        controller = ServerListController(
-          discovery: discovery,
-          random: FixedRandom(0),
-          trust: trust,
-        );
-        addTearDown(controller.dispose);
-        await flush();
-        expect(controller.current.selected?.name, 'Nuvem');
-      },
-    );
-
-    test('se só há nomes que mudaram, nada é escolhido sozinho', () async {
+    test('um nome que mudou de id não entra: a pessoa é perguntada, e nada é escolhido', () async {
       trust = ServerTrust(MemoryKeyValueStore());
       await trust.remember('Casa', 'aaa');
       discovery = FakeDiscovery([casa('bbb')]);
       controller = ServerListController(
         discovery: discovery,
-        random: FixedRandom(0),
         trust: trust,
       );
+      pickFirst(controller);
       addTearDown(controller.dispose);
       await flush();
       expect(controller.current.selected, isNull);
+      expect(controller.current.pendingChange?.name, 'Casa');
       expect(controller.current.available, hasLength(1));
     });
 
@@ -640,10 +623,10 @@ void main() {
         discovery = FakeDiscovery([casa('bbb')]);
         controller = ServerListController(
           discovery: discovery,
-          random: FixedRandom(0),
           trust: trust,
         );
-        addTearDown(controller.dispose);
+        pickFirst(controller);
+      addTearDown(controller.dispose);
         expect(controller.current.loaded, isFalse);
         slow.release();
         await flush();
@@ -665,152 +648,115 @@ void main() {
     });
   });
 
-  group('escolha automática testada no início', () {
-    const retry = Duration(milliseconds: 30);
+  group('confiáveis e pareados', () {
+    final pem = File('test/fixtures/pairing/good-ca.pem').readAsStringSync();
+    PairedServer paired(String hostPort, {String name = 'Casa', String id = 'aaa'}) =>
+        PairedServer(hostPort: hostPort, fingerprint: fingerprintOfPem(pem), caPem: pem, name: name, serverId: id);
 
-    ServerListController makeAuto(
-      Future<bool> Function(Uri) probe, {
-      List<DiscoveredServer>? initial,
-      int random = 0,
-    }) {
+    ServerListController build({ServerTrust? trust, PairedStore? store, List<DiscoveredServer>? initial}) {
       discovery = FakeDiscovery(initial ?? sampleServers);
-      controller = ServerListController(
-        discovery: discovery,
-        random: FixedRandom(random),
-        probe: probe,
-        autoRetry: retry,
-      );
+      controller = ServerListController(discovery: discovery, trust: trust, paired: store);
       addTearDown(controller.dispose);
       return controller;
     }
 
-    test('o sorteado é testado antes de ser escolhido', () async {
-      final gate = Completer<bool>();
-      Uri? asked;
-      makeAuto((uri) {
-        asked = uri;
-        return gate.future;
-      });
+    test('quem já foi aberto com o mesmo id é confiável; o novo e o que mudou de id não são', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      await trust.remember('Casa', 'aaa');
+      await trust.remember('Nuvem', 'zzz');
+      build(
+        trust: trust,
+        initial: [
+          server('Casa', addresses: ['10.0.0.1'], id: 'aaa'),
+          server('Nuvem', addresses: ['10.0.0.9'], id: 'outro'),
+          server('Escritório', addresses: ['10.0.0.2'], id: 'bbb'),
+        ],
+      );
       await flush();
-      expect(asked, sampleServers.first.baseUri);
-      expect(controller.current.selected, isNull, reason: 'ainda testando');
-      expect(controller.current.available, hasLength(3));
-      gate.complete(true);
       await flush();
+      final byName = {for (final s in controller.current.available) s.name: s};
+      expect(byName['Casa']!.trusted, isTrue);
+      expect(byName['Nuvem']!.trusted, isFalse, reason: 'same name, another id: not the server the person knows');
+      expect(byName['Escritório']!.trusted, isFalse);
+      expect(controller.isChanged(byName['Nuvem']!), isTrue);
+      expect(controller.isChanged(byName['Escritório']!), isFalse);
+      expect(controller.current.selected, isNull, reason: 'nothing is chosen on its own');
+    });
+
+    test('concluir o pareamento escolhe o servidor, o lembra e o marca confiável', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      build(trust: trust, initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      await flush();
+      expect(controller.current.available.single.trusted, isFalse);
+      await controller.completePairing(ServerOption.fromPaired(paired('10.0.0.1:8443')));
       expect(controller.current.selected?.name, 'Casa');
-      expect(controller.current.connection, ServerConnection.connected);
+      expect(controller.current.selected?.trusted, isTrue);
+      expect(controller.current.selected?.baseUri?.scheme, 'https');
+      expect(trust.trustOf('Casa', 'aaa'), Trust.same, reason: 'remembered for the next time');
+      expect(controller.current.available.where((s) => s.name == 'Casa'), hasLength(1), reason: 'no duplicate of the announced one');
+      expect(controller.current.available.single.trusted, isTrue);
     });
 
-    test('se o sorteado não responde, tenta o próximo', () async {
-      final asked = <String>[];
-      makeAuto((uri) async {
-        asked.add(uri.host);
-        return uri.host == '192.168.0.20';
-      });
+    test('concluir o pareamento de um nome que mudou de id fecha a pergunta pendente', () async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      await trust.remember('Casa', 'velho');
+      build(trust: trust, initial: [server('Casa', addresses: ['10.0.0.1'], id: 'novo')]);
       await flush();
       await flush();
-      expect(controller.current.selected?.name, 'Escritório');
-      expect(asked.length, 2);
+      await controller.select(controller.current.available.single);
+      expect(controller.current.pendingChange, isNotNull);
+      await controller.completePairing(ServerOption.fromPaired(paired('10.0.0.1:8443', id: 'novo')));
+      expect(controller.current.pendingChange, isNull);
+      expect(controller.current.selected?.name, 'Casa');
+      expect(trust.trustOf('Casa', 'novo'), Trust.same);
     });
 
-    test('um que lança é tratado como não respondeu', () async {
-      var calls = 0;
-      makeAuto((_) async {
-        if (calls++ == 0) throw StateError('boom');
-        return true;
-      });
+    test('os servidores pareados aparecem mesmo sem serem anunciados, e não duplicam os anunciados', () async {
+      final store = MemoryPairedStore();
+      await store.save(paired('192.168.1.50:8443', name: 'Sítio', id: 'sss'));
+      await store.save(paired('10.0.0.1:8443', name: 'Casa', id: ''));
+      build(store: store, initial: [server('Casa', addresses: ['10.0.0.1'])]);
       await flush();
       await flush();
-      expect(controller.current.selected, isNotNull);
-      expect(calls, 2);
-    });
-
-    test(
-      'ninguém responde: sem escolha, no máximo 3 testes por rodada',
-      () async {
-        var calls = 0;
-        makeAuto(
-          (_) async {
-            calls++;
-            return false;
-          },
-          initial: [
-            for (var i = 0; i < 6; i++)
-              server('S$i', addresses: ['10.0.0.${i + 1}']),
-          ],
-        );
-        await flush();
-        await flush();
-        expect(controller.current.selected, isNull);
-        expect(controller.current.available, hasLength(6));
-        expect(calls, ServerListController.maxAutoProbes);
-      },
-    );
-
-    test('depois de uma rodada sem resposta, tenta de novo sozinho', () async {
-      var up = false;
-      makeAuto((_) async => up);
-      await flush();
+      final names = controller.current.available.map((s) => s.name).toList();
+      expect(names, ['Casa', 'Sítio']);
+      final sitio = controller.current.available.last;
+      expect(sitio.trusted, isTrue);
+      expect(sitio.baseUri, Uri.parse('https://192.168.1.50:8443'));
       expect(controller.current.selected, isNull);
-      up = true;
-      await Future<void>.delayed(retry * 3);
-      expect(controller.current.selected, isNotNull);
     });
 
-    test(
-      'o usuário escolhe durante o teste: o resultado do teste é descartado',
-      () async {
-        final gate = Completer<bool>();
-        var calls = 0;
-        makeAuto((_) {
-          calls++;
-          return calls == 1 ? gate.future : Future.value(true);
-        });
-        await flush();
-        final mine = controller.current.available.last;
-        expect(await controller.select(mine), isTrue);
-        gate.complete(true);
-        await flush();
-        expect(controller.current.selected, mine);
-      },
-    );
+    test('um servidor pareado continua na lista quando a rede deixa de anunciá-lo', () async {
+      final store = MemoryPairedStore();
+      await store.save(paired('10.0.0.1:8443', name: 'Casa', id: ''));
+      build(store: store, initial: [server('Casa', addresses: ['10.0.0.1'])]);
+      await flush();
+      await flush();
+      discovery.emit(const []);
+      await flush();
+      expect(controller.current.available.map((s) => s.name), ['Casa']);
+    });
 
-    test(
-      'lista chegando de novo durante o teste não dispara outro teste',
-      () async {
-        final gate = Completer<bool>();
-        var calls = 0;
-        makeAuto((_) {
-          calls++;
-          return gate.future;
-        });
-        await flush();
-        for (var i = 0; i < 10; i++) {
-          discovery.emit([
-            ...sampleServers,
-            server('Extra$i', addresses: ['10.1.0.$i']),
-          ]);
-          await flush();
-        }
-        expect(calls, 1);
-        gate.complete(true);
-        await flush();
-        expect(controller.current.selected, isNotNull);
-      },
-    );
+    testWidgets('um armazenamento que nunca responde não impede a lista de aparecer (depois do limite)', (tester) async {
+      discovery = FakeDiscovery(sampleServers);
+      controller = ServerListController(discovery: discovery, paired: _HangingStore());
+      addTearDown(controller.dispose);
+      await tester.pump();
+      expect(controller.current.loaded, isFalse);
+      await tester.pump(ServerListController.loadTimeout + const Duration(milliseconds: 10));
+      await tester.pump();
+      expect(controller.current.available, hasLength(3));
+    });
 
-    test(
-      'fechar a tela durante o teste não escolhe nada nem deixa timer',
-      () async {
-        final gate = Completer<bool>();
-        makeAuto((_) => gate.future);
-        await flush();
-        await controller.dispose();
-        gate.complete(true);
-        await flush();
-        expect(controller.current.selected, isNull);
-      },
-    );
+    test('concluir o pareamento duas vezes seguidas, ou com a tela já fechada, não quebra', () async {
+      build(initial: [server('Casa', addresses: ['10.0.0.1'])]);
+      await flush();
+      final p = ServerOption.fromPaired(paired('10.0.0.1:8443'));
+      await Future.wait([controller.completePairing(p), controller.completePairing(p)]);
+      expect(controller.current.selected?.name, 'Casa');
+      expect(controller.current.available, hasLength(1));
+    });
   });
 
   group('pausa com o app em segundo plano', () {
@@ -820,8 +766,8 @@ void main() {
       pausable = PausableDiscovery(initial ?? sampleServers);
       controller = ServerListController(
         discovery: pausable,
-        random: FixedRandom(0),
       );
+      pickFirst(controller);
       addTearDown(controller.dispose);
       return controller;
     }
@@ -907,4 +853,19 @@ class _SlowStore implements KeyValueStore {
 
   @override
   Future<void> write(String key, String value) async => _data[key] = value;
+}
+
+/// A device whose secure storage never answers.
+class _HangingStore implements PairedStore {
+  @override
+  Future<List<PairedServer>> all() => Completer<List<PairedServer>>().future;
+
+  @override
+  Future<PairedServer?> find(String hostPort) => Completer<PairedServer?>().future;
+
+  @override
+  Future<void> save(PairedServer server) => Completer<void>().future;
+
+  @override
+  Future<void> forget(String hostPort) => Completer<void>().future;
 }

@@ -99,27 +99,32 @@ String confirmationCode(String fingerprint) {
 
 /// A server this device has paired with: only its CA is trusted, and only for it.
 class PairedServer {
-  const PairedServer({required this.hostPort, required this.fingerprint, required this.caPem, required this.name});
+  const PairedServer({required this.hostPort, required this.fingerprint, required this.caPem, required this.name, this.serverId = ''});
 
   final String hostPort;
   final String fingerprint;
   final String caPem;
   final String name;
 
-  Map<String, String> toJson() => {'hostPort': hostPort, 'fingerprint': fingerprint, 'caPem': caPem, 'name': name};
+  /// The id the server announces for itself (`x-pindrel-id`), empty when it announced none.
+  final String serverId;
+
+  Map<String, String> toJson() => {'hostPort': hostPort, 'fingerprint': fingerprint, 'caPem': caPem, 'name': name, 'serverId': serverId};
 
   static PairedServer? fromJson(Object? json) {
     if (json is! Map) return null;
     final h = json['hostPort'], f = json['fingerprint'], c = json['caPem'], n = json['name'];
     if (h is! String || f is! String || c is! String || n is! String) return null;
     if (fingerprintOfPem(c) != f) return null; // a stored CA that is not the one it says it is is not used
-    return PairedServer(hostPort: h, fingerprint: f, caPem: c, name: n);
+    final id = json['serverId'];
+    return PairedServer(hostPort: h, fingerprint: f, caPem: c, name: n, serverId: id is String ? id : '');
   }
 }
 
 /// Where pairings are kept between runs (the app uses secure storage).
 abstract interface class PairedStore {
   Future<PairedServer?> find(String hostPort);
+  Future<List<PairedServer>> all();
   Future<void> save(PairedServer server);
   Future<void> forget(String hostPort);
 }
@@ -129,6 +134,9 @@ class MemoryPairedStore implements PairedStore {
 
   @override
   Future<PairedServer?> find(String hostPort) async => _items[hostPort];
+
+  @override
+  Future<List<PairedServer>> all() async => _items.values.toList();
 
   @override
   Future<void> save(PairedServer server) async => _items[server.hostPort] = server;
@@ -175,8 +183,11 @@ enum PairingFailure {
   /// Too many failed attempts from this device: the server asks it to wait.
   locked,
 
-  /// The person said the numbers were different (or did not answer in time).
+  /// The person said the numbers were different.
   declined,
+
+  /// Nobody answered before the digits expired (the server drops a session after a minute): ask again for new ones.
+  expired,
 
   /// The server answered something the protocol does not say: another program, or a different version.
   protocol,
@@ -246,8 +257,11 @@ Future<http.Client> clientForUri(Uri baseUri, PairedStore store) async {
 
 /// What the person sees while pairing by digits: compare [digits] with the ones on the server's connection page.
 class SasPrompt {
-  const SasPrompt({required this.digits, required this.name, required this.hostPort});
+  const SasPrompt({required this.digits, required this.name, required this.hostPort, required this.expiresAt});
   final String digits;
+
+  /// When the server forgets these digits: past it the person is given new ones.
+  final DateTime expiresAt;
   final String name;
   final String hostPort;
 
@@ -278,8 +292,21 @@ String _field(String body, String key) {
   return '';
 }
 
-/// How long the person has to compare and answer: a little over the server's own 60 s.
-const sasConfirmTimeout = Duration(seconds: 70);
+/// The shape of [pairWithDigits], so a screen can be tested with a fake.
+typedef DigitsPairer = Future<PairingResult> Function({
+  required String host,
+  required int port,
+  required PairedStore store,
+  required Future<bool> Function(SasPrompt prompt) confirm,
+  Duration timeout,
+  Duration confirmTimeout,
+  Random? random,
+  String serverId,
+});
+
+/// How long the person has to compare and answer: just under the server's own 60 s, so the app asks for new digits before
+/// the server forgets the old ones.
+const sasConfirmTimeout = Duration(seconds: 58);
 
 /// Pairs with the server at [host]:[port] by comparing six digits, with no camera and no code to type.
 ///
@@ -297,6 +324,7 @@ Future<PairingResult> pairWithDigits({
   Duration timeout = pairingTimeout,
   Duration confirmTimeout = sasConfirmTimeout,
   Random? random,
+  String serverId = '',
 }) async {
   final rng = random ?? Random.secure();
   final base = Uri(scheme: 'https', host: host, port: port);
@@ -346,10 +374,12 @@ Future<PairingResult> pairWithDigits({
 
     final digits = sasDigits(_unhex(fp, 32)!, a, s);
     bool same;
+    var expired = false;
     try {
-      same = await confirm(SasPrompt(digits: digits, name: name, hostPort: hostPort)).timeout(confirmTimeout);
+      same = await confirm(SasPrompt(digits: digits, name: name, hostPort: hostPort, expiresAt: DateTime.now().add(confirmTimeout))).timeout(confirmTimeout);
     } on TimeoutException {
       same = false;
+      expired = true;
     }
     // Best effort: tells the server the person has answered, so its page stops showing the digits and another device can
     // pair. The server drops the session by itself after a minute if this never arrives.
@@ -358,8 +388,8 @@ Future<PairingResult> pairWithDigits({
     } on Object {
       // nothing to do about it
     }
-    if (!same) return const PairingFailed(PairingFailure.declined);
-    final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name);
+    if (!same) return PairingFailed(expired ? PairingFailure.expired : PairingFailure.declined);
+    final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name, serverId: serverId);
     await store.save(server);
     return Paired(server);
   } on TimeoutException {

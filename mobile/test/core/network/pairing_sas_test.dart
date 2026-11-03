@@ -83,7 +83,7 @@ Future<PairingResult> run(FakeServer s, MemoryPairedStore store, Future<bool> Fu
 void main() {
   test('os 6 números são os mesmos que o gateway calcula (vetor fixo conferido com o Rust)', () {
     expect(sasDigits(List.filled(32, 7), List.filled(16, 1), List.filled(16, 2)), '180115');
-    expect(SasPrompt(digits: '012345', name: 'x', hostPort: 'h').grouped, '012 345');
+    expect(SasPrompt(digits: '012345', name: 'x', hostPort: 'h', expiresAt: DateTime(2030)).grouped, '012 345');
     for (var i = 0; i < 500; i++) {
       final d = sasDigits(List.filled(32, i % 256), List.filled(16, i ~/ 2), List.filled(16, 9));
       expect(d, matches(RegExp(r'^\d{6}$')));
@@ -132,11 +132,11 @@ void main() {
       expect(otherFp, isNot(goodFp));
     });
 
-    test('quem não responde a tempo (pessoa distraída) não pareia', () async {
+    test('quem não responde a tempo (pessoa distraída) não pareia e os números expiram', () async {
       server = await FakeServer().start();
       final never = Completer<bool>();
       final r = await run(server, store, (_) => never.future, confirmTimeout: const Duration(milliseconds: 200));
-      expect((r as PairingFailed).reason, PairingFailure.declined);
+      expect((r as PairingFailed).reason, PairingFailure.expired, reason: 'new digits are asked for, nothing is kept');
       expect(await store.find('127.0.0.1:${server.port}'), isNull);
     });
 
