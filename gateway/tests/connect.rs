@@ -415,10 +415,16 @@ async fn the_page_tells_whose_machine_it_is_and_what_it_does_not_do() {
     assert!(body.contains("<details class=\"choice\" id=\"web\" name=\"conexao\">\n<summary>Vou usar no navegador"));
     assert!(body.contains("<details class=\"choice\" id=\"app\" name=\"conexao\">\n<summary>Tenho o app Pindrel"));
     assert!(!body.contains("class=\"choice\" open"));
-    assert!(body.contains("prefers-reduced-motion: no-preference"), "motion must respect the system setting");
+    assert!(
+        body.contains("prefers-reduced-motion: no-preference"),
+        "motion must respect the system setting"
+    );
     // the title is painted at once: animating it from transparent leaves the page without a first contentful paint
     let motion = body.split("prefers-reduced-motion: no-preference").nth(1).unwrap();
-    assert!(!motion.contains("h1, ") && !motion.contains(".badge,"), "the title and badge must not start transparent");
+    assert!(
+        !motion.contains("h1, ") && !motion.contains(".badge,"),
+        "the title and badge must not start transparent"
+    );
     assert!(
         body.find("Vou usar no navegador").unwrap() < body.find("<svg xmlns").unwrap(),
         "the QR comes before the explanation"
