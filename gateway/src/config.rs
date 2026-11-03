@@ -6,9 +6,20 @@ use crate::{
     pool::parse_targets,
 };
 
+/// TLS listener (HTTP/1.1 + HTTP/2 over TCP, and HTTP/3 over UDP on the same port number when `http3`).
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    pub port: u16,
+    pub cert: std::path::PathBuf,
+    pub key: std::path::PathBuf,
+    pub http3: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub port: u16,
+    /// Off unless `TLS_PORT` is set (needs the `tls` build feature).
+    pub tls: Option<TlsConfig>,
     pub upstreams: Vec<SocketAddr>,
     pub server_name: String,
     pub mdns: bool,
@@ -41,6 +52,7 @@ impl Config {
     pub fn new(upstreams: Vec<SocketAddr>) -> Self {
         Self {
             port: 8080,
+            tls: None,
             upstreams,
             server_name: "Pindrel".into(),
             mdns: true,
@@ -96,6 +108,26 @@ impl Config {
         };
         let mdns = flag("MDNS_ENABLED", true);
         let rate_limit = flag("RATE_LIMIT_ENABLED", true);
+        let tls_port = get("TLS_PORT").map(|v| match v.parse::<u16>() {
+            Ok(p) if p > 0 => p,
+            _ => {
+                errs.push(format!("TLS_PORT: invalid value {v:?} (expected 1-65535)"));
+                0
+            }
+        });
+        let tls_cert = get("TLS_CERT_FILE");
+        let tls_key = get("TLS_KEY_FILE");
+        let tls = tls_port.map(|port| {
+            if tls_cert.is_none() || tls_key.is_none() {
+                errs.push("TLS_CERT_FILE and TLS_KEY_FILE: required when TLS_PORT is set".into());
+            }
+            TlsConfig {
+                port,
+                cert: tls_cert.clone().unwrap_or_default().into(),
+                key: tls_key.clone().unwrap_or_default().into(),
+                http3: true,
+            }
+        });
         let upstreams = match get("UPSTREAMS") {
             None => {
                 errs.push("UPSTREAMS: required (e.g. 127.0.0.1:9000-9099)".into());
@@ -119,8 +151,19 @@ impl Config {
         if !errs.is_empty() {
             return Err(errs);
         }
+        let mut tls = tls;
+        if let (Some(t), Some(v)) = (tls.as_mut(), get("HTTP3_ENABLED")) {
+            t.http3 = v.parse::<bool>().unwrap_or_else(|_| {
+                errs.push(format!("HTTP3_ENABLED: invalid value {v:?} (expected true or false)"));
+                true
+            });
+        }
+        if !errs.is_empty() {
+            return Err(errs);
+        }
         Ok(Self {
             port,
+            tls,
             upstreams,
             server_name: get("SERVER_NAME").unwrap_or_else(|| "Pindrel".into()),
             mdns,
@@ -227,5 +270,39 @@ mod tests {
     fn blank_values_count_as_unset() {
         let c = load(&[("UPSTREAMS", "127.0.0.1:1"), ("SERVER_NAME", "   "), ("GATEWAY_PORT", "")]).unwrap();
         assert_eq!((c.server_name.as_str(), c.port), ("Pindrel", 8080));
+    }
+
+    #[test]
+    fn tls_is_off_by_default_and_needs_both_files_when_on() {
+        assert!(load(&[("UPSTREAMS", "127.0.0.1:1")]).unwrap().tls.is_none());
+        let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TLS_PORT", "8443")]).unwrap_err();
+        assert!(errs.iter().any(|e| e.starts_with("TLS_CERT_FILE and TLS_KEY_FILE")), "{errs:?}");
+        let t = load(&[
+            ("UPSTREAMS", "127.0.0.1:1"),
+            ("TLS_PORT", "8443"),
+            ("TLS_CERT_FILE", "/c.pem"),
+            ("TLS_KEY_FILE", "/k.pem"),
+        ])
+        .unwrap()
+        .tls
+        .unwrap();
+        assert_eq!((t.port, t.http3), (8443, true));
+    }
+
+    #[test]
+    fn bad_tls_settings_are_reported_with_the_rest() {
+        for port in ["0", "70000", "x"] {
+            let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TLS_PORT", port)]).unwrap_err();
+            assert!(errs.iter().any(|e| e.starts_with("TLS_PORT")), "{port}: {errs:?}");
+        }
+        let errs = load(&[
+            ("UPSTREAMS", "127.0.0.1:1"),
+            ("TLS_PORT", "8443"),
+            ("TLS_CERT_FILE", "/c"),
+            ("TLS_KEY_FILE", "/k"),
+            ("HTTP3_ENABLED", "maybe"),
+        ])
+        .unwrap_err();
+        assert!(errs.iter().any(|e| e.starts_with("HTTP3_ENABLED")), "{errs:?}");
     }
 }

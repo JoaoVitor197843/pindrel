@@ -118,6 +118,15 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
     });
     app.pool.probe().await; // so the first request already knows who is up
 
+    #[cfg(feature = "tls")]
+    if let Some(t) = app.cfg.tls.clone() {
+        start_tls(&app, &t, rx.clone()).await?;
+    }
+    #[cfg(not(feature = "tls"))]
+    if app.cfg.tls.is_some() {
+        eprintln!("TLS_PORT is set but this build has no TLS (build with --features tls or http3)");
+    }
+
     let (closed_tx, closed) = oneshot::channel();
     let task = tokio::spawn(accept_loop(app.clone(), listener, rx, closed_tx));
     Ok(Running {
@@ -171,4 +180,22 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
         _ = graceful.shutdown() => {}
         _ = time::sleep(Duration::from_secs(5)) => eprintln!("shutdown: some connections were still open after 5 s"),
     }
+}
+
+#[cfg(feature = "tls")]
+async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Receiver<bool>) -> io::Result<()> {
+    let h3 = cfg!(feature = "http3") && t.http3;
+    let tcp = TcpListener::bind(("0.0.0.0", t.port)).await?;
+    let tcp_cfg = crate::tls::server_config(&t.cert, &t.key, &[b"h2", b"http/1.1"])?;
+    let alt_svc = h3.then(|| format!("h3=\":{}\"; ma=86400", t.port));
+    tokio::spawn(crate::tls::accept_loop(app.clone(), tcp, tcp_cfg, alt_svc, stop.clone()));
+    eprintln!("TLS: HTTP/1.1 + HTTP/2 on port {}", t.port);
+    #[cfg(feature = "http3")]
+    if h3 {
+        let quic_cfg = crate::tls::server_config(&t.cert, &t.key, &[b"h3"])?;
+        let endpoint = crate::h3::endpoint(quic_cfg, ([0, 0, 0, 0], t.port).into())?;
+        tokio::spawn(crate::h3::accept_loop(app.clone(), endpoint, stop));
+        eprintln!("TLS: HTTP/3 on udp port {}", t.port);
+    }
+    Ok(())
 }
