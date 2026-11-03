@@ -97,6 +97,20 @@ void main() {
     });
   });
 
+  group('código de conferência', () {
+    test('são os 12 primeiros dígitos da impressão digital, em maiúsculas, de 4 em 4', () {
+      final c = PairingCode.tryParse(code('192.168.1.5:8443', goodFp))!;
+      expect(c.confirmation, '${goodFp.substring(0, 4)}-${goodFp.substring(4, 8)}-${goodFp.substring(8, 12)}'.toUpperCase());
+      expect(c.confirmation, matches(RegExp(r'^[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$')));
+    });
+    test('entradas estranhas dão vazio, nunca lançam', () {
+      for (final s in ['', 'abc', '日本語日本語日本語日本語', 'zzzzzzzzzzzzzzzz', '12345678901']) {
+        expect(confirmationCode(s), '', reason: s);
+      }
+      expect(confirmationCode('ab' * 32), 'ABAB-ABAB-ABAB'); // the same as the gateway's
+    });
+  });
+
   group('fingerprintOfPem', () {
     test('é o SHA-256 do certificado e ignora quebras de linha', () {
       final pem = fixture('good-ca.pem');
