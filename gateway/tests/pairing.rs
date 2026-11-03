@@ -622,13 +622,13 @@ async fn the_master_code_pairs_without_digits_and_both_sides_prove_themselves() 
 #[tokio::test]
 async fn the_master_code_works_once_and_the_next_one_is_new() {
     let r = rig(|_| {}).await;
-    let _ = r.gw.app.pairing.take_notices();
+    let _ = r.gw.app.pairing.take_notice();
     let code = r.gw.app.pairing.master_for_tests();
     assert_eq!(master(&r, Some(device(2)), &code, &r.ca_fp, [3; 16]).await.0, 200);
     let next = r.gw.app.pairing.master_for_tests();
     assert_ne!(code, next);
     assert!(
-        r.gw.app.pairing.take_notices().is_empty(),
+        r.gw.app.pairing.take_notice().is_none(),
         "the gateway already printed the new code in its log"
     );
     // the old one is worth nothing
@@ -650,10 +650,10 @@ async fn somebody_in_between_with_another_ca_cannot_use_the_master_code_even_if_
 }
 
 #[tokio::test]
-async fn wrong_master_codes_lock_the_address_and_five_from_anyone_replace_every_code() {
+async fn wrong_master_codes_lock_the_address_and_five_from_anyone_replace_the_code() {
     let r = rig(|_| {}).await;
-    let _ = r.gw.app.pairing.take_notices();
-    let real = r.gw.app.pairing.masters_for_tests();
+    let _ = r.gw.app.pairing.take_notice();
+    let real = r.gw.app.pairing.master_for_tests();
     let wrong = [9u8; 10];
     for _ in 0..3 {
         assert_eq!(master(&r, Some(device(2)), &wrong, &r.ca_fp, [3; 16]).await.0, 403);
@@ -674,15 +674,15 @@ async fn wrong_master_codes_lock_the_address_and_five_from_anyone_replace_every_
     assert_eq!(master(&r, Some(device(3)), &wrong, &r.ca_fp, [3; 16]).await.0, 403);
     assert_eq!(master(&r, Some(device(4)), &wrong, &r.ca_fp, [3; 16]).await.0, 403);
     assert!(
-        r.gw.app.pairing.masters_for_tests().iter().all(|c| !real.contains(c)),
-        "every code of the log was replaced, not just the one that was being guessed at"
+        r.gw.app.pairing.master_for_tests() != real,
+        "the code of the log is not the one that was being guessed at"
     );
     assert!(
-        r.gw.app.pairing.take_notices().is_empty(),
-        "the replacements were already printed in the log"
+        r.gw.app.pairing.take_notice().is_none(),
+        "the replacement was already printed in the log"
     );
     // so a right (old) code no longer works from a clean address
-    assert_eq!(master(&r, Some(device(5)), &real[0], &r.ca_fp, [3; 16]).await.0, 403);
+    assert_eq!(master(&r, Some(device(5)), &real, &r.ca_fp, [3; 16]).await.0, 403);
     r.gw.shutdown().await;
 }
 
@@ -727,39 +727,5 @@ async fn rooms_and_the_master_way_work_at_the_same_time() {
         Some(by_digits.2.as_str()),
         "the room was not disturbed"
     );
-    r.gw.shutdown().await;
-}
-
-#[tokio::test]
-async fn several_people_read_the_log_and_each_uses_a_code_of_their_own_at_the_same_time() {
-    let r = rig(|c| c.master_codes = 6).await;
-    let codes = r.gw.app.pairing.masters_for_tests();
-    assert_eq!(codes.len(), 6);
-    // six people, six addresses, six different codes, all pairing at once
-    let one = |n: usize| {
-        let (r, code) = (&r, codes[n]);
-        async move { master(r, Some(device(80 + n as u8)), &code, &r.ca_fp, [n as u8 + 1; 16]).await }
-    };
-    let (a, b, c, d, e, f) = tokio::join!(one(0), one(1), one(2), one(3), one(4), one(5));
-    for (n, (status, body, ..)) in [a, b, c, d, e, f].into_iter().enumerate() {
-        assert_eq!(status, 200, "person {n}: {body}");
-    }
-    // every code that was used is replaced, and the old ones are worth nothing
-    let now = r.gw.app.pairing.masters_for_tests();
-    assert!(now.iter().all(|c| !codes.contains(c)));
-    assert_eq!(master(&r, Some(device(90)), &codes[3], &r.ca_fp, [9; 16]).await.0, 403);
-    r.gw.shutdown().await;
-}
-
-#[tokio::test]
-async fn using_one_code_does_not_disturb_the_others_and_the_number_of_codes_is_configurable() {
-    let r = rig(|c| c.master_codes = 3).await;
-    let codes = r.gw.app.pairing.masters_for_tests();
-    assert_eq!(codes.len(), 3);
-    assert_eq!(master(&r, Some(device(80)), &codes[1], &r.ca_fp, [1; 16]).await.0, 200);
-    let now = r.gw.app.pairing.masters_for_tests();
-    assert_eq!((now[0], now[2]), (codes[0], codes[2]), "the others stay as they were in the log");
-    assert_eq!(master(&r, Some(device(81)), &codes[0], &r.ca_fp, [2; 16]).await.0, 200);
-    assert_eq!(master(&r, Some(device(82)), &codes[2], &r.ca_fp, [3; 16]).await.0, 200);
     r.gw.shutdown().await;
 }
