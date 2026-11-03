@@ -7,10 +7,11 @@ import 'package:mobile/features/auth/data/pairing_flow.dart';
 
 import '../../support/pairing_fakes.dart';
 
-PairingFlow flow(FakePairer p, {FlowMode mode = FlowMode.compare, Uri? base, TlsOffer? offer = const TlsOffer(port: 8443, serverId: 'abc123')}) {
+PairingFlow flow(FakePairer p, {FlowMode mode = FlowMode.compare, String room = '4821', Uri? base, TlsOffer? offer = const TlsOffer(port: 8443, serverId: 'abc123')}) {
   return PairingFlow(
     base: base ?? Uri.parse('http://192.168.1.5:8086'),
     mode: mode,
+    room: room,
     store: MemoryPairedStore(),
     pairer: p.call,
     offerFor: (_) async => offer,
@@ -61,6 +62,7 @@ void main() {
     final f = PairingFlow(
       base: Uri.parse('http://192.168.1.5:8086'),
       mode: FlowMode.compare,
+      room: '4821',
       store: MemoryPairedStore(),
       pairer: p.call,
       offerFor: (_) async => const TlsOffer(port: 8443),
@@ -149,6 +151,7 @@ void main() {
     final f = PairingFlow(
       base: Uri.parse('https://192.168.1.5:9443'),
       mode: FlowMode.compare,
+      room: '4821',
       store: MemoryPairedStore(),
       pairer: p.call,
       offerFor: (_) async {
@@ -189,6 +192,7 @@ void main() {
     final f = PairingFlow(
       base: Uri.parse('http://192.168.1.5:8086'),
       mode: FlowMode.compare,
+      room: '4821',
       store: MemoryPairedStore(),
       pairer: p.call,
       offerFor: (_) => slow.future,
@@ -208,5 +212,78 @@ void main() {
     await until(f, FlowPhase.showing);
     expect(p.calls, 1);
     f.cancel();
+  });
+
+  test('uma sala que o servidor não conhece encerra o fluxo dizendo isso, sem números e sem parear', () async {
+    final p = FakePairer(['123456']);
+    final f = flow(p, room: '0000')..start();
+    await until(f, FlowPhase.failed);
+    expect(f.state.failure, PairingFailure.badRoom);
+    expect(f.state.prompt, isNull);
+    expect(p.rooms, ['0000']);
+  });
+
+  test('a mesma sala vale para todas as renovações dos números', () async {
+    final p = FakePairer(['111111', '222222']);
+    final f = flow(p, room: '4821')..start();
+    await until(f, FlowPhase.showing);
+    for (var i = 0; i < 200 && f.state.round < 2; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    await until(f, FlowPhase.showing);
+    expect(p.rooms.toSet(), {'4821'}, reason: 'the room is the same, the digits are new');
+    f.cancel();
+  });
+
+  group('código mestre', () {
+    PairingFlow master(FakeMasterPairer m, {String code = '0410-6105-0R3G-G28A', TlsOffer? offer = const TlsOffer(port: 8443, serverId: 'abc')}) => PairingFlow(
+          base: Uri.parse('http://192.168.1.5:8086'),
+          mode: FlowMode.master,
+          master: code,
+          store: MemoryPairedStore(),
+          pairer: FakePairer(['123456']).call,
+          masterPairer: m.call,
+          offerFor: (_) async => offer,
+        );
+
+    test('o código certo pareia sem nenhum número para comparar', () async {
+      final m = FakeMasterPairer();
+      final f = master(m)..start();
+      await until(f, FlowPhase.paired);
+      expect(f.state.prompt, isNull);
+      expect(f.state.paired!.serverId, 'abc');
+      expect(f.state.paired!.hostPort, '192.168.1.5:8443');
+      expect(m.tried, ['0410-6105-0R3G-G28A']);
+    });
+
+    test('o código errado é dito como recusado e nada é guardado', () async {
+      final f = master(FakeMasterPairer(), code: 'ZZZZ-ZZZZ-ZZZZ-ZZZZ')..start();
+      await until(f, FlowPhase.failed);
+      expect(f.state.failure, PairingFailure.badCode);
+      expect(f.state.paired, isNull);
+    });
+
+    test('digitar ou "são iguais" não fazem nada neste modo', () async {
+      final f = master(FakeMasterPairer(result: const PairingFailed(PairingFailure.locked)))..start();
+      expect(f.submit('123456'), isFalse);
+      f.confirmSame();
+      await until(f, FlowPhase.failed);
+      expect(f.state.failure, PairingFailure.locked);
+    });
+
+    test('servidor sem HTTPS: avisa e não tenta nada', () async {
+      final m = FakeMasterPairer();
+      final f = master(m, offer: null)..start();
+      await until(f, FlowPhase.noTls);
+      expect(m.tried, isEmpty);
+    });
+
+    test('fechar a tela no meio solta tudo', () async {
+      final m = FakeMasterPairer();
+      final f = master(m)..start();
+      f.cancel();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(f.state.phase, FlowPhase.cancelled);
+    });
   });
 }

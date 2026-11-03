@@ -17,7 +17,27 @@ List<int> unhex(String h) => [for (var i = 0; i < h.length; i += 2) int.parse(h.
 /// The server side of the protocol, as `gateway/src/pairing.rs` does it: it checks the commitment and computes its digits
 /// from ITS OWN CA ([serverCa]), whatever CA it hands out at `/server/ca.pem` ([servedCa]).
 class FakeServer {
-  FakeServer({this.servedCa, this.startReply, this.revealStatus = 204, this.name = 'Casa', this.dropFirstDone = false, this.doneStatus = 204});
+  FakeServer({
+    this.servedCa,
+    this.startReply,
+    this.revealStatus = 204,
+    this.name = 'Casa',
+    this.dropFirstDone = false,
+    this.doneStatus = 204,
+    this.room = '4821',
+    this.master,
+    this.masterAnswer = 'honest',
+  });
+
+  /// The only room that exists.
+  final String room;
+
+  /// The master code the log shows (10 bytes); `null`: the server has none.
+  final List<int>? master;
+
+  /// What the server's proof is like: `honest`, `wrong` (it does not know the code) or `garbage`.
+  final String masterAnswer;
+  final rooms = <String>[];
 
   /// What "done" answers: 409 plays a session that was replaced or expired.
   final int doneStatus;
@@ -51,8 +71,29 @@ class FakeServer {
       String field(String k) => body.split('\n').map((l) => l.split('=')).where((p) => p.length == 2 && p[0] == k).map((p) => p[1]).firstOrNull ?? '';
       if (req.uri.path == '/server/ca.pem') {
         res.write(servedCa ?? fixture('$serverCa-ca.pem'));
+      } else if (req.uri.path == '/server/pair/master/start') {
+        _commit = unhex(field('c'));
+        _nonceS = List.generate(16, (i) => i + 100);
+        res.write('id=${'cd' * 16}\nn=${_nonceS.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}\nname=$name\n');
+      } else if (req.uri.path == '/server/pair/master/finish') {
+        final a = unhex(field('a'));
+        final fp = unhex(fingerprintOfPem(fixture('$serverCa-ca.pem')));
+        final mine = master == null ? null : masterProof(master!, 'pindrel-master-a', fp, a, _nonceS);
+        final theirs = unhex(field('p'));
+        if (mine == null || theirs.length != mine.length || !_eq(theirs, mine)) {
+          res.statusCode = 403;
+          res.write('{"error":{"code":"pairing_denied"}}');
+        } else {
+          final key = masterAnswer == 'wrong' ? List.filled(10, 9) : master!;
+          final proof = masterAnswer == 'garbage' ? 'zz' : _hexOf(masterProof(key, 'pindrel-master-s', fp, a, _nonceS));
+          res.write('p=$proof\n');
+        }
       } else if (req.uri.path == '/server/pair/start') {
-        if (startReply != null) {
+        rooms.add(field('room'));
+        if (field('room') != room) {
+          res.statusCode = 404;
+          res.write('{"error":{"code":"pairing_room"}}');
+        } else if (startReply != null) {
           res.statusCode = startReply!.$1;
           res.write(startReply!.$2);
         } else {
@@ -84,13 +125,23 @@ class FakeServer {
     return this;
   }
 
+  static bool _eq(List<int> a, List<int> b) {
+    var d = 0;
+    for (var i = 0; i < a.length; i++) {
+      d |= a[i] ^ b[i];
+    }
+    return d == 0;
+  }
+
+  static String _hexOf(List<int> b) => b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+
   int get port => http.port;
   Future<void> stop() => http.close(force: true);
 }
 
 Future<PairingResult> run(FakeServer s, MemoryPairedStore store, Future<bool> Function(SasPrompt) confirm,
-        {Duration timeout = const Duration(seconds: 2), Duration confirmTimeout = const Duration(seconds: 2), int seed = 1}) =>
-    pairWithDigits(host: '127.0.0.1', port: s.port, store: store, confirm: confirm, timeout: timeout, confirmTimeout: confirmTimeout, random: Random(seed));
+        {Duration timeout = const Duration(seconds: 2), Duration confirmTimeout = const Duration(seconds: 2), int seed = 1, String room = '4821'}) =>
+    pairWithDigits(host: '127.0.0.1', port: s.port, room: room, store: store, confirm: confirm, timeout: timeout, confirmTimeout: confirmTimeout, random: Random(seed));
 
 void main() {
   test('os 6 números são os mesmos que o gateway calcula (vetor fixo conferido com o Rust)', () {
@@ -160,6 +211,16 @@ void main() {
       server = await FakeServer().start();
     });
 
+    test('a sala é enviada com o pedido, e uma sala que o servidor não conhece é dita como tal, sem parear', () async {
+      server = await FakeServer(room: '4821').start();
+      expect(await run(server, store, (p) async => true, room: '4821'), isA<Paired>());
+      expect(server.rooms.last, '4821');
+      final r = await run(server, store, (p) async => true, room: '0000');
+      expect((r as PairingFailed).reason, PairingFailure.badRoom);
+      expect(server.rooms.last, '0000');
+      expect(server.calls.where((c) => c == 'POST /server/pair/reveal'), hasLength(1), reason: 'a bad room never gets as far as the digits');
+    });
+
     test('se a pessoa diz que são diferentes, nada é guardado', () async {
       server = await FakeServer().start();
       final r = await run(server, store, (_) async => false);
@@ -205,7 +266,6 @@ void main() {
         (200, 'id=${'ab' * 16}\nn=${'0' * 31}\n'), // short number
         (200, 'id=${'ab' * 16}\nn=${'0' * 34}\n'),
         (500, 'boom'),
-        (404, 'nope'),
         (200, '\u0000\u0001garbage'),
       ]) {
         server = await FakeServer(startReply: reply).start();
@@ -228,7 +288,7 @@ void main() {
       expect(((await run(server, store, (_) async => true)) as PairingFailed).reason, PairingFailure.notACertificate);
       final port = server.port;
       await server.stop();
-      final closed = await pairWithDigits(host: '127.0.0.1', port: port, store: store, confirm: (_) async => true, timeout: const Duration(seconds: 1));
+      final closed = await pairWithDigits(host: '127.0.0.1', port: port, room: '4821', store: store, confirm: (_) async => true, timeout: const Duration(seconds: 1));
       expect((closed as PairingFailed).reason, PairingFailure.unreachable);
       server = await FakeServer().start();
     });
@@ -237,7 +297,7 @@ void main() {
       final mute = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
       mute.listen((_) {}); // accepts and never speaks
       final sw = Stopwatch()..start();
-      final r = await pairWithDigits(host: '127.0.0.1', port: mute.port, store: store, confirm: (_) async => true, timeout: const Duration(milliseconds: 500));
+      final r = await pairWithDigits(host: '127.0.0.1', port: mute.port, room: '4821', store: store, confirm: (_) async => true, timeout: const Duration(milliseconds: 500));
       expect((r as PairingFailed).reason, PairingFailure.unreachable);
       expect(sw.elapsed, lessThan(const Duration(seconds: 3)));
       await mute.close();

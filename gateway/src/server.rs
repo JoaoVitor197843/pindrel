@@ -225,6 +225,25 @@ async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Re
         if let Some(ip) = discovery::lan_ip() {
             eprintln!("TLS: pairing code  pindrel://pair?host={ip}:{}&ca={fp}", t.port);
         }
+        // The master code is shown here and nowhere else; a clock replaces it when it is too old and shows the new one.
+        #[cfg(feature = "selfcert")]
+        {
+            crate::handler::announce_master(app);
+            let (app, mut stop) = (app.clone(), stop.clone());
+            tokio::spawn(async move {
+                let mut tick = time::interval(std::time::Duration::from_secs(60));
+                loop {
+                    tokio::select! {
+                        _ = tick.tick() => {
+                            if let Some(code) = app.pairing.tick(std::time::Instant::now()) {
+                                crate::handler::print_master(&code);
+                            }
+                        }
+                        _ = stop.changed() => return,
+                    }
+                }
+            });
+        }
     }
     let tcp = TcpListener::bind(("0.0.0.0", t.port)).await?;
     let tcp_cfg = certs::server_config(resolver.clone(), &[b"h2", b"http/1.1"])?;

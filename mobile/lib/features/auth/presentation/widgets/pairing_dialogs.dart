@@ -24,6 +24,10 @@ String pairingFailureText(PairingFailure reason) => switch (reason) {
     'Os números não eram iguais, então nada foi guardado. Se não foi um engano, desconfie deste servidor.',
   PairingFailure.expired =>
     'Os números expiraram várias vezes sem resposta. Tente de novo quando estiver com o servidor à vista.',
+  PairingFailure.badRoom =>
+    'Esse código de sala não existe (mais): pode ter vencido, ter sido digitado errado ou já ter outro aparelho. Gere um novo na página do servidor.',
+  PairingFailure.badCode =>
+    'O código mestre foi recusado, ou este servidor não provou conhecê-lo. Ele vale uma vez e pode já ter sido trocado: veja a linha mais recente "código mestre" no registro (log) do gateway.',
   PairingFailure.fingerprintMismatch ||
   PairingFailure.notACertificate ||
   PairingFailure.protocol =>
@@ -125,11 +129,14 @@ class _CountdownState extends State<_Countdown> {
   }
 }
 
-PairingFlow _makeFlow(WidgetRef ref, Uri base, FlowMode mode) => PairingFlow(
+PairingFlow _makeFlow(WidgetRef ref, Uri base, FlowMode mode, String room, String master) => PairingFlow(
   base: base,
   mode: mode,
+  room: room,
+  master: master,
   store: ref.read(pairedStoreProvider),
   pairer: ref.read(digitsPairerProvider),
+  masterPairer: ref.read(masterPairerProvider),
   offerFor: ref.read(tlsOfferProvider),
 );
 
@@ -139,10 +146,10 @@ mixin _FlowHost<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   PairingFlow? flow;
   bool _closed = false;
 
-  void begin(Uri base, FlowMode mode) {
+  void begin(Uri base, FlowMode mode, {String room = '', String master = ''}) {
     flow?.removeListener(_changed);
     flow?.cancel();
-    final f = _makeFlow(ref, base, mode);
+    final f = _makeFlow(ref, base, mode, room, master);
     flow = f..addListener(_changed);
     onBegin();
     unawaited(f.start());
@@ -188,8 +195,36 @@ mixin _FlowHost<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   }
 }
 
-/// A server announced on the network that this device has not opened before: the app shows six numbers, the server's
-/// connection page shows six numbers, and the person says whether they are the same.
+const _roomHint =
+    'Na página de conexão do servidor, ou na tela de login do web, toque em "Gerar código de pareamento": aparece um código de 4 dígitos.';
+
+/// Only digits, at most four: the code of a room.
+final _roomFormatters = [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(4)];
+
+Widget _masterField(TextEditingController controller, {required bool enabled, required ValueChanged<String> onChanged, String? errorText}) {
+  return TextField(
+    key: const ValueKey('master-field'),
+    controller: controller,
+    enabled: enabled,
+    autocorrect: false,
+    enableSuggestions: false,
+    textCapitalization: TextCapitalization.characters,
+    inputFormatters: [LengthLimitingTextInputFormatter(40)],
+    onChanged: onChanged,
+    style: AppText.mono(16, color: AppColors.text, letterSpacing: 2),
+    decoration: InputDecoration(
+      labelText: AddServerDialog.masterLabel,
+      hintText: 'XXXX-XXXX-XXXX-XXXX',
+      errorText: errorText,
+      helperMaxLines: 3,
+      helperText: 'Está no registro (log) do gateway, na linha "PAIR: código mestre". Vale uma vez.',
+    ),
+  );
+}
+
+/// A server announced on the network that this device has not opened before. The person opens a room on a page of the server
+/// and types its 4-digit code here; then the app shows six numbers, that page shows six numbers, and the person says whether
+/// they are the same. With the master code from the server's log there is nothing to compare.
 class PairingDialog extends ConsumerStatefulWidget {
   const PairingDialog({super.key, required this.server});
 
@@ -208,17 +243,61 @@ class PairingDialog extends ConsumerStatefulWidget {
 
 class _PairingDialogState extends ConsumerState<PairingDialog>
     with _FlowHost<PairingDialog> {
+  final _room = TextEditingController();
+  final _master = TextEditingController();
+  bool _useMaster = false;
+  bool _failedWithMaster = false;
+
+  /// Whether the server has a secure side (`null` while asking).
+  bool? _tls;
+
   @override
   void initState() {
     super.initState();
+    unawaited(_checkTls());
+  }
+
+  Future<void> _checkTls() async {
     final base = widget.server.baseUri;
-    if (base != null) begin(base, FlowMode.compare);
+    if (base == null) return setState(() => _tls = false);
+    if (base.scheme == 'https') return setState(() => _tls = true);
+    final offer = await ref.read(tlsOfferProvider)(base);
+    if (mounted) setState(() => _tls = offer != null);
+  }
+
+  @override
+  void dispose() {
+    _room.dispose();
+    _master.dispose();
+    super.dispose();
+  }
+
+  bool get _ready => _useMaster ? parseMasterCode(_master.text) != null : _room.text.length == 4;
+
+  void _go() {
+    final base = widget.server.baseUri;
+    if (base == null || !_ready) return;
+    _failedWithMaster = _useMaster;
+    if (_useMaster) {
+      begin(base, FlowMode.master, master: _master.text);
+    } else {
+      begin(base, FlowMode.compare, room: _room.text);
+    }
+  }
+
+  /// Back to the first step (a wrong room code, a refused master code), keeping what is worth keeping.
+  void _again() {
+    flow?.removeListener(_changed);
+    flow?.cancel();
+    setState(() {
+      flow = null;
+      _room.clear();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final server = widget.server;
-    final state = flow?.state ?? const PairingFlowState();
     final title = 'Parear com ${server.name}';
     final cancel = TextButton(
       onPressed: () {
@@ -227,6 +306,101 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
       },
       child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
     );
+    final loading = _frame(
+      title: title,
+      body: const [
+        Row(
+          children: [
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+            SizedBox(width: 12),
+            Expanded(child: Text('Procurando a conexão segura…', style: _muted)),
+          ],
+        ),
+      ],
+      actions: [cancel],
+    );
+    if (_tls == null) return loading;
+    if (_tls == false) {
+      return _frame(
+        title: title,
+        body: const [
+          Text(
+            'Este servidor não oferece conexão segura (HTTPS). Você pode usá-lo mesmo assim, mas o que for enviado '
+            'pela rede, inclusive a senha, não ficará criptografado.',
+            style: _muted,
+          ),
+        ],
+        actions: [
+          TextButton(
+            onPressed: () async {
+              final nav = Navigator.of(context);
+              final controller = ref.read(serverListControllerProvider);
+              final ok = await controller.select(server, confirmed: true);
+              if (nav.mounted) nav.pop(ok);
+            },
+            child: const Text('Usar sem criptografia', style: TextStyle(color: AppColors.textMuted)),
+          ),
+          FilledButton(
+            autofocus: true,
+            style: _primary(),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      );
+    }
+    final state = flow?.state;
+    if (state == null) {
+      // the first step: the room code (or the master code)
+      return _frame(
+        title: title,
+        body: [
+          Text(
+            _useMaster
+                ? 'Digite o código mestre que o gateway mostra no registro (log). O app e o servidor provam um ao outro que o conhecem, e não é preciso comparar números.'
+                : '$_roomHint Digite-o aqui. Se preferir abrir a página no navegador: http://${server.address}/server/connect/?ficar',
+            style: _muted,
+          ),
+          const SizedBox(height: 14),
+          if (_useMaster)
+            _masterField(_master, enabled: true, onChanged: (_) => setState(() {}))
+          else
+            TextField(
+              key: const ValueKey('room-field'),
+              controller: _room,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: _roomFormatters,
+              textInputAction: TextInputAction.go,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _go(),
+              style: AppText.mono(28, color: AppColors.text, letterSpacing: 8),
+              decoration: const InputDecoration(labelText: AddServerDialog.roomLabel, hintText: '0000'),
+            ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const ValueKey('master-toggle'),
+              onPressed: () => setState(() => _useMaster = !_useMaster),
+              child: Text(
+                _useMaster ? 'Voltar para o código da sala' : 'Tenho o código mestre',
+                style: const TextStyle(color: AppColors.accentBorder),
+              ),
+            ),
+          ),
+        ],
+        actions: [
+          cancel,
+          FilledButton(
+            key: const ValueKey('pairing-go'),
+            style: _primary(),
+            onPressed: _ready ? _go : null,
+            child: Text(_useMaster ? 'Parear com o código mestre' : 'Continuar'),
+          ),
+        ],
+      );
+    }
     switch (state.phase) {
       case FlowPhase.looking:
       case FlowPhase.renewing:
@@ -235,17 +409,11 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
           body: [
             Row(
               children: [
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+                const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    state.phase == FlowPhase.renewing
-                        ? 'Gerando novos números…'
-                        : 'Procurando a conexão segura…',
+                    state.phase == FlowPhase.renewing ? 'Gerando novos números…' : 'Falando com o servidor…',
                     style: _muted,
                   ),
                 ),
@@ -255,46 +423,14 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
           actions: [cancel],
         );
       case FlowPhase.noTls:
-        return _frame(
-          title: title,
-          body: const [
-            Text(
-              'Este servidor não oferece conexão segura (HTTPS). Você pode usá-lo mesmo assim, mas o que for enviado '
-              'pela rede, inclusive a senha, não ficará criptografado.',
-              style: _muted,
-            ),
-          ],
-          actions: [
-            TextButton(
-              onPressed: () async {
-                final nav = Navigator.of(context);
-                final controller = ref.read(serverListControllerProvider);
-                final ok = await controller.select(server, confirmed: true);
-                if (nav.mounted) nav.pop(ok);
-              },
-              child: const Text(
-                'Usar sem criptografia',
-                style: TextStyle(color: AppColors.textMuted),
-              ),
-            ),
-            FilledButton(
-              autofocus: true,
-              style: _primary(),
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancelar'),
-            ),
-          ],
-        );
+        return loading; // not reached: the first step already looked for the secure side
       case FlowPhase.showing:
         final prompt = state.prompt!;
         return _frame(
           title: title,
           body: [
             Text(
-              'Abra a página de conexão do servidor (no navegador, em '
-              'http://${server.address}/server/connect/?ficar) ou, se você já usa o Pindrel no navegador, '
-              'o botão "Parear um aparelho" da tela de login. '
-              'Confira se os números abaixo são os mesmos que aparecem lá.',
+              'Sala ${_room.text}. Na página do servidor, confira se os números abaixo são os mesmos que aparecem lá.',
               style: _muted,
             ),
             const SizedBox(height: 18),
@@ -305,11 +441,7 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
                   child: Text(
                     prompt.grouped,
                     key: const ValueKey('pairing-digits'),
-                    style: AppText.mono(
-                      40,
-                      color: AppColors.text,
-                      letterSpacing: 6,
-                    ),
+                    style: AppText.mono(40, color: AppColors.text, letterSpacing: 6),
                   ),
                 ),
               ),
@@ -335,30 +467,29 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
       case FlowPhase.cancelled:
         return _frame(title: title, body: const [], actions: const []);
       case FlowPhase.failed:
+        final reason = state.failure ?? PairingFailure.protocol;
+        // a wrong room code or a refused master code is fixed by typing again; the rest can be retried as it was
+        final retypes = reason == PairingFailure.badRoom || reason == PairingFailure.badCode;
         return _frame(
           title: title,
-          body: [
-            Text(
-              pairingFailureText(state.failure ?? PairingFailure.protocol),
-              style: _muted,
-            ),
-          ],
+          body: [Text(pairingFailureText(reason), style: _muted)],
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text(
-                'Fechar',
-                style: TextStyle(color: AppColors.textMuted),
-              ),
+              child: const Text('Fechar', style: TextStyle(color: AppColors.textMuted)),
             ),
             FilledButton(
               autofocus: true,
               style: _primary(),
               onPressed: () {
-                final base = widget.server.baseUri;
-                if (base != null) begin(base, FlowMode.compare);
+                if (retypes) {
+                  _useMaster = _failedWithMaster && reason == PairingFailure.badCode;
+                  _again();
+                } else {
+                  _go();
+                }
               },
-              child: const Text('Tentar de novo'),
+              child: Text(retypes ? 'Digitar outro código' : 'Tentar de novo'),
             ),
           ],
         );
@@ -366,8 +497,9 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
   }
 }
 
-/// "Adicionar servidor": the address and, as a required field, the six numbers the server shows. The numbers exist only after
-/// the server has been reached, so the field is switched on then; it is cleared whenever new numbers replace the old ones.
+/// "Adicionar servidor": the address, an optional name and, as required fields, the code of a room opened on a page of the
+/// server and the six numbers that page then shows (switched on once the server was reached; cleared whenever new numbers
+/// replace the old ones). With the master code from the server's log those two are replaced by that one code.
 class AddServerDialog extends ConsumerStatefulWidget {
   const AddServerDialog({super.key});
 
@@ -380,7 +512,9 @@ class AddServerDialog extends ConsumerStatefulWidget {
   static const title = 'Adicionar servidor';
   static const addressLabel = 'Endereço do servidor';
   static const nameLabel = 'Nome do servidor (opcional)';
+  static const roomLabel = 'Código da sala (obrigatório)';
   static const codeLabel = 'Código de 6 dígitos (obrigatório)';
+  static const masterLabel = 'Código mestre (obrigatório)';
 
   @override
   ConsumerState<AddServerDialog> createState() => _AddServerDialogState();
@@ -390,10 +524,13 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
     with _FlowHost<AddServerDialog> {
   final _address = TextEditingController();
   final _name = TextEditingController();
+  final _room = TextEditingController();
+  final _master = TextEditingController();
   final _code = TextEditingController();
   String? _addressError;
+  String? _roomError;
   String? _codeError;
-  Uri? _target;
+  bool _useMaster = false;
   int _lastRound = 0;
   int _lastWrong = 0;
 
@@ -404,6 +541,8 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
   void dispose() {
     _address.dispose();
     _name.dispose();
+    _room.dispose();
+    _master.dispose();
     _code.dispose();
     super.dispose();
   }
@@ -436,11 +575,24 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
       return;
     }
     _addressError = null;
+    _roomError = null;
+    if (_useMaster) {
+      if (parseMasterCode(_master.text) == null) {
+        setState(() => _roomError = 'O código mestre tem 16 letras e números (XXXX-XXXX-XXXX-XXXX).');
+        return;
+      }
+    } else if (_room.text.length != 4) {
+      setState(() => _roomError = 'Digite o código da sala (4 dígitos). $_roomHint');
+      return;
+    }
     _codeError = null;
     _lastRound = 0;
     _lastWrong = 0;
-    _target = uri;
-    begin(uri, FlowMode.type);
+    if (_useMaster) {
+      begin(uri, FlowMode.master, master: _master.text);
+    } else {
+      begin(uri, FlowMode.type, room: _room.text);
+    }
   }
 
   void _submit() => flow?.submit(_code.text);
@@ -453,8 +605,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
     final showing = phase == FlowPhase.showing;
     final failed = phase == FlowPhase.failed;
     final noTls = phase == FlowPhase.noTls;
-    final locked = flow != null && !failed && !noTls; // the address is fixed once the search started
-    final target = _target;
+    final locked = flow != null && !failed && !noTls; // what was typed is fixed once the search started
     return _frame(
       title: AddServerDialog.title,
       body: [
@@ -465,8 +616,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
           keyboardType: TextInputType.url,
           autocorrect: false,
           enableSuggestions: false,
-          textInputAction: TextInputAction.go,
-          onSubmitted: (_) => _search(),
+          textInputAction: TextInputAction.next,
           style: AppText.mono(14, color: AppColors.text, letterSpacing: 0.5),
           decoration: InputDecoration(
             labelText: AddServerDialog.addressLabel,
@@ -489,46 +639,84 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
           ),
         ),
         const SizedBox(height: 14),
-        TextField(
-          key: const ValueKey('pairing-code-field'),
-          controller: _code,
-          enabled: showing,
-          keyboardType: TextInputType.number,
-          inputFormatters: [
-            FilteringTextInputFormatter.digitsOnly,
-            LengthLimitingTextInputFormatter(6),
-          ],
-          textInputAction: TextInputAction.done,
-          onChanged: (_) => setState(() => _codeError = null),
-          onSubmitted: (_) {
-            if (_code.text.length == 6) _submit();
-          },
-          style: AppText.mono(22, color: AppColors.text, letterSpacing: 6),
-          decoration: InputDecoration(
-            labelText: AddServerDialog.codeLabel,
-            hintText: '000000',
-            errorText: _codeError,
-            helperMaxLines: 4,
-            helperText: showing
-                ? 'Digite os 6 números que a página de conexão do servidor mostra (abra '
-                      'http://${target?.host}:${target?.port}/ num navegador).'
-                : 'Os números aparecem na página do servidor depois que você buscar.',
+        if (_useMaster)
+          _masterField(
+            _master,
+            enabled: !locked,
+            errorText: _roomError,
+            onChanged: (_) => setState(() => _roomError = null),
+          )
+        else
+          TextField(
+            key: const ValueKey('room-field'),
+            controller: _room,
+            enabled: !locked,
+            keyboardType: TextInputType.number,
+            inputFormatters: _roomFormatters,
+            textInputAction: TextInputAction.go,
+            onChanged: (_) => setState(() => _roomError = null),
+            onSubmitted: (_) => _search(),
+            style: AppText.mono(22, color: AppColors.text, letterSpacing: 6),
+            decoration: InputDecoration(
+              labelText: AddServerDialog.roomLabel,
+              hintText: '0000',
+              errorText: _roomError,
+              errorMaxLines: 4,
+              helperMaxLines: 4,
+              helperText: _roomHint,
+            ),
+          ),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            key: const ValueKey('master-toggle'),
+            onPressed: locked ? null : () => setState(() {
+              _useMaster = !_useMaster;
+              _roomError = null;
+            }),
+            child: Text(
+              _useMaster ? 'Voltar para o código da sala' : 'Tenho o código mestre',
+              style: TextStyle(color: locked ? AppColors.textMuted : AppColors.accentBorder),
+            ),
           ),
         ),
+        if (!_useMaster) ...[
+          const SizedBox(height: 8),
+          TextField(
+            key: const ValueKey('pairing-code-field'),
+            controller: _code,
+            enabled: showing,
+            keyboardType: TextInputType.number,
+            inputFormatters: [
+              FilteringTextInputFormatter.digitsOnly,
+              LengthLimitingTextInputFormatter(6),
+            ],
+            textInputAction: TextInputAction.done,
+            onChanged: (_) => setState(() => _codeError = null),
+            onSubmitted: (_) {
+              if (_code.text.length == 6) _submit();
+            },
+            style: AppText.mono(22, color: AppColors.text, letterSpacing: 6),
+            decoration: InputDecoration(
+              labelText: AddServerDialog.codeLabel,
+              hintText: '000000',
+              errorText: _codeError,
+              helperMaxLines: 4,
+              helperText: showing
+                  ? 'Digite os 6 números que a página do servidor mostra na sua sala.'
+                  : 'Os 6 números aparecem na página do servidor depois que você buscar.',
+            ),
+          ),
+        ],
         if (searching) ...[
           const SizedBox(height: 14),
           Row(
             children: [
-              const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
+              const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
               const SizedBox(width: 12),
               Text(
-                phase == FlowPhase.renewing
-                    ? 'Gerando novos números…'
-                    : 'Procurando o servidor…',
+                phase == FlowPhase.renewing ? 'Gerando novos números…' : 'Procurando o servidor…',
                 style: _muted,
               ),
             ],
@@ -566,10 +754,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
             flow?.reject();
             Navigator.of(context).pop(false);
           },
-          child: const Text(
-            'Cancelar',
-            style: TextStyle(color: AppColors.textMuted),
-          ),
+          child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
         ),
         if (showing)
           FilledButton(
@@ -581,7 +766,9 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
           FilledButton(
             style: _primary(),
             onPressed: searching ? null : _search,
-            child: Text(failed || noTls ? 'Tentar de novo' : 'Buscar servidor'),
+            child: Text(
+              failed || noTls ? 'Tentar de novo' : (_useMaster ? 'Parear com o código mestre' : 'Buscar servidor'),
+            ),
           ),
       ],
     );

@@ -36,6 +36,8 @@ pub struct App {
 impl App {
     pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
         let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
+        #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
+        let max_pairings = cfg.max_pairings;
         let pool = Pool::new(cfg.upstreams.clone());
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(4)
@@ -53,7 +55,7 @@ impl App {
             ws_stop: tokio::sync::watch::channel(false).0,
             ca: RwLock::new(None),
             #[cfg(feature = "selfcert")]
-            pairing: Default::default(),
+            pairing: crate::pairing::Pairing::new(max_pairings),
         }
     }
 }
@@ -345,14 +347,13 @@ fn plain_policy<B>(app: &App, peer: IpAddr, req: &Request<B>) -> Option<Response
         return None;
     }
     let (method, path) = (req.method(), req.uri().path());
+    // a page on the plain port asks for a room and watches it: that carries no secret of the app
+    if matches!(path, "/server/pair/room" | "/server/pair/room/close") {
+        return None;
+    }
     let safe = matches!(*method, Method::GET | Method::HEAD);
     // public, read-only, and what is needed to get started from a device that does not trust the server yet
-    if safe
-        && matches!(
-            path,
-            "/server/info/" | "/server/ca.pem" | "/server/ca.crt" | "/server/connect/" | "/server/pair/sas"
-        )
-    {
+    if safe && matches!(path, "/server/info/" | "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") {
         return None;
     }
     if crate::websocket::is_upgrade(req) || !safe {
@@ -395,7 +396,25 @@ fn field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
     found
 }
 
-/// `/server/pair/*`: pairing by six digits (see `pairing`). Only reached by peers on the local network.
+/// The header that carries the secret of a room (never in a URL, which ends up in logs and histories).
+#[cfg(feature = "selfcert")]
+pub const ROOM_HEADER: &str = "x-pindrel-room";
+
+/// Prints a master code the log has not shown yet. It is the only place the code is ever written.
+#[cfg(feature = "selfcert")]
+pub fn announce_master(app: &App) {
+    if let Some(code) = app.pairing.take_notice() {
+        print_master(&code);
+    }
+}
+
+#[cfg(feature = "selfcert")]
+pub fn print_master(code: &str) {
+    eprintln!("PAIR: código mestre {code} (vale uma vez, por até 24 h; quando for usado ou vencer, um novo aparece aqui)");
+}
+
+/// `/server/pair/*` (see `pairing`). Only reached by peers on the local network. A page asks for a room and watches it
+/// (`room`, any scheme: it only hands out a 4-digit code); the app pairs in a room or with the master code (TLS only).
 #[cfg(feature = "selfcert")]
 async fn pairing_routes<B>(app: &App, peer: IpAddr, secure: bool, req: Request<B>) -> Response<Body>
 where
@@ -405,29 +424,78 @@ where
     use crate::pairing::{hex, unhex, PairError};
     use std::time::Instant;
     let fail = |e: PairError| match e {
-        PairError::Busy => error(StatusCode::TOO_MANY_REQUESTS, "pairing_busy", "another device is pairing right now"),
+        PairError::Busy => error(StatusCode::TOO_MANY_REQUESTS, "pairing_busy", "no room is free right now"),
         PairError::Locked => error(
             StatusCode::TOO_MANY_REQUESTS,
             "pairing_locked",
             "too many failed attempts, try later",
         ),
         PairError::Invalid => error(StatusCode::BAD_REQUEST, "pairing_invalid", "invalid pairing request"),
+        PairError::UnknownRoom => error(StatusCode::NOT_FOUND, "pairing_room", "that room does not exist (any more)"),
+        PairError::Denied => error(StatusCode::FORBIDDEN, "pairing_denied", "the proof does not match"),
     };
-    let (method, path) = (req.method().clone(), req.uri().path().to_string());
-    if method == Method::GET && path == "/server/pair/sas" {
-        let mut r = match app.pairing.showing(Instant::now()) {
-            Some(s) => reply(
-                StatusCode::OK,
-                "text/plain; charset=utf-8",
-                format!("sas={}\nleft={}\nfrom={}\n", s.digits, s.seconds_left, s.from).into_bytes(),
-            ),
-            None => reply(StatusCode::NO_CONTENT, "text/plain", Vec::new()),
-        };
+    let no_store = |mut r: Response<Body>| {
         r.headers_mut()
             .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
-        return r;
+        r
+    };
+    let (method, path) = (req.method().clone(), req.uri().path().to_string());
+    let token = req.headers().get(ROOM_HEADER).and_then(|v| v.to_str().ok()).and_then(unhex::<16>);
+    let now = Instant::now();
+
+    // ---- the page side: no secrets of the app, so any scheme ------------------------------------------------------
+    match (method.clone(), path.as_str()) {
+        (Method::POST, "/server/pair/room") => {
+            return no_store(match app.pairing.open_room(peer, now) {
+                Ok((code, token)) => reply(
+                    StatusCode::OK,
+                    "text/plain; charset=utf-8",
+                    format!(
+                        "code={code:04}\ntoken={}\nttl={}\n",
+                        hex(&token),
+                        crate::pairing::ROOM_TTL.as_secs()
+                    )
+                    .into_bytes(),
+                ),
+                Err(e) => fail(e),
+            });
+        }
+        (Method::GET, "/server/pair/room") => {
+            let Some(token) = token else {
+                return fail(PairError::UnknownRoom);
+            };
+            return no_store(match app.pairing.room_view(&token, now) {
+                Some(v) => {
+                    let mut body = format!("left={}\n", v.room_left);
+                    if let Some(phone) = v.phone {
+                        body.push_str(&format!("phone={phone}\n"));
+                    }
+                    if let Some((d, left)) = v.digits {
+                        body.push_str(&format!("d={d},{left}\n"));
+                    }
+                    reply(StatusCode::OK, "text/plain; charset=utf-8", body.into_bytes())
+                }
+                None => fail(PairError::UnknownRoom),
+            });
+        }
+        (Method::POST, "/server/pair/room/close") => {
+            if let Some(token) = token {
+                app.pairing.close_room(&token);
+            }
+            return reply(StatusCode::NO_CONTENT, "text/plain", Vec::new());
+        }
+        _ => {}
     }
-    if method != Method::POST || !matches!(path.as_str(), "/server/pair/start" | "/server/pair/reveal" | "/server/pair/done") {
+
+    // ---- the app side: TLS only -----------------------------------------------------------------------------------
+    let known = [
+        "/server/pair/start",
+        "/server/pair/reveal",
+        "/server/pair/done",
+        "/server/pair/master/start",
+        "/server/pair/master/finish",
+    ];
+    if method != Method::POST || !known.contains(&path.as_str()) {
         return error(StatusCode::NOT_FOUND, "not_found", "not found");
     }
     if !secure {
@@ -440,47 +508,97 @@ where
     let Ok(text) = std::str::from_utf8(&body) else {
         return fail(PairError::Invalid);
     };
-    let now = Instant::now();
-    if path == "/server/pair/start" {
-        let Some(commit) = field(text, "c").and_then(unhex::<32>) else {
-            return fail(PairError::Invalid);
-        };
-        return match app.pairing.start(peer, commit, now) {
-            Ok((id, nonce)) => reply(
-                StatusCode::OK,
-                "text/plain; charset=utf-8",
-                format!("id={}\nn={}\nname={}\n", hex(&id), hex(&nonce), app.cfg.server_name).into_bytes(),
-            ),
-            Err(e) => fail(e),
-        };
-    }
-    if path == "/server/pair/done" {
-        let Some(id) = field(text, "id").and_then(unhex::<16>) else {
-            return fail(PairError::Invalid);
-        };
-        // 204: that session was the live one, so what the person compared is what the page showed. 409: it was replaced
-        // or expired, and the app must not pair on it.
-        return if app.pairing.finish(peer, id, now) {
-            reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
-        } else {
-            error(StatusCode::CONFLICT, "pairing_expired", "that pairing is no longer the current one")
-        };
-    }
-    let (Some(id), Some(a)) = (field(text, "id").and_then(unhex::<16>), field(text, "a").and_then(unhex::<16>)) else {
-        return fail(PairError::Invalid);
-    };
-    let Some(ca) = app.ca.read().ok().and_then(|c| c.clone()).and_then(|(_, fp)| unhex::<32>(&fp)) else {
-        return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
-    };
-    match app.pairing.reveal(peer, id, a, &ca, now) {
-        Ok(digits) => {
-            eprintln!(
-                "PAIR: código de conferência {digits} (aparelho {peer}); vale {} s",
-                crate::pairing::TTL.as_secs()
-            );
-            reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
-        }
+    let started = |ok: Result<([u8; 16], [u8; 16]), PairError>| match ok {
+        Ok((id, nonce)) => reply(
+            StatusCode::OK,
+            "text/plain; charset=utf-8",
+            format!("id={}\nn={}\nname={}\n", hex(&id), hex(&nonce), app.cfg.server_name).into_bytes(),
+        ),
         Err(e) => fail(e),
+    };
+    // this server's own CA, for the proofs and the digits
+    let own_ca = || app.ca.read().ok().and_then(|c| c.clone()).and_then(|(_, fp)| unhex::<32>(&fp));
+    match path.as_str() {
+        "/server/pair/start" => {
+            let (Some(commit), Some(room)) = (
+                field(text, "c").and_then(unhex::<32>),
+                field(text, "room")
+                    .filter(|r| r.len() == 4 && r.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|r| r.parse::<u16>().ok()),
+            ) else {
+                return fail(PairError::Invalid);
+            };
+            started(app.pairing.start(peer, room, commit, now))
+        }
+        "/server/pair/master/start" => {
+            let Some(commit) = field(text, "c").and_then(unhex::<32>) else {
+                return fail(PairError::Invalid);
+            };
+            let r = started(app.pairing.master_start(peer, commit, now));
+            announce_master(app); // an expired code may have been replaced
+            r
+        }
+        "/server/pair/done" => {
+            let Some(id) = field(text, "id").and_then(unhex::<16>) else {
+                return fail(PairError::Invalid);
+            };
+            // 204: that session was the live one, so what the person compared is what the page showed. 409: it was replaced
+            // or expired, and the app must not pair on it.
+            if app.pairing.finish(peer, id, now) {
+                reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
+            } else {
+                error(StatusCode::CONFLICT, "pairing_expired", "that pairing is no longer the current one")
+            }
+        }
+        "/server/pair/reveal" => {
+            let (Some(id), Some(a)) = (field(text, "id").and_then(unhex::<16>), field(text, "a").and_then(unhex::<16>)) else {
+                return fail(PairError::Invalid);
+            };
+            let Some(ca) = own_ca() else {
+                return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
+            };
+            match app.pairing.reveal(peer, id, a, &ca, now) {
+                Ok((digits, room)) => {
+                    eprintln!(
+                        "PAIR: sala {room:04}, código de conferência {digits} (aparelho {peer}); vale {} s",
+                        crate::pairing::TTL.as_secs()
+                    );
+                    reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
+                }
+                Err(e) => fail(e),
+            }
+        }
+        _ => {
+            // "/server/pair/master/finish": the proof of the app, and the server's own in return
+            let (Some(id), Some(a), Some(proof)) = (
+                field(text, "id").and_then(unhex::<16>),
+                field(text, "a").and_then(unhex::<16>),
+                field(text, "p").and_then(unhex::<32>),
+            ) else {
+                return fail(PairError::Invalid);
+            };
+            let Some(ca) = own_ca() else {
+                return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
+            };
+            let r = match app.pairing.master_finish(peer, id, a, &proof, &ca, now) {
+                Ok(answer) => {
+                    eprintln!("PAIR: aparelho {peer} pareado com o código mestre");
+                    reply(
+                        StatusCode::OK,
+                        "text/plain; charset=utf-8",
+                        format!("p={}\n", hex(&answer)).into_bytes(),
+                    )
+                }
+                Err(e) => {
+                    if e == PairError::Denied {
+                        eprintln!("PAIR: código mestre errado, vindo de {peer}");
+                    }
+                    fail(e)
+                }
+            };
+            announce_master(app); // used, or too many wrong tries: the new code is shown
+            r
+        }
     }
 }
 
