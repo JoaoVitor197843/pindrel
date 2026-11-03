@@ -28,6 +28,9 @@ pub struct App {
     pub ws_stop: tokio::sync::watch::Sender<bool>,
     /// Public CA certificate (PEM) and its SHA-256 fingerprint, when the gateway keeps its own CA (`TLS_AUTO`).
     pub ca: RwLock<Option<(String, String)>>,
+    /// The session of the pairing by six digits (see `pairing`).
+    #[cfg(feature = "selfcert")]
+    pub pairing: crate::pairing::Pairing,
 }
 
 impl App {
@@ -49,6 +52,8 @@ impl App {
             ws_per_ip: crate::limiter::ConnLimit::new(cfg_ws_ip),
             ws_stop: tokio::sync::watch::channel(false).0,
             ca: RwLock::new(None),
+            #[cfg(feature = "selfcert")]
+            pairing: Default::default(),
         }
     }
 }
@@ -140,8 +145,14 @@ where
     }
     let path = req.uri().path();
     // the CA and the page that explains it are for the people on the network of this server, never for a tunnel or the internet
-    if matches!(path, "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") && (via_proxy || !lan_peer(peer.ip())) {
+    if (matches!(path, "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") || path.starts_with("/server/pair/"))
+        && (via_proxy || !lan_peer(peer.ip()))
+    {
         return Ok(error(StatusCode::NOT_FOUND, "not_found", "not found"));
+    }
+    #[cfg(feature = "selfcert")]
+    if path.starts_with("/server/pair/") {
+        return Ok(pairing_routes(&app, peer.ip(), secure, req).await);
     }
     if matches!(path, "/server/connect/" | "/server/ca.crt") && matches!(*req.method(), Method::GET | Method::HEAD) {
         return Ok(public_ca_routes(&app, &req));
@@ -336,7 +347,12 @@ fn plain_policy<B>(app: &App, peer: IpAddr, req: &Request<B>) -> Option<Response
     let (method, path) = (req.method(), req.uri().path());
     let safe = matches!(*method, Method::GET | Method::HEAD);
     // public, read-only, and what is needed to get started from a device that does not trust the server yet
-    if safe && matches!(path, "/server/info/" | "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") {
+    if safe
+        && matches!(
+            path,
+            "/server/info/" | "/server/ca.pem" | "/server/ca.crt" | "/server/connect/" | "/server/pair/sas"
+        )
+    {
         return None;
     }
     if crate::websocket::is_upgrade(req) || !safe {
@@ -360,6 +376,106 @@ fn plain_policy<B>(app: &App, peer: IpAddr, req: &Request<B>) -> Option<Response
         r.headers_mut().insert(header::LOCATION, v);
     }
     Some(r)
+}
+
+/// The value of `key` in a body of `key=value` lines; `None` when it is missing or given twice.
+#[cfg(feature = "selfcert")]
+fn field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+    let mut found = None;
+    for line in body.lines() {
+        if let Some((k, v)) = line.trim().split_once('=') {
+            if k == key {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(v.trim());
+            }
+        }
+    }
+    found
+}
+
+/// `/server/pair/*`: pairing by six digits (see `pairing`). Only reached by peers on the local network.
+#[cfg(feature = "selfcert")]
+async fn pairing_routes<B>(app: &App, peer: IpAddr, secure: bool, req: Request<B>) -> Response<Body>
+where
+    B: HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    use crate::pairing::{hex, unhex, PairError};
+    use std::time::Instant;
+    let fail = |e: PairError| match e {
+        PairError::Busy => error(StatusCode::TOO_MANY_REQUESTS, "pairing_busy", "another device is pairing right now"),
+        PairError::Locked => error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "pairing_locked",
+            "too many failed attempts, try later",
+        ),
+        PairError::Invalid => error(StatusCode::BAD_REQUEST, "pairing_invalid", "invalid pairing request"),
+    };
+    let (method, path) = (req.method().clone(), req.uri().path().to_string());
+    if method == Method::GET && path == "/server/pair/sas" {
+        let mut r = match app.pairing.showing(Instant::now()) {
+            Some(s) => reply(
+                StatusCode::OK,
+                "text/plain; charset=utf-8",
+                format!("sas={}\nleft={}\nfrom={}\n", s.digits, s.seconds_left, s.from).into_bytes(),
+            ),
+            None => reply(StatusCode::NO_CONTENT, "text/plain", Vec::new()),
+        };
+        r.headers_mut()
+            .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+        return r;
+    }
+    if method != Method::POST || !matches!(path.as_str(), "/server/pair/start" | "/server/pair/reveal" | "/server/pair/done") {
+        return error(StatusCode::NOT_FOUND, "not_found", "not found");
+    }
+    if !secure {
+        return error(StatusCode::UPGRADE_REQUIRED, "https_required", "pairing happens only over HTTPS");
+    }
+    let body = match time::timeout(app.cfg.body_timeout, Limited::new(req.into_body(), 512).collect()).await {
+        Ok(Ok(b)) => b.to_bytes(),
+        _ => return error(StatusCode::BAD_REQUEST, "bad_request", "could not read the request body"),
+    };
+    let Ok(text) = std::str::from_utf8(&body) else {
+        return fail(PairError::Invalid);
+    };
+    let now = Instant::now();
+    if path == "/server/pair/start" {
+        let Some(commit) = field(text, "c").and_then(unhex::<32>) else {
+            return fail(PairError::Invalid);
+        };
+        return match app.pairing.start(peer, commit, now) {
+            Ok((id, nonce)) => reply(
+                StatusCode::OK,
+                "text/plain; charset=utf-8",
+                format!("id={}\nn={}\nname={}\n", hex(&id), hex(&nonce), app.cfg.server_name).into_bytes(),
+            ),
+            Err(e) => fail(e),
+        };
+    }
+    if path == "/server/pair/done" {
+        if let Some(id) = field(text, "id").and_then(unhex::<16>) {
+            app.pairing.finish(peer, id);
+        }
+        return reply(StatusCode::NO_CONTENT, "text/plain", Vec::new());
+    }
+    let (Some(id), Some(a)) = (field(text, "id").and_then(unhex::<16>), field(text, "a").and_then(unhex::<16>)) else {
+        return fail(PairError::Invalid);
+    };
+    let Some(ca) = app.ca.read().ok().and_then(|c| c.clone()).and_then(|(_, fp)| unhex::<32>(&fp)) else {
+        return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
+    };
+    match app.pairing.reveal(peer, id, a, &ca, now) {
+        Ok(digits) => {
+            eprintln!(
+                "PAIR: código de conferência {digits} (aparelho {peer}); vale {} s",
+                crate::pairing::TTL.as_secs()
+            );
+            reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
+        }
+        Err(e) => fail(e),
+    }
 }
 
 /// `/server/connect/` (the page) and `/server/ca.crt` (the CA as a download); `/server/ca.pem` is handled with the others.

@@ -479,3 +479,21 @@ async fn a_device_that_already_trusts_the_server_is_sent_on_unless_it_asks_to_st
     assert!(!body.contains("location.search +") || !body.contains("location.href = location.search"));
     gw.shutdown().await;
 }
+
+#[tokio::test]
+async fn the_app_choice_leads_with_the_six_digits_and_keeps_the_qr_as_a_second_way() {
+    let (_a, gw, _d, _tls) = started(|_| {}).await;
+    let (head, body) = raw(gw.addr, &req("GET", "/server/connect/", "192.168.1.5:8080", "")).await;
+    assert!(
+        head.to_lowercase().contains("connect-src 'self' https://"),
+        "the page asks the server for the digits: {head}"
+    );
+    // the digits come first, the QR sits inside a closed "prefer a QR" box after them
+    let (digits, qr) = (body.find("6 números").unwrap(), body.find("Prefiro ler um QR code").unwrap());
+    assert!(digits < qr && qr < body.find("<svg xmlns").unwrap());
+    // live: asks for them only while the choice is open, never stores them, and fills the text (not HTML)
+    assert!(body.contains("/server/pair/sas") && body.contains("textContent") && body.contains("clearInterval"));
+    assert!(!body.contains("innerHTML"), "what the server sends is shown as text");
+    assert!(body.contains("Nenhum aparelho está pareando agora"));
+    gw.shutdown().await;
+}

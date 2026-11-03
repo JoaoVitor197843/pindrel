@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -167,6 +168,18 @@ enum PairingFailure {
 
   /// Something answered, but not with a certificate.
   notACertificate,
+
+  /// Another device is pairing with that server right now (try again in a minute).
+  busy,
+
+  /// Too many failed attempts from this device: the server asks it to wait.
+  locked,
+
+  /// The person said the numbers were different (or did not answer in time).
+  declined,
+
+  /// The server answered something the protocol does not say: another program, or a different version.
+  protocol,
 }
 
 class PairingFailed extends PairingResult {
@@ -229,4 +242,137 @@ Future<http.Client> clientForUri(Uri baseUri, PairedStore store) async {
   final key = baseUri.host.contains(':') ? '[${baseUri.host}]:${baseUri.port}' : '${baseUri.host}:${baseUri.port}';
   final paired = baseUri.scheme == 'https' ? await store.find(key) : null;
   return paired == null ? http.Client() : clientFor(paired);
+}
+
+/// What the person sees while pairing by digits: compare [digits] with the ones on the server's connection page.
+class SasPrompt {
+  const SasPrompt({required this.digits, required this.name, required this.hostPort});
+  final String digits;
+  final String name;
+  final String hostPort;
+
+  /// `123 456`, easier to read and to say aloud.
+  String get grouped => '${digits.substring(0, 3)} ${digits.substring(3)}';
+}
+
+/// The six digits both sides compute (see `gateway/src/pairing.rs`, which has the protocol and the reasoning): a hash of the
+/// fingerprint of the CA that was downloaded and of both random numbers, reduced to six decimal digits.
+String sasDigits(List<int> caFingerprint, List<int> nonceA, List<int> nonceS) {
+  final d = sha256.convert([...utf8.encode('pindrel-sas-v1'), ...caFingerprint, ...nonceA, ...nonceS]).bytes;
+  final n = (d[0] << 24 | d[1] << 16 | d[2] << 8 | d[3]) % 1000000;
+  return n.toString().padLeft(6, '0');
+}
+
+String _hex(List<int> bytes) => bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+List<int>? _unhex(String text, int length) {
+  if (text.length != length * 2 || !RegExp(r'^[0-9a-fA-F]+$').hasMatch(text)) return null;
+  return [for (var i = 0; i < length; i++) int.parse(text.substring(i * 2, i * 2 + 2), radix: 16)];
+}
+
+String _field(String body, String key) {
+  for (final line in const LineSplitter().convert(body)) {
+    final i = line.indexOf('=');
+    if (i > 0 && line.substring(0, i) == key) return line.substring(i + 1).trim();
+  }
+  return '';
+}
+
+/// How long the person has to compare and answer: a little over the server's own 60 s.
+const sasConfirmTimeout = Duration(seconds: 70);
+
+/// Pairs with the server at [host]:[port] by comparing six digits, with no camera and no code to type.
+///
+/// 1. The CA is downloaded without being checked (nothing to check it against yet) and its fingerprint is taken.
+/// 2. The app commits to a random number, the server answers with its own, the app reveals its number.
+/// 3. Both sides compute the same six digits only if they hold the same CA; [confirm] shows them to the person, who compares
+///    with the server's connection page and answers. Only on "same" is the CA kept (and trusted for that server alone).
+///
+/// Somebody in between presents another CA, gets other digits and cannot choose them: see the protocol notes in the gateway.
+Future<PairingResult> pairWithDigits({
+  required String host,
+  required int port,
+  required PairedStore store,
+  required Future<bool> Function(SasPrompt prompt) confirm,
+  Duration timeout = pairingTimeout,
+  Duration confirmTimeout = sasConfirmTimeout,
+  Random? random,
+}) async {
+  final rng = random ?? Random.secure();
+  final base = Uri(scheme: 'https', host: host, port: port);
+  final hostPort = host.contains(':') ? '[$host]:$port' : '$host:$port';
+  final client = HttpClient()..connectionTimeout = timeout;
+  client.badCertificateCallback = (_, h, p) => h == host && p == port;
+
+  Future<(int, String)> call(String method, String path, [String body = '']) async {
+    final request = await (method == 'GET' ? client.getUrl(base.resolve(path)) : client.postUrl(base.resolve(path))).timeout(timeout);
+    if (method == 'POST') {
+      request.headers.contentType = ContentType.text;
+      request.write(body);
+    }
+    final response = await request.close().timeout(timeout);
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in response.timeout(timeout)) {
+      bytes.add(chunk);
+      if (bytes.length > _maxCaBytes) throw const FormatException('answer too large');
+    }
+    return (response.statusCode, utf8.decode(bytes.takeBytes(), allowMalformed: true));
+  }
+
+  PairingFailed? refusal(int status) => switch (status) {
+        429 => const PairingFailed(PairingFailure.busy),
+        _ => const PairingFailed(PairingFailure.protocol),
+      };
+
+  try {
+    final (caStatus, pem) = await call('GET', '/server/ca.pem');
+    if (caStatus != 200) return const PairingFailed(PairingFailure.notACertificate);
+    final fp = fingerprintOfPemOrNull(pem);
+    if (fp == null) return const PairingFailed(PairingFailure.notACertificate);
+
+    final a = List<int>.generate(16, (_) => rng.nextInt(256));
+    final (startStatus, startBody) = await call('POST', '/server/pair/start', 'c=${sha256.convert(a)}\n');
+    if (startStatus == 429) return PairingFailed(startBody.contains('pairing_locked') ? PairingFailure.locked : PairingFailure.busy);
+    if (startStatus != 200) return refusal(startStatus)!;
+    final id = _field(startBody, 'id');
+    final s = _unhex(_field(startBody, 'n'), 16);
+    if (_unhex(id, 16) == null || s == null) return const PairingFailed(PairingFailure.protocol);
+    var name = _field(startBody, 'name').replaceAll(RegExp(r'[\u0000-\u001f\u007f]'), '').trim();
+    if (name.isEmpty || name.length > PairingCode.maxNameLength) name = host;
+
+    final (revealStatus, _) = await call('POST', '/server/pair/reveal', 'id=$id\na=${_hex(a)}\n');
+    if (revealStatus == 429) return const PairingFailed(PairingFailure.locked);
+    if (revealStatus != 204) return const PairingFailed(PairingFailure.protocol);
+
+    final digits = sasDigits(_unhex(fp, 32)!, a, s);
+    bool same;
+    try {
+      same = await confirm(SasPrompt(digits: digits, name: name, hostPort: hostPort)).timeout(confirmTimeout);
+    } on TimeoutException {
+      same = false;
+    }
+    // Best effort: tells the server the person has answered, so its page stops showing the digits and another device can
+    // pair. The server drops the session by itself after a minute if this never arrives.
+    try {
+      await call('POST', '/server/pair/done', 'id=$id\n');
+    } on Object {
+      // nothing to do about it
+    }
+    if (!same) return const PairingFailed(PairingFailure.declined);
+    final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name);
+    await store.save(server);
+    return Paired(server);
+  } on TimeoutException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on SocketException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on HandshakeException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on HttpException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on FormatException {
+    return const PairingFailed(PairingFailure.protocol);
+  } finally {
+    client.close(force: true);
+  }
 }

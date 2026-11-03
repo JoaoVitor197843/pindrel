@@ -120,7 +120,7 @@ impl Page<'_> {
 
     pub fn csp(&self) -> String {
         format!(
-            "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{}'; img-src data:; connect-src {}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{}'; img-src data:; connect-src 'self' {}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
             self.nonce,
             self.https_origin()
         )
@@ -188,6 +188,8 @@ details.os > summary { cursor:pointer; font-weight:600; padding:4px 0; }
 ol { padding-left:20px; margin:8px 0; } li { margin:4px 0; }
 a { color:var(--accent-text); }
 :focus-visible { outline:2px solid var(--accent-line); outline-offset:2px; }
+.sas { border:1px dashed var(--field); border-radius:14px; padding:6px 16px; margin:14px 0; }
+.sas .short { font-size:44px; letter-spacing:8px; text-align:center; }
 .fp { font:14px monospace; word-spacing:6px; overflow-wrap:anywhere; }
 
 /* Motion: everything below is switched off for people who asked their system for less movement. */
@@ -260,13 +262,24 @@ a { color:var(--accent-text); }
 
 <details class="choice" id="app" name="conexao">
 <summary>Tenho o app Pindrel</summary>
-<p style="margin-top:12px">Abra o app, escolha <strong>Adicionar servidor</strong> e leia o código abaixo com a câmera, ou cole o texto. O app passa a confiar somente neste servidor: não é preciso instalar nada no sistema.</p>
+<p style="margin-top:12px">No app, escolha <strong>Adicionar servidor</strong> e toque neste servidor. O app vai mostrar <strong>6 números</strong>. Os mesmos 6 números aparecem aqui embaixo: se forem iguais, toque em <em>São iguais</em> no app. Só isso. Nada precisa ser instalado no sistema.</p>
 <p class="muted">A tela de pareamento do app ainda está em desenvolvimento; até lá, use "Vou usar no navegador".</p>
+<div id="sas" class="sas" aria-live="polite">
+<p class="muted" id="sas-idle">Nenhum aparelho está pareando agora. Quando você iniciar o pareamento no app, os números aparecem aqui.</p>
+<div id="sas-on" hidden>
+<p class="muted">Confira com o app (aparelho <span class="mono" id="sas-from"></span>):</p>
+<div class="short" id="sas-digits"></div>
+<p class="muted">Vale por mais <span id="sas-left"></span> s. Se os números forem diferentes, <strong>não confirme</strong>: toque em <em>Cancelar</em> no app.</p>
+</div>
+</div>
+<p class="muted">Por que números? O app confere, com você, que está falando com este servidor e não com outro aparelho da rede que se passa por ele. Os números mudam a cada tentativa e só valem por um minuto, então não dá para decorar nem preparar um falso.</p>
+<details class="os"><summary>Prefiro ler um QR code</summary>
+<p>O código abaixo contém só o endereço do servidor e a impressão digital da chave dele. Não contém senha.</p>
 <div class="qr">@@SVG@@</div>
-<p class="muted"><strong>O que este código contém:</strong> só o endereço do servidor e a impressão digital da chave dele. Não contém senha. Você pode ler como texto:</p>
 <div class="code" id="code">@@CODE@@</div>
 <p class="muted">Código de conferência no app: <span class="mono">@@SHORT@@</span></p>
 <div class="row"><button class="btn ghost" id="copy" type="button">Copiar código</button></div>
+</details>
 </details>
 
 <section aria-labelledby="why">
@@ -302,6 +315,31 @@ a { color:var(--accent-text); }
     clearTimeout(timer);
     s.className = 'todo'; s.textContent = 'Este aparelho ainda não confia neste servidor (ou não consegue chegar à porta segura). Siga os passos abaixo, ou use o app.';
   });
+
+  // While the app choice is open, ask every 2 s whether a device is pairing and show its six digits (nothing else is stored).
+  var app = document.getElementById('app'), idle = document.getElementById('sas-idle'), on = document.getElementById('sas-on');
+  var poll = null, busy = false;
+  function tick() {
+    if (busy || document.hidden) return; busy = true;
+    var ac = typeof AbortController === 'function' ? new AbortController() : null;
+    var to = setTimeout(function () { if (ac) ac.abort(); }, 3000);
+    fetch('/server/pair/sas', { cache: 'no-store', signal: ac ? ac.signal : undefined }).then(function (r) {
+      return r.status === 200 ? r.text() : '';
+    }).then(function (t) {
+      var v = {}; t.split('\n').forEach(function (l) { var i = l.indexOf('='); if (i > 0) v[l.slice(0, i)] = l.slice(i + 1); });
+      if (/^\d{6}$/.test(v.sas || '')) {
+        document.getElementById('sas-digits').textContent = v.sas.slice(0, 3) + ' ' + v.sas.slice(3);
+        document.getElementById('sas-left').textContent = String(parseInt(v.left, 10) || 0);
+        document.getElementById('sas-from').textContent = (v.from || '').replace(/[^0-9a-f:.]/gi, '');
+        idle.hidden = true; on.hidden = false;
+      } else { idle.hidden = false; on.hidden = true; }
+    }).catch(function () {}).then(function () { clearTimeout(to); busy = false; });
+  }
+  function sync() {
+    if (app.open && !poll) { tick(); poll = setInterval(tick, 2000); }
+    if (!app.open && poll) { clearInterval(poll); poll = null; }
+  }
+  app.addEventListener('toggle', sync); sync();
   var b = document.getElementById('copy');
   b.addEventListener('click', function () {
     var t = document.getElementById('code').textContent;
