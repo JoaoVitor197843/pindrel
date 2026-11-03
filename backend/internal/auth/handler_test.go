@@ -3,6 +3,7 @@ package auth_test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -278,6 +279,39 @@ func TestDB_Handler_Login_Success(t *testing.T) {
 	}
 	if !cookie.HttpOnly {
 		t.Fatal("expected refresh_token cookie to be HttpOnly")
+	}
+}
+
+// The cookie is Secure exactly when the client came over TLS: directly, or through the gateway/tunnel that says so.
+func TestDB_Handler_Login_CookieIsSecureOnlyOverTLS(t *testing.T) {
+	handler, repo, cleanup := setupTest(t, true)
+	defer cleanup()
+	u := registerUser(t, handler, repo, "secure-cookie")
+
+	cases := []struct {
+		name   string
+		tweak  func(*http.Request)
+		secure bool
+	}{
+		{"plain http", func(r *http.Request) {}, false},
+		{"gateway over https", func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https") }, true},
+		{"upper case value", func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "HTTPS") }, true},
+		{"gateway over http", func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "http") }, false},
+		{"nonsense value", func(r *http.Request) { r.Header.Set("X-Forwarded-Proto", "https, http") }, false},
+		{"direct TLS", func(r *http.Request) { r.TLS = &tls.ConnectionState{} }, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := protoRequest(t, http.MethodPost, "/auth/login", &dto.LoginInput{Email: u.Email, Password: u.Password})
+			tc.tweak(req)
+			rec := httptest.NewRecorder()
+			handler.Login(rec, req)
+			requireStatus(t, rec, http.StatusOK)
+			c := findCookie(rec, "refresh_token")
+			if c == nil || c.Secure != tc.secure || !c.HttpOnly {
+				t.Fatalf("cookie %+v, want Secure=%v and HttpOnly", c, tc.secure)
+			}
+		})
 	}
 }
 

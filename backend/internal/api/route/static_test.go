@@ -388,3 +388,22 @@ func TestSPAHandler_ManyConcurrentCompressedRequests(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestSPAHandler_PageCarriesTheContentSecurityPolicyAndAssetsDoNot(t *testing.T) {
+	dir := newPublicDir(t)
+	h := spaHandler(dir)
+	for _, target := range []string{"/", "/login", "/notes/1"} {
+		csp := get(h, target).Header().Get("Content-Security-Policy")
+		for _, want := range []string{"default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", "frame-ancestors 'none'", "object-src 'none'", "base-uri 'none'"} {
+			if !strings.Contains(csp, want) {
+				t.Errorf("%s: CSP lacks %q: %s", target, want, csp)
+			}
+		}
+		if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") || strings.Contains(csp, "unsafe-eval'") && !strings.Contains(csp, "wasm-unsafe-eval") {
+			t.Errorf("%s: scripts may run inline: %s", target, csp)
+		}
+	}
+	if csp := get(h, "/assets/app.js").Header().Get("Content-Security-Policy"); csp != "" {
+		t.Errorf("a script file does not need a document policy: %q", csp)
+	}
+}
