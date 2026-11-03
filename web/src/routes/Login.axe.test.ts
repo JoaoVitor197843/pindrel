@@ -63,6 +63,22 @@ describe('acessibilidade (axe) nos estados da tela de login', () => {
     expect(await violations()).toEqual([])
   })
 
+  it('menu com um servidor seguro e outro que ainda pede o certificado, e o aviso de conexão', async () => {
+    manual.list = [
+      { id: 'https://a.test:8443', name: 'A', trustName: 'A', serverId: 'a', url: 'https://a.test:8443', address: 'a.test:8443' },
+      { id: 'http://b.test', name: 'B', trustName: 'B', serverId: 'b', url: 'http://b.test', address: 'b.test', connectUrl: 'http://b.test/server/connect/' },
+    ]
+    manual.health = { 'https://a.test:8443': 'connected', 'http://b.test': 'connected' }
+    selection.tlsOffered = true
+    render(Login)
+    expect(screen.getByTestId('insecure-notice')).toBeTruthy()
+    expect(await violations()).toEqual([])
+    await openMenu()
+    expect(screen.getByRole('menuitem', { name: /Conectar com segurança/ })).toBeTruthy()
+    expect(await violations()).toEqual([])
+    selection.tlsOffered = false
+  })
+
   it('janela de adicionar servidor, vazia e com erro', async () => {
     render(Login)
     await openMenu()

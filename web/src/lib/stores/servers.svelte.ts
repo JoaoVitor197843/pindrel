@@ -2,6 +2,7 @@ import { fetchDiscoveredServers } from '../api/servers'
 import type { DiscoveredServer } from '../../types/shared/protos/server'
 import { inspect } from '../api/serverCheck'
 import { manual } from './manual.svelte'
+import { parsePort } from '../api/serverCheck'
 import { toast } from './toast.svelte'
 import { remember, trustOf } from './trust'
 
@@ -168,6 +169,7 @@ const HEALTH_FAILURES = 2
 export type Health = 'connected' | 'disconnected'
 
 const ADDRESS_HEADER = 'x-pindrel-address'
+const TLS_HEADER = 'x-pindrel-tls'
 
 /** `ip:port` of the header if it looks like a usable LAN address (the value comes from the network: never trusted blindly). */
 export function lanAddress(value: string | null): string | null {
@@ -213,6 +215,8 @@ class ServerSelection {
    * may be `localhost` or a VPN address, which is exactly what must not flash on screen before the right one arrives.
    */
   address = $state<string | null>(null)
+  /** Whether this page's server has a secure (HTTPS) side (`x-pindrel-tls` on `/server/info/`). */
+  tlsOffered = $state(false)
 
   /** What to print for the address: a placeholder while it is not known yet. */
   get shownAddress(): string {
@@ -239,7 +243,10 @@ class ServerSelection {
       // any response that is not a server error proves someone is there: 404 and 429 count
       const res = await fetch('/server/info/', { cache: 'no-store', signal: timeout.signal })
       up = res.status < 500
-      if (up) this.address = lanAddress(res.headers.get(ADDRESS_HEADER)) ?? embedded.address
+      if (up) {
+        this.address = lanAddress(res.headers.get(ADDRESS_HEADER)) ?? embedded.address
+        this.tlsOffered = parsePort(res.headers.get(TLS_HEADER)) !== undefined
+      }
     } catch {
       up = false
     } finally {

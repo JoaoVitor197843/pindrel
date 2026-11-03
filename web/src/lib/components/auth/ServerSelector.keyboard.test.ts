@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { found, mockDiscover } from '../../../test/discovery'
 import { directory, selection } from '../../stores/servers.svelte'
+import { manual } from '../../stores/manual.svelte'
 import ServerSelector from './ServerSelector.svelte'
 
 const trigger = () => screen.getByRole('button', { name: /^Selecionar servidor/ })
@@ -78,5 +79,29 @@ describe('seletor de servidor só com o teclado', () => {
     selection.health = 'disconnected' // the focused entry is destroyed and rebuilt in another section
     await waitFor(() => expect(menu.contains(document.activeElement)).toBe(true))
     expect(document.activeElement).not.toBe(document.body)
+  })
+
+  it('o link "Conectar com segurança" também é alcançado pelas setas e abre a página certa em outra aba', async () => {
+    manual.list = [{ id: 'http://b.test', name: 'B', trustName: 'B', serverId: 'b', url: 'http://b.test', address: 'b.test', connectUrl: 'http://b.test/server/connect/' }]
+    manual.health = { 'http://b.test': 'connected' }
+    render(ServerSelector)
+    await fireEvent.keyDown(trigger(), { key: 'ArrowDown' })
+    const menu = await screen.findByRole('menu')
+    const link = screen.getByRole('menuitem', { name: /Conectar com segurança/ }) as HTMLAnchorElement
+    expect(link.getAttribute('href')).toBe('http://b.test/server/connect/')
+    expect(link.target).toBe('_blank')
+    expect(link.rel).toContain('noopener')
+    for (let i = 0; i < 6 && document.activeElement !== link; i++) await fireEvent.keyDown(menu, { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(link)
+    manual.list = []
+  })
+
+  it('um servidor com https mostra o cadeado', async () => {
+    manual.list = [{ id: 'https://a.test:8443', name: 'A', trustName: 'A', serverId: 'a', url: 'https://a.test:8443', address: 'a.test:8443' }]
+    manual.health = { 'https://a.test:8443': 'connected' }
+    render(ServerSelector)
+    await fireEvent.click(trigger())
+    expect(screen.getByRole('img', { name: 'Conexão segura' })).toBeTruthy()
+    manual.list = []
   })
 })

@@ -16,6 +16,6 @@ export function errorText(r: Extract<FindResult, { ok: false }>): string {
     case 'timeout':
       return `${r.host} não respondeu a tempo. Confira se o aparelho está ligado e se você está na mesma rede ou VPN.`
     case 'unreachable':
-      return `Não foi possível conectar a ${r.host}: a conexão foi recusada ou o endereço não existe. Confira o endereço e a porta${r.https ? ' (e, em https, se o certificado é confiável)' : ''}.`
+      return `Não foi possível conectar a ${r.host}: a conexão foi recusada ou o endereço não existe. Confira o endereço e a porta${r.https ? ' (e, em https, se este navegador confia no certificado: um servidor com certificado próprio tem uma página de conexão no endereço comum dele, terminada em /server/connect/)' : ''}.`
   }
 }
