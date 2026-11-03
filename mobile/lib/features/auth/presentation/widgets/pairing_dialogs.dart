@@ -294,7 +294,8 @@ class _PairingDialogState extends ConsumerState<PairingDialog>
               'Abra a página de conexão do servidor (no navegador, em '
               'http://${server.address}/server/connect/?ficar) ou, se você já usa o Pindrel no navegador, '
               'o botão "Parear um aparelho" da tela de login. '
-              'Confira se os números abaixo são os mesmos que aparecem lá.',
+              'Lá, ache a linha do seu aparelho${prompt.yourAddress.isEmpty ? '' : ' (${prompt.yourAddress})'} '
+              'e confira se os números abaixo são os mesmos.',
               style: _muted,
             ),
             const SizedBox(height: 18),
@@ -510,7 +511,8 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
             errorText: _codeError,
             helperMaxLines: 4,
             helperText: showing
-                ? 'Digite os 6 números que a página de conexão do servidor mostra (abra '
+                ? 'Digite os 6 números que a página de conexão do servidor mostra na linha do seu aparelho'
+                      '${(state?.prompt?.yourAddress ?? '').isEmpty ? '' : ' (${state!.prompt!.yourAddress})'} (abra '
                       'http://${target?.host}:${target?.port}/ num navegador).'
                 : 'Os números aparecem na página do servidor depois que você buscar.',
           ),

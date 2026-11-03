@@ -36,6 +36,8 @@ pub struct App {
 impl App {
     pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
         let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
+        #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
+        let max_pairings = cfg.max_pairings;
         let pool = Pool::new(cfg.upstreams.clone());
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(4)
@@ -53,7 +55,7 @@ impl App {
             ws_stop: tokio::sync::watch::channel(false).0,
             ca: RwLock::new(None),
             #[cfg(feature = "selfcert")]
-            pairing: Default::default(),
+            pairing: crate::pairing::Pairing::new(max_pairings),
         }
     }
 }
@@ -415,13 +417,16 @@ where
     };
     let (method, path) = (req.method().clone(), req.uri().path().to_string());
     if method == Method::GET && path == "/server/pair/sas" {
-        let mut r = match app.pairing.showing(Instant::now()) {
-            Some(s) => reply(
-                StatusCode::OK,
-                "text/plain; charset=utf-8",
-                format!("sas={}\nleft={}\nfrom={}\n", s.digits, s.seconds_left, s.from).into_bytes(),
-            ),
-            None => reply(StatusCode::NO_CONTENT, "text/plain", Vec::new()),
+        // one line per device that is pairing: `d=<six digits>,<seconds left>,<its address>`
+        let rows = app.pairing.showing(Instant::now());
+        let mut r = if rows.is_empty() {
+            reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
+        } else {
+            let body: String = rows
+                .iter()
+                .map(|s| format!("d={},{},{}\n", s.digits, s.seconds_left, s.from))
+                .collect();
+            reply(StatusCode::OK, "text/plain; charset=utf-8", body.into_bytes())
         };
         r.headers_mut()
             .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
@@ -449,7 +454,9 @@ where
             Ok((id, nonce)) => reply(
                 StatusCode::OK,
                 "text/plain; charset=utf-8",
-                format!("id={}\nn={}\nname={}\n", hex(&id), hex(&nonce), app.cfg.server_name).into_bytes(),
+                // `you` is the address the server sees: the page lists each device's digits under its address, so the person
+                // looks for the row that is theirs
+                format!("id={}\nn={}\nname={}\nyou={peer}\n", hex(&id), hex(&nonce), app.cfg.server_name).into_bytes(),
             ),
             Err(e) => fail(e),
         };

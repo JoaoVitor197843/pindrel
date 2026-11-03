@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { selection } from '../../stores/servers.svelte'
 import PairingCode from './PairingCode.svelte'
 
-const sas = (digits = '123456', left = 48, from = '192.168.1.5') => new Response(`sas=${digits}\nleft=${left}\nfrom=${from}\n`, { status: 200 })
+const sas = (digits = '123456', left = 48, from = '192.168.1.5') => new Response(`d=${digits},${left},${from}\n`, { status: 200 })
+const many = (...r: [string, number, string][]) => new Response(r.map(([d, l, f]) => `d=${d},${l},${f}\n`).join(''), { status: 200 })
 
 // the shared setup resets the global fetch before every test; each test gives it the answers it needs
 const fetchWith = (impl: (...a: never[]) => unknown) => vi.mocked(fetch).mockImplementation(impl as never)
@@ -55,7 +56,7 @@ describe('PairingCode (os 6 números na tela de login)', () => {
     expect(el.textContent?.trim()).toBe('123 456')
     expect(el.getAttribute('aria-label')).toBe('Número de conferência: 1 2 3 4 5 6')
     expect(screen.getByText(/aparelho 192\.168\.1\.5/)).toBeTruthy()
-    expect(screen.getByText(/mais 48 s/)).toBeTruthy()
+    expect(screen.getByText('48 s')).toBeTruthy()
     answer = () => new Response(null, { status: 204 })
     await vi.advanceTimersByTimeAsync(2000)
     expect(screen.queryByTestId('pairing-digits')).toBeNull()
@@ -90,21 +91,40 @@ describe('PairingCode (os 6 números na tela de login)', () => {
     expect(calls).toBeLessThanOrEqual(3)
   })
 
-  it('o que o servidor manda é mostrado como texto e só se for 6 dígitos', async () => {
-    for (const body of ['sas=12345\n', 'sas=1234567\n', 'sas=abcdef\n', 'sas=<img src=x onerror=alert(1)>\n', '', 'lixo', 'sas=123456 \nsas=999999']) {
+  it('vários aparelhos pareando: uma linha para cada, com o endereço, e some só a que terminou', async () => {
+    let answer: () => Response = () => many(['111111', 50, '192.168.1.5'], ['222222', 40, '192.168.1.9'], ['333333', 10, '10.0.0.4'])
+    fetchWith(async () => answer())
+    render(PairingCode)
+    await open()
+    const rows = screen.getAllByTestId('pairing-digits').map((e) => e.textContent?.trim())
+    expect(rows).toEqual(['111 111', '222 222', '333 333'])
+    expect(screen.getByText('aparelho 192.168.1.9')).toBeTruthy()
+    expect(screen.getByText('aparelho 10.0.0.4')).toBeTruthy()
+    answer = () => many(['111111', 48, '192.168.1.5'], ['333333', 8, '10.0.0.4'])
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(screen.getAllByTestId('pairing-digits').map((e) => e.textContent?.trim())).toEqual(['111 111', '333 333'])
+  })
+
+  it('o que o servidor manda é mostrado como texto, só linhas bem formadas, e no máximo 64', async () => {
+    for (const body of ['d=12345,10,1.2.3.4\n', 'd=1234567,10,1.2.3.4\n', 'd=abcdef,10,1.2.3.4\n', 'd=123456,10,<img src=x onerror=alert(1)>\n', '', 'lixo', 'sas=123456\n', 'd=123456,10\n', 'd=123456,abc,1.2.3.4\n']) {
       cleanup()
       fetchWith(async () => new Response(body, { status: 200 }))
       render(PairingCode)
       await open()
-      if (body.startsWith('sas=123456')) continue
       expect(screen.queryByTestId('pairing-digits'), body).toBeNull()
     }
     cleanup()
-    fetchWith(async () => sas('123456', 999, '<b>x</b>192.168.1.5'))
+    fetchWith(async () => many(['123456', 99, '192.168.1.5']))
     render(PairingCode)
     await open()
-    expect(document.querySelector('b')).toBeNull()
-    expect(screen.getByText(/mais 60 s/)).toBeTruthy()
+    expect(screen.getByText('60 s')).toBeTruthy()
+    cleanup()
+    const lots = Array.from({ length: 200 }, (_, i) => ['123456', 10, `10.0.${i >> 8}.${i & 255}`] as [string, number, string])
+    fetchWith(async () => many(...lots))
+    render(PairingCode)
+    await open()
+    expect(screen.getAllByTestId('pairing-digits').length).toBe(64)
+    expect(document.querySelector('img')).toBeNull()
   })
 
   it('erro de rede ou 404 (fora da rede local): avisa, sem quebrar', async () => {

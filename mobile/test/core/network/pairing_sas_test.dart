@@ -17,7 +17,10 @@ List<int> unhex(String h) => [for (var i = 0; i < h.length; i += 2) int.parse(h.
 /// The server side of the protocol, as `gateway/src/pairing.rs` does it: it checks the commitment and computes its digits
 /// from ITS OWN CA ([serverCa]), whatever CA it hands out at `/server/ca.pem` ([servedCa]).
 class FakeServer {
-  FakeServer({this.servedCa, this.startReply, this.revealStatus = 204, this.name = 'Casa', this.dropFirstDone = false, this.doneStatus = 204});
+  FakeServer({this.servedCa, this.startReply, this.revealStatus = 204, this.name = 'Casa', this.dropFirstDone = false, this.doneStatus = 204, this.you = '192.168.1.77'});
+
+  /// The address the server says it sees (`null`: an older server that says nothing).
+  final String? you;
 
   /// What "done" answers: 409 plays a session that was replaced or expired.
   final int doneStatus;
@@ -58,7 +61,7 @@ class FakeServer {
         } else {
           _commit = unhex(field('c'));
           _nonceS = List.generate(16, (i) => i + 100);
-          res.write('id=${'ab' * 16}\nn=${_nonceS.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}\nname=$name\n');
+          res.write('id=${'ab' * 16}\nn=${_nonceS.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}\nname=$name\n${you == null ? '' : 'you=$you\n'}');
         }
       } else if (req.uri.path == '/server/pair/done') {
         if (dropFirstDone && !_dropped) {
@@ -155,6 +158,20 @@ void main() {
         final r = await run(server, store, (p) async => true);
         expect((r as PairingFailed).reason, PairingFailure.unreachable, reason: '$status');
         expect(await store.find('127.0.0.1:${server.port}'), isNull);
+        await server.stop();
+      }
+      server = await FakeServer().start();
+    });
+
+    test('o app fica sabendo o endereço com que o servidor o vê, e ignora o que não for endereço', () async {
+      for (final (you, expected) in [('192.168.1.77', '192.168.1.77'), ('fe80::1', 'fe80::1'), (null, ''), ('<script>', ''), ('not an address', ''), ('1' * 80, '')]) {
+        server = await FakeServer(you: you).start();
+        late SasPrompt shown;
+        await run(server, store, (p) async {
+          shown = p;
+          return false;
+        });
+        expect(shown.yourAddress, expected, reason: '$you');
         await server.stop();
       }
       server = await FakeServer().start();
