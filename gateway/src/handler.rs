@@ -455,10 +455,16 @@ where
         };
     }
     if path == "/server/pair/done" {
-        if let Some(id) = field(text, "id").and_then(unhex::<16>) {
-            app.pairing.finish(peer, id);
-        }
-        return reply(StatusCode::NO_CONTENT, "text/plain", Vec::new());
+        let Some(id) = field(text, "id").and_then(unhex::<16>) else {
+            return fail(PairError::Invalid);
+        };
+        // 204: that session was the live one, so what the person compared is what the page showed. 409: it was replaced
+        // or expired, and the app must not pair on it.
+        return if app.pairing.finish(peer, id, now) {
+            reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
+        } else {
+            error(StatusCode::CONFLICT, "pairing_expired", "that pairing is no longer the current one")
+        };
     }
     let (Some(id), Some(a)) = (field(text, "id").and_then(unhex::<16>), field(text, "a").and_then(unhex::<16>)) else {
         return fail(PairError::Invalid);

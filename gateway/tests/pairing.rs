@@ -298,11 +298,13 @@ async fn telling_the_server_the_person_answered_clears_the_page() {
     let id = value(&body, "id");
     https(&r, "POST", "/server/pair/reveal", format!("id={id}\na={}", hex(&nonce)).as_bytes()).await;
     assert_eq!(get(r.gw.addr, "/server/pair/sas").await.status, 200);
-    // a wrong id (or garbage) ends nothing and says nothing
-    for junk in ["id=00", "", "id=zz", &format!("id={}", hex(&[1u8; 16]))] {
+    // garbage is refused; a well-formed id that is not the live session ends nothing and is told so
+    for junk in ["id=00", "", "id=zz"] {
         let (status, _) = https(&r, "POST", "/server/pair/done", junk.as_bytes()).await;
-        assert_eq!(status, 204, "{junk:?}");
+        assert_eq!(status, 400, "{junk:?}");
     }
+    let (status, body) = https(&r, "POST", "/server/pair/done", format!("id={}", hex(&[1u8; 16])).as_bytes()).await;
+    assert_eq!(status, 409, "{body}");
     assert_eq!(get(r.gw.addr, "/server/pair/sas").await.status, 200, "still showing");
     let (status, _) = https(&r, "POST", "/server/pair/done", format!("id={id}").as_bytes()).await;
     assert_eq!(status, 204);
@@ -311,5 +313,23 @@ async fn telling_the_server_the_person_answered_clears_the_page() {
         204,
         "the digits are gone once the app is done"
     );
+    r.gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_second_start_from_the_same_address_makes_the_first_confirmation_worthless() {
+    // two people behind one address: the second replaces the first, and the first may not pair on numbers the page no longer shows
+    let r = rig(|_| {}).await;
+    let n1 = [7u8; 16];
+    let c1 = hex(digest(&SHA256, &n1).as_ref());
+    let (_, b1) = https(&r, "POST", "/server/pair/start", format!("c={c1}").as_bytes()).await;
+    let id1 = value(&b1, "id");
+    https(&r, "POST", "/server/pair/reveal", format!("id={id1}\na={}", hex(&n1)).as_bytes()).await;
+    let _second = app_side(&r, [8; 16]).await; // takes the slot and shows its own digits
+    let shown = String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap();
+    assert_ne!(value(&shown, "sas"), "");
+    let (status, body) = https(&r, "POST", "/server/pair/done", format!("id={id1}").as_bytes()).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body.contains("pairing_expired"));
     r.gw.shutdown().await;
 }

@@ -17,7 +17,14 @@ List<int> unhex(String h) => [for (var i = 0; i < h.length; i += 2) int.parse(h.
 /// The server side of the protocol, as `gateway/src/pairing.rs` does it: it checks the commitment and computes its digits
 /// from ITS OWN CA ([serverCa]), whatever CA it hands out at `/server/ca.pem` ([servedCa]).
 class FakeServer {
-  FakeServer({this.servedCa, this.startReply, this.revealStatus = 204, this.name = 'Casa'});
+  FakeServer({this.servedCa, this.startReply, this.revealStatus = 204, this.name = 'Casa', this.dropFirstDone = false, this.doneStatus = 204});
+
+  /// What "done" answers: 409 plays a session that was replaced or expired.
+  final int doneStatus;
+
+  /// The first "done" dies on the wire (a connection that went stale while the person compared).
+  final bool dropFirstDone;
+  bool _dropped = false;
 
   final String? servedCa;
   final String serverCa = 'good';
@@ -54,7 +61,12 @@ class FakeServer {
           res.write('id=${'ab' * 16}\nn=${_nonceS.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}\nname=$name\n');
         }
       } else if (req.uri.path == '/server/pair/done') {
-        res.statusCode = 204;
+        if (dropFirstDone && !_dropped) {
+          _dropped = true;
+          (await res.detachSocket()).destroy();
+          return;
+        }
+        res.statusCode = doneStatus;
       } else if (req.uri.path == '/server/pair/reveal') {
         final a = unhex(field('a'));
         // the real server refuses a number that does not match what was committed
@@ -110,6 +122,42 @@ void main() {
       expect(kept!.fingerprint, goodFp);
       expect(server.calls, ['GET /server/ca.pem', 'POST /server/pair/start', 'POST /server/pair/reveal', 'POST /server/pair/done'],
           reason: 'the CA is downloaded before the number is revealed');
+    });
+
+    test('uma pessoa lenta: a conexão fica parada e o servidor a fecha, mas o aviso de "terminei" ainda chega', () async {
+      server = await FakeServer().start();
+      server.http.idleTimeout = const Duration(milliseconds: 100);
+      final r = await run(server, store, (p) async {
+        await Future<void>.delayed(const Duration(milliseconds: 500)); // comparing the two screens
+        return p.digits == server.serverDigits;
+      });
+      expect(r, isA<Paired>());
+      expect(server.calls.last, 'POST /server/pair/done', reason: 'the server is told, so its page clears and another device can pair');
+    });
+
+    test('se o aviso de "terminei" morre na rede, é repetido numa conexão nova', () async {
+      server = await FakeServer(dropFirstDone: true).start();
+      final r = await run(server, store, (p) async => p.digits == server.serverDigits);
+      expect(r, isA<Paired>(), reason: 'a failed notice never undoes a pairing the person confirmed');
+      expect(server.calls.where((c) => c == 'POST /server/pair/done'), hasLength(2));
+    });
+
+    test('a sessão foi substituída enquanto a pessoa comparava (409): não pareia, e pede números novos', () async {
+      server = await FakeServer(doneStatus: 409).start();
+      final r = await run(server, store, (p) async => true);
+      expect((r as PairingFailed).reason, PairingFailure.expired);
+      expect(await store.find('127.0.0.1:${server.port}'), isNull, reason: 'the confirmation was about numbers the server no longer showed');
+    });
+
+    test('o servidor não confirma o "terminei" (erro, ou nenhuma resposta): não pareia, por segurança', () async {
+      for (final status in [500, 404, 400, 200, 429]) {
+        server = await FakeServer(doneStatus: status).start();
+        final r = await run(server, store, (p) async => true);
+        expect((r as PairingFailed).reason, PairingFailure.unreachable, reason: '$status');
+        expect(await store.find('127.0.0.1:${server.port}'), isNull);
+        await server.stop();
+      }
+      server = await FakeServer().start();
     });
 
     test('se a pessoa diz que são diferentes, nada é guardado', () async {

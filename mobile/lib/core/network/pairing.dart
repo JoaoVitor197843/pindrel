@@ -396,14 +396,35 @@ Future<PairingResult> pairWithDigits({
       same = false;
       expired = true;
     }
-    // Best effort: tells the server the person has answered, so its page stops showing the digits and another device can
-    // pair. The server drops the session by itself after a minute if this never arrives.
-    try {
-      await call('POST', '/server/pair/done', 'id=$id\n');
-    } on Object {
-      // nothing to do about it
+    // Tells the server the person has answered, so its page stops showing the digits and another device can pair. The
+    // answer matters when the person said "same": 204 means that session was still the live one, i.e. the digits the person
+    // compared are the ones the server was showing. 409 means it was replaced or expired meanwhile, and nothing is paired.
+    Future<int?> finish() async {
+      try {
+        return (await call('POST', '/server/pair/done', 'id=$id\n')).$1;
+      } on Object {
+        // The connection sat idle while the person compared the screens and may be dead: once more, on a new one.
+        final fresh = HttpClient()..connectionTimeout = timeout;
+        fresh.badCertificateCallback = (_, h, p) => h == host && p == port;
+        try {
+          final request = await fresh.postUrl(base.resolve('/server/pair/done')).timeout(timeout);
+          request.headers.contentType = ContentType.text;
+          request.write('id=$id\n');
+          final response = await request.close().timeout(timeout);
+          await response.drain<void>().timeout(timeout);
+          return response.statusCode;
+        } on Object {
+          return null;
+        } finally {
+          fresh.close(force: true);
+        }
+      }
     }
+
+    final told = await finish();
     if (!same) return PairingFailed(expired ? PairingFailure.expired : PairingFailure.declined);
+    if (told == 409) return const PairingFailed(PairingFailure.expired); // new digits are asked for, not a pairing on old ones
+    if (told != 204) return const PairingFailed(PairingFailure.unreachable); // never pair on a confirmation the server did not acknowledge
     final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name, serverId: serverId);
     await store.save(server);
     return Paired(server);

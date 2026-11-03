@@ -178,12 +178,20 @@ impl Pairing {
     }
 
     /// The app is done (the person confirmed or cancelled): the digits leave the page and the slot is free again.
-    /// Only the device that owns the session can end it; anything else is ignored, so nobody learns whether one exists.
-    pub fn finish(&self, ip: IpAddr, id: [u8; 16]) {
+    /// Returns whether that session was still the live one: a session that was replaced (another device, or the same address
+    /// starting again) or that expired no longer matches what the page showed, so the person's confirmation of it is worth
+    /// nothing and the app must not pair on it. Only the owner of a session can end it.
+    pub fn finish(&self, ip: IpAddr, id: [u8; 16], now: Instant) -> bool {
         let mut st = self.state.lock().unwrap();
+        Self::expire(&mut st, now);
+        let live = st
+            .session
+            .as_ref()
+            .is_some_and(|s| s.peer == ip && s.id == id && s.digits.is_some());
         if st.session.as_ref().is_some_and(|s| s.peer == ip && s.id == id) {
             st.session = None;
         }
+        live
     }
 
     /// What the page and the log show: only after a valid reveal, and only while the session lives.
@@ -248,16 +256,36 @@ mod tests {
         let a = [1u8; 16];
         let (id, _) = p.start(ip(5), commit(&a), t0).unwrap();
         p.reveal(ip(5), id, a, &CA, t0).unwrap();
-        p.finish(ip(6), id); // somebody else cannot end it
+        assert!(!p.finish(ip(6), id, t0), "somebody else cannot end it");
         assert!(p.showing(t0).is_some());
-        p.finish(ip(5), [0; 16]); // nor can a wrong id
+        assert!(!p.finish(ip(5), [0; 16], t0), "nor can a wrong id");
         assert!(p.showing(t0).is_some());
-        p.finish(ip(5), id);
+        assert!(p.finish(ip(5), id, t0), "the owner ends it, and it was live");
         assert_eq!(p.showing(t0), None);
+        assert!(!p.finish(ip(5), id, t0), "ending twice says it is no longer live");
         assert!(
             p.start(ip(6), commit(&a), t0).is_ok(),
             "the next device does not wait for the old session to expire"
         );
+    }
+
+    #[test]
+    fn a_replaced_or_expired_session_is_not_live_when_the_app_says_it_is_done() {
+        let (p, t0) = (Pairing::default(), Instant::now());
+        let a = [1u8; 16];
+        // the same address starts again: the first session is gone, and its confirmation must not count
+        let (first, _) = p.start(ip(5), commit(&a), t0).unwrap();
+        p.reveal(ip(5), first, a, &CA, t0).unwrap();
+        let (second, _) = p.start(ip(5), commit(&[2; 16]), t0).unwrap();
+        assert!(!p.finish(ip(5), first, t0), "the first was replaced");
+        assert!(
+            !p.finish(ip(5), second, t0),
+            "the second was never revealed, so nothing was shown to compare"
+        );
+        // expired
+        let (third, _) = p.start(ip(5), commit(&a), t0).unwrap();
+        p.reveal(ip(5), third, a, &CA, t0).unwrap();
+        assert!(!p.finish(ip(5), third, t0 + TTL), "its minute is over");
     }
 
     #[test]
