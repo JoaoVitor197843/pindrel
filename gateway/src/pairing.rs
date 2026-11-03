@@ -51,8 +51,10 @@ pub const TTL: Duration = Duration::from_secs(60);
 pub const ROOM_TTL: Duration = Duration::from_secs(180);
 /// Rooms open at the same time unless configured otherwise.
 pub const DEFAULT_ROOMS: usize = 6;
-/// Master codes good at the same time unless configured otherwise.
-pub const DEFAULT_MASTERS: usize = 6;
+/// Master codes good at the same time unless configured otherwise, and the most that can ever be (each one is one more
+/// secret sitting in the log).
+pub const DEFAULT_MASTERS: usize = 1;
+pub const MAX_MASTERS: usize = 6;
 /// Failed attempts (an unknown room code, a commitment that does not match, a wrong proof) before an address must wait.
 const MAX_FAILS: u8 = 3;
 const LOCKOUT: Duration = Duration::from_secs(300);
@@ -312,7 +314,7 @@ impl Pairing {
     /// `max_rooms` pages may pair at once, and `codes` master codes are good at the same time.
     pub fn with_codes(max_rooms: usize, codes: usize) -> Self {
         let now = Instant::now();
-        let masters: Vec<Master> = (0..codes.max(1)).map(|_| new_master(now)).collect();
+        let masters: Vec<Master> = (0..codes.clamp(1, MAX_MASTERS)).map(|_| new_master(now)).collect();
         Self {
             max_rooms: max_rooms.max(1),
             state: Mutex::new(State {
@@ -890,7 +892,7 @@ mod tests {
     #[test]
     fn the_master_code_works_once_and_a_new_one_takes_its_place() {
         let (p, t0) = (Pairing::default(), Instant::now());
-        assert_eq!(p.take_notices().len(), DEFAULT_MASTERS, "the first codes are for the log");
+        assert_eq!(p.take_notices().len(), DEFAULT_MASTERS, "the first code is for the log");
         assert!(p.take_notices().is_empty(), "shown once");
         let old = p.master_for_tests();
         let (id, a, s) = master_session(&p, 5, t0);
@@ -1025,7 +1027,7 @@ mod tests {
 
     #[test]
     fn a_code_that_is_none_of_them_is_refused_however_many_there_are() {
-        let (p, t0) = (Pairing::with_codes(6, 50), Instant::now());
+        let (p, t0) = (Pairing::with_codes(6, MAX_MASTERS), Instant::now());
         let (id, a, s) = master_session(&p, 5, t0);
         let wrong = master_proof(&[0xEE; 10], b"pindrel-master-a", &CA, &a, &s);
         assert_eq!(p.master_finish(ip(5), id, a, &wrong, &CA, t0), Err(PairError::Denied));
@@ -1054,17 +1056,22 @@ mod tests {
     }
 
     #[test]
-    fn the_number_of_codes_is_at_least_one() {
+    fn the_number_of_codes_is_at_least_one_and_at_most_six() {
         assert_eq!(Pairing::with_codes(6, 0).masters_for_tests().len(), 1);
+        assert_eq!(Pairing::default().masters_for_tests().len(), 1, "one by default");
+        assert_eq!(Pairing::with_codes(6, 3).masters_for_tests().len(), 3);
+        assert_eq!(Pairing::with_codes(6, 6).masters_for_tests().len(), MAX_MASTERS);
+        for asked in [7, 50, 100, 10_000, usize::MAX] {
+            assert_eq!(Pairing::with_codes(6, asked).masters_for_tests().len(), MAX_MASTERS, "{asked}");
+        }
     }
 
     #[test]
-    fn a_hundred_codes_take_next_to_no_memory() {
-        // a code is 10 bytes and a time: the whole table is a few kilobytes, whatever the number
+    fn the_codes_take_next_to_no_memory() {
+        // a code is 10 bytes and a time: the whole table is a few hundred bytes
         assert!(std::mem::size_of::<Master>() <= 32, "{}", std::mem::size_of::<Master>());
-        let p = Pairing::with_codes(6, 100);
-        assert_eq!(p.masters_for_tests().len(), 100);
-        assert_eq!(p.take_notices().len(), 100);
+        let p = Pairing::with_codes(6, MAX_MASTERS);
+        assert_eq!(p.take_notices().len(), MAX_MASTERS);
     }
 
     #[test]

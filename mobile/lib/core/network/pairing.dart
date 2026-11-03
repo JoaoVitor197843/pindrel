@@ -210,6 +210,9 @@ enum PairingFailure {
   /// The room code is not one the server has (a typo, one that expired, or one another device already joined).
   badRoom,
 
+  /// Something answered at that address, but not as a Pindrel server (another kind of server, or a page of some site).
+  notPindrel,
+
   /// The master code was refused, or the server could not prove it knows it: a wrong or spent code, or not the right server.
   badCode,
 }

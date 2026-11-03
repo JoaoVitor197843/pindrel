@@ -732,9 +732,9 @@ async fn rooms_and_the_master_way_work_at_the_same_time() {
 
 #[tokio::test]
 async fn several_people_read_the_log_and_each_uses_a_code_of_their_own_at_the_same_time() {
-    let r = rig(|_| {}).await;
+    let r = rig(|c| c.master_codes = 6).await;
     let codes = r.gw.app.pairing.masters_for_tests();
-    assert_eq!(codes.len(), 6, "six by default");
+    assert_eq!(codes.len(), 6);
     // six people, six addresses, six different codes, all pairing at once
     let one = |n: usize| {
         let (r, code) = (&r, codes[n]);

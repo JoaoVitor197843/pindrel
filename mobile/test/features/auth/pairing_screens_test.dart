@@ -21,6 +21,9 @@ Future<ProviderContainer> pump(
   FakePairer? pairer,
   FakeMasterPairer? master,
   bool tls = true,
+
+  /// What asking the server where its HTTPS is throws (`notPindrel`, `unreachable`), instead of answering.
+  PairingFailure? lookupFails,
   ServerTrust? trust,
   double width = 450,
 }) async {
@@ -38,7 +41,10 @@ Future<ProviderContainer> pump(
         serverProbeProvider.overrideWithValue((_) async => true),
         digitsPairerProvider.overrideWithValue((pairer ?? FakePairer(['123456'])).call),
         masterPairerProvider.overrideWithValue((master ?? FakeMasterPairer()).call),
-        tlsOfferProvider.overrideWithValue((_) async => tls ? const TlsOffer(port: 8443) : null),
+        tlsOfferProvider.overrideWithValue((_) async {
+          if (lookupFails != null) throw ServerLookupFailed(lookupFails);
+          return tls ? const TlsOffer(port: 8443) : null;
+        }),
       ],
       child: const PindrelApp(),
     ),
@@ -185,7 +191,7 @@ void main() {
         (PairingFailure.locked, 'tentativas demais'),
         (PairingFailure.unreachable, 'firewall'),
         (PairingFailure.declined, 'desconfie'),
-        (PairingFailure.protocol, 'inesperado'),
+        (PairingFailure.protocol, 'não entende'),
       ]) {
         final c = await pump(tester, pairer: FakePairer(['123456'], result: PairingFailed(reason)));
         await openMenu(tester);
@@ -338,6 +344,16 @@ void main() {
       expect(find.text('123 456'), findsOneWidget);
       expect(pairer.rooms, ['0000', '4821']);
       await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('um servidor da lista que deixou de responder: diz isso e deixa tentar de novo', (tester) async {
+      await pump(tester, lookupFails: PairingFailure.unreachable);
+      await openCasa(tester);
+      expect(find.textContaining('Não consegui falar com o servidor'), findsOneWidget);
+      expect(find.byKey(const ValueKey('room-field')), findsNothing);
+      expect(find.text('Tentar de novo'), findsOneWidget);
+      await tester.tap(find.text('Fechar'));
       await tester.pumpAndSettle();
     });
 
@@ -551,6 +567,88 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('Outro aparelho está pareando'), findsOneWidget);
       expect(find.text('Tentar de novo'), findsOneWidget);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('google.com (ou qualquer coisa que não seja Pindrel): diz isso, e não "sem HTTPS"', (tester) async {
+      final pairer = FakePairer(['123456']);
+      await pump(tester, pairer: pairer, lookupFails: PairingFailure.notPindrel);
+      await openAdd(tester);
+      await search(tester, 'google.com');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('não parece ser um servidor Pindrel'), findsOneWidget);
+      expect(find.textContaining('não oferece conexão segura'), findsNothing, reason: 'that is for a Pindrel server without HTTPS');
+      expect(find.byKey(const ValueKey('found-server')), findsNothing);
+      expect(pairer.calls, 0);
+      expect(tester.widget<TextField>(addressField()).enabled, isTrue, reason: 'unlocked: the address can be fixed');
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('o aviso de que não é Pindrel vem antes de pedir o código da sala', (tester) async {
+      await pump(tester, lookupFails: PairingFailure.notPindrel);
+      await openAdd(tester);
+      await tester.enterText(addressField(), 'google.com');
+      await tester.pump();
+      await tester.tap(find.text('Buscar servidor'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('não parece ser um servidor Pindrel'), findsOneWidget);
+      expect(find.textContaining('Digite o código da sala'), findsNothing, reason: 'a code means nothing for something that is not a server of ours');
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('endereço que não responde: "não consegui falar", e dá para corrigir e tentar de novo', (tester) async {
+      await pump(tester, lookupFails: PairingFailure.unreachable);
+      await openAdd(tester);
+      await search(tester, '192.168.1.99:8080');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Não consegui falar com o servidor'), findsOneWidget);
+      expect(find.textContaining('não parece ser um servidor Pindrel'), findsNothing);
+      await tester.enterText(addressField(), '192.168.1.5:8080');
+      await tester.pump();
+      await tester.tap(find.text('Buscar servidor'));
+      await tester.pump();
+      expect(find.textContaining('Não consegui falar com o servidor'), findsOneWidget, reason: 'asked again (and the fake still fails)');
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('toques repetidos em "Buscar servidor" enquanto pergunta ao endereço não perguntam duas vezes', (tester) async {
+      var asked = 0;
+      tester.view.physicalSize = const Size(900, 1800);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            serverTrustProvider.overrideWithValue(ServerTrust(MemoryKeyValueStore())),
+            pairedStoreProvider.overrideWithValue(MemoryPairedStore()),
+            digitsPairerProvider.overrideWithValue(FakePairer(['123456']).call),
+            masterPairerProvider.overrideWithValue(FakeMasterPairer().call),
+            tlsOfferProvider.overrideWithValue((_) async {
+              asked++;
+              await Future<void>.delayed(const Duration(milliseconds: 300));
+              throw const ServerLookupFailed(PairingFailure.notPindrel);
+            }),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.dark,
+            home: Builder(builder: (context) => Scaffold(body: TextButton(onPressed: () => AddServerDialog.show(context), child: const Text('abrir')))),
+          ),
+        ),
+      );
+      await tester.tap(find.text('abrir'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, AddServerDialog.addressLabel), 'google.com');
+      await tester.pump();
+      for (var i = 0; i < 4; i++) {
+        await tester.tap(find.text('Buscar servidor'), warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      await tester.pump(const Duration(seconds: 1));
+      expect(asked, 1);
       await tester.tap(find.text('Cancelar'));
       await tester.pumpAndSettle();
     });
