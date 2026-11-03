@@ -6,7 +6,7 @@
 
 FROM --platform=$BUILDPLATFORM rust:1-alpine AS builder
 ARG TARGETARCH
-# experiment: `--build-arg FEATURES=http3` builds the TLS/HTTP/2/HTTP/3 variant (needs a C compiler for `ring`)
+# experiment: `--build-arg FEATURES=selfcert` builds the TLS/HTTP/2 variant (needs a C compiler for `ring`)
 ARG FEATURES=""
 RUN apk add --no-cache musl-dev
 WORKDIR /app
