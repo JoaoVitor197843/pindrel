@@ -167,7 +167,7 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
         let conn = hyper::server::conn::http1::Builder::new()
             .timer(TokioTimer::new())
             .header_read_timeout(app.cfg.header_timeout)
-            .serve_connection(TokioIo::new(stream), service_fn(move |req| handle(app2.clone(), peer, req)))
+            .serve_connection(TokioIo::new(stream), service_fn(move |req| handle(app2.clone(), peer, false, req)))
             .with_upgrades();
         conns.spawn(async move {
             tokio::pin!(conn);

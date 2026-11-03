@@ -55,7 +55,14 @@ impl App {
 
 /// Headers that claim to say who the client is. The gateway is the edge: it sets `x-forwarded-for` itself, and the
 /// others do not reach the API (nothing there should trust them).
-pub(crate) const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
+pub(crate) const CLIENT_ADDRESS: [&str; 6] = [
+    "x-forwarded-for",
+    "forwarded",
+    "x-real-ip",
+    "cf-connecting-ip",
+    "true-client-ip",
+    "x-forwarded-proto",
+];
 
 /// The page of a server may be opened by `localhost` or a VPN address; this header on `GET /server/info/` tells
 /// the web the address the other devices of the LAN use. It is not sent when the request came through a declared
@@ -69,6 +76,9 @@ pub const ID_HEADER: &str = "x-pindrel-id";
 /// SHA-256 of the CA certificate of this server, on `GET /server/info/` (see `selfcert`). Seeing it over plain HTTP proves
 /// nothing: a client trusts it only when it matches the fingerprint it was given out of band (a pairing code).
 pub const CA_HEADER: &str = "x-pindrel-ca";
+
+/// The port of the TLS listener, on `GET /server/info/`, so a client that reached the plain port can offer the secure one.
+pub const TLS_HEADER: &str = "x-pindrel-tls";
 
 pub(crate) const HOP_BY_HOP: [&str; 8] = [
     "connection",
@@ -104,8 +114,9 @@ fn rate_limited(retry_after: Duration) -> Response<Body> {
     r
 }
 
-/// Works for any request body: hyper's own `Incoming` (HTTP/1.1, HTTP/2) and the ones the HTTP/3 side builds.
-pub async fn handle<B>(app: Arc<App>, peer: SocketAddr, mut req: Request<B>) -> Result<Response<Body>, Infallible>
+/// Works for any request body: hyper's own `Incoming` (HTTP/1.1, HTTP/2) and the ones the HTTP/3 side builds. `secure`:
+/// the request arrived over TLS (any version of HTTP).
+pub async fn handle<B>(app: Arc<App>, peer: SocketAddr, secure: bool, mut req: Request<B>) -> Result<Response<Body>, Infallible>
 where
     B: HttpBody<Data = Bytes> + Send + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -117,11 +128,20 @@ where
             return Ok(rate_limited(wait));
         }
     }
+    let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
+    // a tunnel or proxy that ended the TLS itself (declared in TRUSTED_PROXIES) is as good as TLS here
+    if !secure && !via_proxy {
+        if let Some(resp) = plain_policy(&app, &req) {
+            return Ok(resp);
+        }
+    }
     if crate::websocket::is_upgrade(&req) {
-        return Ok(crate::websocket::tunnel(&app, ip, &mut req).await);
+        return Ok(crate::websocket::tunnel(&app, ip, secure || via_proxy, &mut req).await);
     }
     let path = req.uri().path();
-    let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
+    if matches!(path, "/server/connect/" | "/server/ca.crt") && matches!(*req.method(), Method::GET | Method::HEAD) {
+        return Ok(public_ca_routes(&app, &req));
+    }
     if req.method() == Method::GET && path == "/server/ca.pem" {
         // public by nature (it is a certificate); the fingerprint a client was given out of band is what makes it trusted
         return Ok(match app.ca.read().ok().and_then(|c| c.clone()) {
@@ -159,10 +179,10 @@ where
             return Ok(rate_limited(wait));
         }
     }
-    Ok(proxy(&app, ip, via_proxy, req).await)
+    Ok(proxy(&app, ip, via_proxy, secure, req).await)
 }
 
-async fn proxy<B>(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<B>) -> Response<Body>
+async fn proxy<B>(app: &App, client_ip: IpAddr, via_proxy: bool, secure: bool, req: Request<B>) -> Response<Body>
 where
     B: HttpBody<Data = Bytes> + Send + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -179,6 +199,15 @@ where
         Ok(Ok(b)) => b.to_bytes(),
     };
     let path_and_query = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    // What the API needs to know to mark its cookies `Secure`: the scheme the client used. Never taken from the client,
+    // except from a declared proxy, which is the one that ended the TLS.
+    let proto = parts
+        .headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| via_proxy && matches!(*v, "http" | "https"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| if secure { "https".into() } else { "http".into() });
     // A replica that is being stopped (rolling update) can close a connection right after a request was written to it.
     // The request may have been processed, so only the ones that change nothing are replayed, and only once: a request
     // that kills replicas must not be able to walk through all of them.
@@ -193,7 +222,11 @@ where
                 b = b.header(k, v);
             }
         }
-        let out = match b.header("x-forwarded-for", client_ip.to_string()).body(Full::new(body.clone())) {
+        let out = match b
+            .header("x-forwarded-for", client_ip.to_string())
+            .header("x-forwarded-proto", proto.as_str())
+            .body(Full::new(body.clone()))
+        {
             Ok(r) => r,
             Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "invalid request"),
         };
@@ -213,6 +246,7 @@ where
                 p.headers.remove(ADDRESS_HEADER);
                 p.headers.remove(ID_HEADER);
                 p.headers.remove(CA_HEADER);
+                p.headers.remove(TLS_HEADER);
                 p.headers.remove(header::ACCESS_CONTROL_ALLOW_ORIGIN);
                 p.headers.remove(header::ACCESS_CONTROL_EXPOSE_HEADERS);
                 if parts.method == Method::GET && parts.uri.path() == "/server/info/" {
@@ -227,12 +261,21 @@ where
                     {
                         p.headers.insert(CA_HEADER, v);
                     }
+                    if let Some(t) = &app.cfg.tls {
+                        // where the secure side of this server is: what a client that reached the plain port needs to offer it
+                        p.headers.insert(TLS_HEADER, header::HeaderValue::from(t.port));
+                    }
                     // Public and read-only, no credentials: a web page opened from another server may read it to check
                     // that an address typed by the user is a Pindrel gateway. Only the id is exposed, never the address.
                     p.headers
                         .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, header::HeaderValue::from_static("*"));
+                    let exposed = if app.cfg.tls.is_some() {
+                        "x-pindrel-id, x-pindrel-ca, x-pindrel-tls"
+                    } else {
+                        ID_HEADER
+                    };
                     p.headers
-                        .insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, header::HeaderValue::from_static(ID_HEADER));
+                        .insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, header::HeaderValue::from_static(exposed));
                 }
                 if !via_proxy && parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     let address = app.address.read().ok().and_then(|a| a.clone());
@@ -248,4 +291,120 @@ where
         }
     }
     error(StatusCode::BAD_GATEWAY, "bad_gateway", "no replica available")
+}
+
+/// The host of the request without its port, only when it is something a host can be (letters, digits, dots, dashes, or an
+/// IPv6 address in brackets). It ends up in a redirect and in a page, so anything else is refused.
+pub(crate) fn clean_host<B>(req: &Request<B>) -> Option<String> {
+    let raw = req.headers().get(header::HOST)?.to_str().ok()?.trim();
+    let host = if let Some(rest) = raw.strip_prefix('[') {
+        let end = rest.find(']')?;
+        let v6 = &rest[..end];
+        if v6.is_empty() || !v6.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
+            return None;
+        }
+        format!("[{v6}]")
+    } else {
+        let h = raw
+            .rsplit_once(':')
+            .map_or(raw, |(h, port)| if port.chars().all(|c| c.is_ascii_digit()) { h } else { raw });
+        if h.is_empty() || h.len() > 253 || !h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+            return None;
+        }
+        h.to_ascii_lowercase()
+    };
+    Some(host)
+}
+
+fn wants_html<B>(req: &Request<B>) -> bool {
+    req.headers()
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("text/html"))
+}
+
+/// What the plain-HTTP port does while TLS is on (see `HttpMode`). `None`: carry on as usual.
+fn plain_policy<B>(app: &App, req: &Request<B>) -> Option<Response<Body>> {
+    let tls = app.cfg.tls.as_ref()?;
+    if app.cfg.http_mode != crate::config::HttpMode::Redirect {
+        return None;
+    }
+    let (method, path) = (req.method(), req.uri().path());
+    let safe = matches!(*method, Method::GET | Method::HEAD);
+    // public, read-only, and what is needed to get started from a device that does not trust the server yet
+    if safe && matches!(path, "/server/info/" | "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") {
+        return None;
+    }
+    if crate::websocket::is_upgrade(req) || !safe {
+        // a password or a note must not be sent in clear just because a client ignored the redirect
+        return Some(error(
+            StatusCode::UPGRADE_REQUIRED,
+            "https_required",
+            "this server accepts this only over HTTPS",
+        ));
+    }
+    if path == "/" && wants_html(req) && app.ca.read().ok().is_some_and(|c| c.is_some()) {
+        return Some(public_ca_routes(app, req)); // the landing page: how to connect securely
+    }
+    let Some(host) = clean_host(req) else {
+        return Some(error(StatusCode::BAD_REQUEST, "bad_request", "invalid Host header"));
+    };
+    let pq = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    let mut r = Response::new(Full::new(Bytes::new()).map_err(|e| match e {}).boxed());
+    *r.status_mut() = StatusCode::PERMANENT_REDIRECT;
+    if let Ok(v) = header::HeaderValue::from_str(&format!("https://{host}:{}{pq}", tls.port)) {
+        r.headers_mut().insert(header::LOCATION, v);
+    }
+    Some(r)
+}
+
+/// `/server/connect/` (the page) and `/server/ca.crt` (the CA as a download); `/server/ca.pem` is handled with the others.
+#[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
+fn public_ca_routes<B>(app: &App, req: &Request<B>) -> Response<Body> {
+    #[cfg(feature = "selfcert")]
+    {
+        let ca = app.ca.read().ok().and_then(|c| c.clone());
+        let (Some((pem, fingerprint)), Some(tls)) = (ca, app.cfg.tls.as_ref()) else {
+            return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
+        };
+        if req.uri().path() == "/server/ca.crt" {
+            let mut r = reply(StatusCode::OK, "application/x-x509-ca-cert", pem.into_bytes());
+            r.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                header::HeaderValue::from_static("attachment; filename=\"pindrel-ca.crt\""),
+            );
+            r.headers_mut()
+                .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-cache"));
+            return r;
+        }
+        let host = clean_host(req).unwrap_or_else(|| "localhost".into());
+        let mut raw = [0u8; 16];
+        let _ = getrandom::fill(&mut raw);
+        let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let page = crate::connect::Page {
+            server_name: &app.cfg.server_name,
+            fingerprint: &fingerprint,
+            host: &host,
+            tls_port: tls.port,
+            // known since the start (the address the gateway announces): looking at the network again on every request cost ~10 ms
+            lan_ip: app
+                .address
+                .read()
+                .ok()
+                .and_then(|a| a.clone())
+                .and_then(|a| a.rsplit_once(':').and_then(|(ip, _)| ip.parse().ok())),
+            nonce: &nonce,
+        };
+        let mut r = reply(StatusCode::OK, "text/html; charset=utf-8", page.render().into_bytes());
+        let h = r.headers_mut();
+        h.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+        h.insert(header::REFERRER_POLICY, header::HeaderValue::from_static("no-referrer"));
+        h.insert(header::X_FRAME_OPTIONS, header::HeaderValue::from_static("DENY"));
+        if let Ok(v) = header::HeaderValue::from_str(&page.csp()) {
+            h.insert(header::CONTENT_SECURITY_POLICY, v);
+        }
+        r
+    }
+    #[cfg(not(feature = "selfcert"))]
+    error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own")
 }

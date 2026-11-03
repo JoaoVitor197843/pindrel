@@ -1,0 +1,234 @@
+//! The page a person opens to connect a device securely: a QR code with the pairing code for the app, the certificate
+//! of the server's own CA with the steps to install it in a browser, and a live check of whether this device already
+//! trusts the server. Plain HTML and CSS, one small script, nothing loaded from outside. Feature `selfcert`.
+use std::net::IpAddr;
+
+use qrcodegen::{QrCode, QrCodeEcc};
+
+/// `pindrel://pair?host=ip:port&ca=<sha256>&n=<name>`: what the QR code carries and what can be typed by hand.
+pub fn pairing_uri(host_port: &str, fingerprint: &str, name: &str) -> String {
+    format!("pindrel://pair?host={host_port}&ca={fingerprint}&n={}", percent_encode(name))
+}
+
+fn percent_encode(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+pub fn escape(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            '&' => "&amp;".into(),
+            '<' => "&lt;".into(),
+            '>' => "&gt;".into(),
+            '"' => "&quot;".into(),
+            '\'' => "&#39;".into(),
+            c => c.to_string(),
+        })
+        .collect()
+}
+
+/// The modules of the QR code (true = dark), without the quiet zone.
+pub fn qr_modules(text: &str) -> Option<Vec<Vec<bool>>> {
+    let qr = QrCode::encode_text(text, QrCodeEcc::Medium).ok()?;
+    let n = qr.size();
+    Some((0..n).map(|y| (0..n).map(|x| qr.get_module(x, y)).collect()).collect())
+}
+
+/// An SVG of the QR code on white with the 4-module quiet zone scanners need.
+pub fn qr_svg(text: &str) -> String {
+    let Some(m) = qr_modules(text) else { return String::new() };
+    let n = m.len();
+    let mut path = String::new();
+    for (y, row) in m.iter().enumerate() {
+        let mut x = 0;
+        while x < n {
+            if row[x] {
+                let start = x;
+                while x < n && row[x] {
+                    x += 1;
+                }
+                path.push_str(&format!("M{},{}h{}v1h-{}z", start + 4, y + 4, x - start, x - start));
+            } else {
+                x += 1;
+            }
+        }
+    }
+    let size = n + 8;
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {size} {size}\" role=\"img\" aria-label=\"QR code de pareamento\" shape-rendering=\"crispEdges\"><rect width=\"{size}\" height=\"{size}\" fill=\"#fff\"/><path d=\"{path}\" fill=\"#000\"/></svg>"
+    )
+}
+
+/// 64 hex digits as eight blocks of eight, easier to compare by eye.
+pub fn grouped(fingerprint: &str) -> String {
+    fingerprint
+        .as_bytes()
+        .chunks(8)
+        .map(|c| String::from_utf8_lossy(c).to_string())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+pub struct Page<'a> {
+    pub server_name: &'a str,
+    pub fingerprint: &'a str,
+    /// Host (no port) the person used to reach this page, already checked; used for the link to the HTTPS site.
+    pub host: &'a str,
+    pub tls_port: u16,
+    /// The address other devices of the LAN use, for the QR code.
+    pub lan_ip: Option<IpAddr>,
+    pub nonce: &'a str,
+}
+
+impl Page<'_> {
+    pub fn pairing_host(&self) -> String {
+        let h = self.lan_ip.map(|ip| ip.to_string()).unwrap_or_else(|| self.host.to_string());
+        if h.contains(':') && !h.starts_with('[') {
+            format!("[{h}]:{}", self.tls_port)
+        } else {
+            format!("{h}:{}", self.tls_port)
+        }
+    }
+
+    pub fn code(&self) -> String {
+        pairing_uri(&self.pairing_host(), self.fingerprint, self.server_name)
+    }
+
+    pub fn https_origin(&self) -> String {
+        let h = if self.host.contains(':') && !self.host.starts_with('[') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.to_string()
+        };
+        format!("https://{h}:{}", self.tls_port)
+    }
+
+    pub fn csp(&self) -> String {
+        format!(
+            "default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-{}'; img-src data:; connect-src {}; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+            self.nonce,
+            self.https_origin()
+        )
+    }
+
+    pub fn render(&self) -> String {
+        let code = self.code();
+        let svg = qr_svg(&code);
+        let name = escape(self.server_name);
+        let origin = escape(&self.https_origin());
+        let fp = grouped(self.fingerprint);
+        format!(
+            r##"<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Conexão segura · {name}</title>
+<style>
+:root {{ --bg:#141412; --surface:#1e1e1b; --line:#2e2e2a; --field:#75716a; --fg:#eae6df; --muted:#9a968e; --accent:#4a5d44; --accent-line:#6b8e61; --accent-text:#8fb085; --cream:#f5f2eb; --on-cream:#141412; --warn:#cd7065; }}
+* {{ box-sizing: border-box; }}
+body {{ margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }}
+main {{ max-width:720px; margin:0 auto; padding:28px 20px 56px; }}
+h1,h2 {{ font-family:serif; font-weight:600; line-height:1.2; margin:0; }}
+h1 {{ font-size:30px; }} h2 {{ font-size:22px; margin-bottom:6px; }}
+.badge {{ font:11px/1 monospace; letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); border:1px solid var(--field); border-radius:10px; padding:6px 10px; display:inline-block; margin-bottom:14px; }}
+p {{ margin:8px 0; }} .muted {{ color:var(--muted); }}
+section {{ background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:22px; margin-top:18px; }}
+#status {{ border-radius:14px; padding:14px 16px; border:1px solid var(--field); margin-top:18px; }}
+#status.ok {{ border-color:var(--accent-line); background:rgba(74,93,68,.45); }}
+#status.todo {{ border-color:var(--warn); }}
+.qr {{ background:#fff; border-radius:14px; padding:6px; width:min(260px,100%); margin:14px 0; }}
+.qr svg {{ display:block; width:100%; height:auto; }}
+code, .mono {{ font-family:monospace; word-break:break-all; }}
+.code {{ background:var(--bg); border:1px solid var(--field); border-radius:10px; padding:12px; font-size:13px; font-family:monospace; overflow-wrap:anywhere; word-break:break-all; }}
+.btn {{ display:inline-block; text-decoration:none; background:var(--cream); color:var(--on-cream); font-weight:600; border-radius:10px; padding:13px 18px; border:0; font-size:16px; cursor:pointer; }}
+.btn.ghost {{ background:transparent; color:var(--fg); border:1px solid var(--field); font:12px monospace; letter-spacing:.6px; text-transform:uppercase; }}
+.btn[aria-disabled="true"] {{ opacity:.55; pointer-events:none; }}
+.row {{ display:flex; gap:10px; flex-wrap:wrap; margin-top:12px; }}
+details {{ border-top:1px solid var(--line); padding:12px 0 0; margin-top:12px; }}
+summary {{ cursor:pointer; font-weight:600; padding:4px 0; }}
+ol {{ padding-left:20px; margin:8px 0; }} li {{ margin:4px 0; }}
+a {{ color:var(--accent-text); }}
+:focus-visible {{ outline:2px solid var(--accent-line); outline-offset:2px; }}
+.fp {{ font:14px monospace; word-spacing:6px; }}
+</style>
+</head>
+<body>
+<main>
+<span class="badge">Conexão segura</span>
+<h1>Conectar a {name}</h1>
+<p class="muted">Este servidor protege a conexão com um certificado criado por ele mesmo, que só vale dentro da sua rede. Nada é enviado para a internet. Escolha como você quer conectar:</p>
+
+<div id="status" role="status" aria-live="polite">Verificando se este aparelho já confia neste servidor…</div>
+
+<section aria-labelledby="app">
+<h2 id="app">1. No app Pindrel (celular ou computador)</h2>
+<p>Abra o app, escolha <strong>Adicionar servidor</strong> e leia este código com a câmera, ou cole o texto abaixo. O app passa a confiar somente neste servidor: não é preciso instalar nada no sistema.</p>
+<p class="muted">A tela de pareamento do app ainda está em desenvolvimento; até lá, use o passo 2 no navegador.</p>
+<div class="qr">{svg}</div>
+<p class="muted">Código para colar:</p>
+<div class="code" id="code">{code_html}</div>
+<div class="row"><button class="btn ghost" id="copy" type="button">Copiar código</button></div>
+</section>
+
+<section aria-labelledby="web">
+<h2 id="web">2. No navegador deste aparelho</h2>
+<p>Para abrir o Pindrel pelo navegador sem avisos, o aparelho precisa confiar uma vez no certificado deste servidor.</p>
+<div class="row">
+<a class="btn" href="/server/ca.crt" download="pindrel-ca.crt">Baixar o certificado</a>
+<a class="btn ghost" id="open" href="{origin_attr}/" aria-disabled="true">Abrir o Pindrel com HTTPS</a>
+</div>
+<p class="muted" style="margin-top:14px">Confira a impressão digital (SHA-256) antes de instalar. Ela deve ser igual à mostrada no log do gateway e no código acima:</p>
+<p class="fp">{fp}</p>
+<details><summary>Android</summary><ol><li>Baixe o certificado.</li><li>Abra <em>Configurações</em> e procure por <em>Instalar certificado</em> (costuma ficar em Segurança e privacidade, Mais configurações de segurança, Criptografia e credenciais).</li><li>Escolha <em>Certificado de CA</em>, confirme o aviso e selecione o arquivo baixado.</li><li>No Chrome o aviso some. Outros apps ignoram esses certificados, por isso o app Pindrel usa o código acima.</li></ol></details>
+<details><summary>iPhone e iPad</summary><ol><li>Abra esta página no Safari e toque em <em>Baixar o certificado</em>, depois em <em>Permitir</em>.</li><li>Em <em>Ajustes</em>, toque em <em>Perfil baixado</em> e em <em>Instalar</em>.</li><li>Em <em>Ajustes, Geral, Sobre, Ajustes de confiança de certificado</em>, ative a confiança total para o certificado do Pindrel.</li></ol></details>
+<details><summary>Windows</summary><ol><li>Baixe o certificado e dê dois cliques no arquivo.</li><li>Escolha <em>Instalar Certificado</em>, <em>Usuário Atual</em>, depois <em>Colocar todos os certificados no repositório a seguir</em>.</li><li>Selecione <em>Autoridades de Certificação Raiz Confiáveis</em> e conclua. Reinicie o navegador.</li></ol></details>
+<details><summary>macOS</summary><ol><li>Baixe o certificado e dê dois cliques para abrir o <em>Acesso às Chaves</em>.</li><li>Abra o certificado, expanda <em>Confiança</em> e escolha <em>Sempre Confiar</em>.</li></ol></details>
+<details><summary>Linux, Chrome e Firefox</summary><ol><li>Chrome: <em>Configurações, Privacidade e segurança, Segurança, Gerenciar certificados, Autoridades, Importar</em>.</li><li>Firefox: <em>Configurações, Privacidade e segurança, Certificados, Ver certificados, Autoridades, Importar</em>, marcando a confiança para sites.</li><li>No sistema: copie o arquivo para <code>/usr/local/share/ca-certificates/</code> e rode <code>sudo update-ca-certificates</code>.</li></ol></details>
+<p class="muted" style="margin-top:14px">Os nomes dos menus mudam entre versões e fabricantes.</p>
+</section>
+
+<section aria-labelledby="why">
+<h2 id="why">Por que isso é seguro?</h2>
+<p>O certificado foi criado por este servidor e <strong>só vale para endereços e nomes da sua rede</strong> (como <code>localhost</code>, <code>.lan</code> e o nome desta máquina). Ele não consegue se passar por sites da internet. Instale somente se você reconhece este servidor.</p>
+<p>Sem esta etapa, o Pindrel continua acessível por esta página, mas a senha e as notas não devem trafegar sem criptografia: por isso o endereço sem HTTPS só mostra esta tela.</p>
+</section>
+</main>
+<script nonce="{nonce}">
+(function () {{
+  var s = document.getElementById('status'), open = document.getElementById('open');
+  fetch('{origin_js}/server/info/', {{ mode: 'no-cors', cache: 'no-store' }}).then(function () {{
+    s.className = 'ok'; s.textContent = 'Pronto: este aparelho já confia neste servidor. Você pode abrir o Pindrel com HTTPS.';
+    open.removeAttribute('aria-disabled'); open.className = 'btn';
+  }}).catch(function () {{
+    s.className = 'todo'; s.textContent = 'Este aparelho ainda não confia neste servidor. Use o app (passo 1) ou instale o certificado (passo 2).';
+  }});
+  var b = document.getElementById('copy');
+  b.addEventListener('click', function () {{
+    var t = document.getElementById('code').textContent;
+    var done = function () {{ b.textContent = 'Copiado'; }};
+    if (navigator.clipboard) {{ navigator.clipboard.writeText(t).then(done); return; }}
+    var a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select();
+    try {{ document.execCommand('copy'); done(); }} catch (e) {{}} document.body.removeChild(a);
+  }});
+}})();
+</script>
+</body>
+</html>
+"##,
+            name = name,
+            svg = svg,
+            code_html = escape(&code),
+            origin_attr = origin,
+            origin_js = self.https_origin().replace(['\\', '\''], ""),
+            fp = fp,
+            nonce = self.nonce,
+        )
+    }
+}

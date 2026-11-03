@@ -66,7 +66,7 @@ pub async fn accept_loop(
                 let service = service_fn(move |req| {
                     let app = app2.clone();
                     async move {
-                        let mut resp = handle(app, peer, req).await.unwrap_or_else(|e: Infallible| match e {});
+                        let mut resp = handle(app, peer, true, req).await.unwrap_or_else(|e: Infallible| match e {});
                         if let Some(v) = alt_svc {
                             resp.headers_mut().insert("alt-svc", hyper::header::HeaderValue::from_static(v));
                         }

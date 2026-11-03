@@ -37,6 +37,8 @@ h3-quinn = { version = "0.0.10", optional = true }
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"], optional = true }
 time = { version = "0.3", default-features = false, features = ["std"], optional = true }
 ring = { version = "0.17", default-features = false, optional = true }
+# the QR code of the pairing page: a few KB, no dependencies, drawn as SVG on the server
+qrcodegen = { version = "1.8", optional = true }
 mdns-sd = { version = "0.21", default-features = false, features = ["async"] }
 tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "macros", "signal", "sync", "io-util"] }
 # interfaces with their flags (tunnel, point-to-point, virtual), to find the real LAN and never a VPN such as Tailscale
@@ -46,9 +48,11 @@ getrandom = "0.3"
 [features]
 tls = ["dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "hyper/http2", "hyper-util/http2", "hyper-util/server-auto"]
 http3 = ["tls", "dep:quinn", "dep:h3", "dep:h3-quinn"]
-selfcert = ["tls", "dep:rcgen", "dep:time", "dep:ring"]
+selfcert = ["tls", "dep:rcgen", "dep:time", "dep:ring", "dep:qrcodegen"]
 
 [dev-dependencies]
+# reads the QR code back, to prove the page carries exactly the pairing code
+rqrr = "0.11"
 # prost is only used by the tests, to decode what the hand-written encoder produces
 prost = { version = "0.13", default-features = false, features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "sync", "io-util"] }

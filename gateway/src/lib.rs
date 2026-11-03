@@ -3,6 +3,8 @@
 pub mod certs;
 pub mod clientip;
 pub mod config;
+#[cfg(feature = "selfcert")]
+pub mod connect;
 pub mod discovery;
 #[cfg(feature = "http3")]
 pub mod h3;
