@@ -17,6 +17,13 @@ Branch `experiment/http2-http3-tls`. Responde: vale a pena o gateway falar TLS, 
 - `experiments/http23/`: `nginx.conf` (terminador de referência), `latproxy.mjs` (injeta RTT em TCP e UDP) e
   `pageload.mjs` (cargas a frio no Chrome por protocolo).
 
+## WebSocket no gateway (segunda etapa)
+
+`gateway/src/websocket.rs`: o `Upgrade` HTTP/1.1 é repassado a uma réplica e, no 101, as duas conexões são unidas byte a
+byte (buffers de 4 KiB por sentido). Limites: `MAX_WEBSOCKETS` (1024), `MAX_WEBSOCKETS_PER_IP` (32, porque o túnel vive mais
+que a conexão HTTP que as outras contagens enxergam), `WS_IDLE_SECS` (600), túneis fechados no desligamento. WebSocket
+sobre HTTP/2 e HTTP/3 é recusado com 426 (nenhum navegador o oferece). 10 testes em `tests/websocket.rs` e 1 em `tests/tls.rs`.
+
 ## Como reproduzir
 
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 30 -keyout key.pem -out cert.pem \

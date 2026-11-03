@@ -21,11 +21,16 @@ pub struct App {
     pub registry: Arc<Registry>,
     /// This machine's address on the LAN (`192.168.1.163:8086`), once known; see `ADDRESS_HEADER`.
     pub address: RwLock<Option<String>>,
-    client: Client<HttpConnector, Full<Bytes>>,
+    pub(crate) client: Client<HttpConnector, Full<Bytes>>,
+    /// WebSocket tunnels: a global budget, one per client, and a signal that closes them on shutdown.
+    pub(crate) ws_slots: Arc<tokio::sync::Semaphore>,
+    pub(crate) ws_per_ip: Arc<crate::limiter::ConnLimit>,
+    pub ws_stop: tokio::sync::watch::Sender<bool>,
 }
 
 impl App {
     pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
+        let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
         let pool = Pool::new(cfg.upstreams.clone());
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(4)
@@ -38,13 +43,16 @@ impl App {
             registry,
             address: RwLock::new(address),
             client,
+            ws_slots: Arc::new(tokio::sync::Semaphore::new(cfg_ws)),
+            ws_per_ip: crate::limiter::ConnLimit::new(cfg_ws_ip),
+            ws_stop: tokio::sync::watch::channel(false).0,
         }
     }
 }
 
 /// Headers that claim to say who the client is. The gateway is the edge: it sets `x-forwarded-for` itself, and the
 /// others do not reach the API (nothing there should trust them).
-const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
+pub(crate) const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
 
 /// The page of a server may be opened by `localhost` or a VPN address; this header on `GET /server/info/` tells
 /// the web the address the other devices of the LAN use. It is not sent when the request came through a declared
@@ -55,7 +63,7 @@ pub const ADDRESS_HEADER: &str = "x-pindrel-address";
 /// read from the page it is on. Unlike the address it is harmless for anyone to see, so a tunnel gets it too.
 pub const ID_HEADER: &str = "x-pindrel-id";
 
-const HOP_BY_HOP: [&str; 8] = [
+pub(crate) const HOP_BY_HOP: [&str; 8] = [
     "connection",
     "keep-alive",
     "proxy-authenticate",
@@ -66,7 +74,7 @@ const HOP_BY_HOP: [&str; 8] = [
     "upgrade",
 ];
 
-fn reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Response<Body> {
+pub(crate) fn reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Response<Body> {
     let mut r = Response::new(Full::new(Bytes::from(body)).map_err(|e| match e {}).boxed());
     *r.status_mut() = status;
     r.headers_mut()
@@ -77,7 +85,7 @@ fn reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Respo
 }
 
 /// Errors use the same protobuf `ErrorHttp` body as the API.
-fn error(status: StatusCode, code: &str, message: &str) -> Response<Body> {
+pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response<Body> {
     reply(status, "application/x-protobuf", proto::error_http(code, message))
 }
 
@@ -90,7 +98,7 @@ fn rate_limited(retry_after: Duration) -> Response<Body> {
 }
 
 /// Works for any request body: hyper's own `Incoming` (HTTP/1.1, HTTP/2) and the ones the HTTP/3 side builds.
-pub async fn handle<B>(app: Arc<App>, peer: SocketAddr, req: Request<B>) -> Result<Response<Body>, Infallible>
+pub async fn handle<B>(app: Arc<App>, peer: SocketAddr, mut req: Request<B>) -> Result<Response<Body>, Infallible>
 where
     B: HttpBody<Data = Bytes> + Send + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -101,6 +109,9 @@ where
         if let Err(wait) = app.limiters.global.check(ip) {
             return Ok(rate_limited(wait));
         }
+    }
+    if crate::websocket::is_upgrade(&req) {
+        return Ok(crate::websocket::tunnel(&app, ip, &mut req).await);
     }
     let path = req.uri().path();
     let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
