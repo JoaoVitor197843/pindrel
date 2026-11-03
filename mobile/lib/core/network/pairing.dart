@@ -272,8 +272,12 @@ Future<http.Client> clientForUri(Uri baseUri, PairedStore store) async {
 
 /// What the person sees while pairing by digits: compare [digits] with the ones on the server's connection page.
 class SasPrompt {
-  const SasPrompt({required this.digits, required this.name, required this.hostPort, required this.expiresAt});
+  const SasPrompt({required this.digits, required this.name, required this.hostPort, required this.expiresAt, this.yourAddress = ''});
   final String digits;
+
+  /// The address the server sees this device at: several devices may be pairing, and the server's page lists each one's
+  /// digits under its address, so the person looks for this one. Empty when the server did not say (an older one).
+  final String yourAddress;
 
   /// When the server forgets these digits: past it the person is given new ones.
   final DateTime expiresAt;
@@ -378,6 +382,8 @@ Future<PairingResult> pairWithDigits({
     if (startStatus == 429) return PairingFailed(startBody.contains('pairing_locked') ? PairingFailure.locked : PairingFailure.busy);
     if (startStatus != 200) return refusal(startStatus)!;
     final id = _field(startBody, 'id');
+    final you = _field(startBody, 'you');
+    final yourAddress = RegExp(r'^[0-9a-fA-F:.]{1,45}$').hasMatch(you) ? you : '';
     final s = _unhex(_field(startBody, 'n'), 16);
     if (_unhex(id, 16) == null || s == null) return const PairingFailed(PairingFailure.protocol);
     var name = _field(startBody, 'name').replaceAll(RegExp(r'[\u0000-\u001f\u007f]'), '').trim();
@@ -391,7 +397,7 @@ Future<PairingResult> pairWithDigits({
     bool same;
     var expired = false;
     try {
-      same = await confirm(SasPrompt(digits: digits, name: name, hostPort: hostPort, expiresAt: DateTime.now().add(confirmTimeout))).timeout(confirmTimeout);
+      same = await confirm(SasPrompt(digits: digits, name: name, hostPort: hostPort, yourAddress: yourAddress, expiresAt: DateTime.now().add(confirmTimeout))).timeout(confirmTimeout);
     } on TimeoutException {
       same = false;
       expired = true;

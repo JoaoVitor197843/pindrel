@@ -81,6 +81,11 @@ async fn rig(tweak: impl FnOnce(&mut pindrel_gateway::config::Config)) -> Rig {
 
 /// One HTTPS request written by hand, trusting only the CA the server gave; returns the status and the body.
 async fn https(rig: &Rig, method: &str, path: &str, body: &[u8]) -> (u16, String) {
+    https_from(rig, None, method, path, body).await
+}
+
+/// The same, as a device with its own address (`127.0.0.N` all reach the same listener, each one is a different peer).
+async fn https_from(rig: &Rig, src: Option<std::net::Ipv4Addr>, method: &str, path: &str, body: &[u8]) -> (u16, String) {
     let mut roots = RootCertStore::empty();
     for c in CertificateDer::pem_slice_iter(rig.ca_pem.as_bytes()) {
         roots.add(c.unwrap()).unwrap();
@@ -90,7 +95,14 @@ async fn https(rig: &Rig, method: &str, path: &str, body: &[u8]) -> (u16, String
         .unwrap()
         .with_root_certificates(roots)
         .with_no_client_auth();
-    let tcp = TcpStream::connect(("127.0.0.1", rig.tls)).await.unwrap();
+    let tcp = match src {
+        None => TcpStream::connect(("127.0.0.1", rig.tls)).await.unwrap(),
+        Some(ip) => {
+            let socket = tokio::net::TcpSocket::new_v4().unwrap();
+            socket.bind((ip, 0).into()).unwrap();
+            socket.connect(([127, 0, 0, 1], rig.tls).into()).await.unwrap()
+        }
+    };
     let mut tls = TlsConnector::from(Arc::new(cfg))
         .connect(ServerName::try_from("localhost").unwrap(), tcp)
         .await
@@ -108,6 +120,21 @@ async fn https(rig: &Rig, method: &str, path: &str, body: &[u8]) -> (u16, String
     (status, text.split_once("\r\n\r\n").map(|(_, b)| b.to_string()).unwrap_or_default())
 }
 
+/// The lines of `/server/pair/sas`: `d=<digits>,<seconds left>,<address>`.
+fn rows(body: &str) -> Vec<(String, u64, String)> {
+    body.lines()
+        .filter_map(|l| l.strip_prefix("d="))
+        .map(|l| {
+            let mut p = l.split(',');
+            (
+                p.next().unwrap().to_string(),
+                p.next().unwrap().parse().unwrap(),
+                p.next().unwrap().to_string(),
+            )
+        })
+        .collect()
+}
+
 fn value(body: &str, key: &str) -> String {
     body.lines()
         .find_map(|l| l.strip_prefix(&format!("{key}=")))
@@ -122,6 +149,7 @@ async fn app_side(rig: &Rig, nonce: [u8; 16]) -> String {
     assert_eq!(status, 200, "{body}");
     let (id, s) = (value(&body, "id"), unhex::<16>(&value(&body, "n")).unwrap());
     assert_eq!(value(&body, "name"), "Pindrel");
+    assert_eq!(value(&body, "you"), "127.0.0.1", "the app is told the address the server sees");
     let (status, body) = https(
         rig,
         "POST",
@@ -142,9 +170,11 @@ async fn the_digits_the_app_computes_are_the_ones_the_page_shows() {
     let shown = get(r.gw.addr, "/server/pair/sas").await; // the plain port, like the connection page
     assert_eq!(shown.status, 200);
     let text = String::from_utf8(shown.body.to_vec()).unwrap();
-    assert_eq!(value(&text, "sas"), app, "{text}");
-    assert_eq!(value(&text, "from"), "127.0.0.1");
-    assert!(value(&text, "left").parse::<u64>().unwrap() <= 60);
+    let shown = rows(&text);
+    assert_eq!(shown.len(), 1, "{text}");
+    assert_eq!(shown[0].0, app);
+    assert_eq!(shown[0].2, "127.0.0.1");
+    assert!(shown[0].1 <= 60);
     r.gw.shutdown().await;
 }
 
@@ -158,7 +188,7 @@ async fn somebody_in_between_with_another_ca_sees_other_digits() {
     https(&r, "POST", "/server/pair/reveal", format!("id={id}\na={}", hex(&nonce)).as_bytes()).await;
     let shown = String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap();
     let forged = digits(&[0xAB; 32], &nonce, &s); // the app was handed another CA
-    assert_ne!(value(&shown, "sas"), forged);
+    assert_ne!(rows(&shown)[0].0, forged);
     r.gw.shutdown().await;
 }
 
@@ -285,7 +315,7 @@ async fn a_second_try_after_a_failure_still_works_for_a_careless_person() {
     .await;
     let app = app_side(&r, [3; 16]).await;
     let text = String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap();
-    assert_eq!(value(&text, "sas"), app);
+    assert_eq!(rows(&text)[0].0, app);
     r.gw.shutdown().await;
 }
 
@@ -327,9 +357,103 @@ async fn a_second_start_from_the_same_address_makes_the_first_confirmation_worth
     https(&r, "POST", "/server/pair/reveal", format!("id={id1}\na={}", hex(&n1)).as_bytes()).await;
     let _second = app_side(&r, [8; 16]).await; // takes the slot and shows its own digits
     let shown = String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap();
-    assert_ne!(value(&shown, "sas"), "");
+    assert_eq!(rows(&shown).len(), 1);
     let (status, body) = https(&r, "POST", "/server/pair/done", format!("id={id1}").as_bytes()).await;
     assert_eq!(status, 409, "{body}");
     assert!(body.contains("pairing_expired"));
+    r.gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn six_devices_pair_at_once_each_finds_its_own_row_and_the_seventh_waits() {
+    let r = rig(|_| {}).await;
+    let device = |n: u8| std::net::Ipv4Addr::new(127, 0, 0, n);
+    // all six start and reveal at the same time
+    let work = |n: u8| {
+        let r = &r;
+        async move {
+            let nonce = [n; 16];
+            let commit = hex(digest(&SHA256, &nonce).as_ref());
+            let (status, body) = https_from(r, Some(device(n)), "POST", "/server/pair/start", format!("c={commit}").as_bytes()).await;
+            assert_eq!(status, 200, "device {n}: {body}");
+            assert_eq!(value(&body, "you"), device(n).to_string());
+            let (id, s) = (value(&body, "id"), unhex::<16>(&value(&body, "n")).unwrap());
+            let (status, _) = https_from(
+                r,
+                Some(device(n)),
+                "POST",
+                "/server/pair/reveal",
+                format!("id={id}\na={}", hex(&nonce)).as_bytes(),
+            )
+            .await;
+            assert_eq!(status, 204);
+            (n, id, digits(&r.ca_fp, &nonce, &s))
+        }
+    };
+    let (a, b, c, d, e, f) = tokio::join!(work(2), work(3), work(4), work(5), work(6), work(7));
+    let mine = vec![a, b, c, d, e, f];
+    // a seventh device finds the server full
+    let (status, body) = https_from(
+        &r,
+        Some(device(8)),
+        "POST",
+        "/server/pair/start",
+        format!("c={}", hex(&[0u8; 32])).as_bytes(),
+    )
+    .await;
+    assert_eq!(status, 429, "{body}");
+    assert!(body.contains("pairing_busy"));
+    // the page lists six rows, and each device's digits are under its own address
+    let text = String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap();
+    let shown = rows(&text);
+    assert_eq!(shown.len(), 6, "{text}");
+    for (n, _, d) in &mine {
+        let row = shown
+            .iter()
+            .find(|(_, _, from)| *from == device(*n).to_string())
+            .expect("a row per device");
+        assert_eq!(&row.0, d, "device {n}");
+    }
+    // one device finishes: its row goes, the waiting one gets in, the others are untouched
+    let (n, id, _) = &mine[0];
+    let (status, _) = https_from(&r, Some(device(*n)), "POST", "/server/pair/done", format!("id={id}").as_bytes()).await;
+    assert_eq!(status, 204);
+    let text = String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap();
+    assert_eq!(rows(&text).len(), 5);
+    let (status, _) = https_from(
+        &r,
+        Some(device(8)),
+        "POST",
+        "/server/pair/start",
+        format!("c={}", hex(&[0u8; 32])).as_bytes(),
+    )
+    .await;
+    assert_eq!(status, 200, "a place was freed");
+    // another device cannot end a session that is not its own
+    let (_, id2, _) = &mine[1];
+    let (status, _) = https_from(&r, Some(device(9)), "POST", "/server/pair/done", format!("id={id2}").as_bytes()).await;
+    assert_eq!(status, 409);
+    assert_eq!(
+        rows(&String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap()).len(),
+        5
+    );
+    r.gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_number_of_places_is_configurable() {
+    let r = rig(|c| c.max_pairings = 2).await;
+    let device = |n: u8| std::net::Ipv4Addr::new(127, 0, 0, n);
+    for (n, want) in [(2u8, 200u16), (3, 200), (4, 429)] {
+        let (status, body) = https_from(
+            &r,
+            Some(device(n)),
+            "POST",
+            "/server/pair/start",
+            format!("c={}", hex(&[1u8; 32])).as_bytes(),
+        )
+        .await;
+        assert_eq!(status, want, "device {n}: {body}");
+    }
     r.gw.shutdown().await;
 }
