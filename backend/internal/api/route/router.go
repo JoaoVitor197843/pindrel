@@ -1,6 +1,7 @@
 package route
 
 import (
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -110,6 +111,13 @@ func spaHandler(dir string) http.HandlerFunc {
 		// path.Clean on a rooted path drops any ".." segments, so it cannot escape dir
 		clean := path.Clean("/" + r.URL.Path)
 		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(clean))); err == nil && !info.IsDir() {
+			// Vite names everything under /assets/ after its content: it can be kept for good
+			if strings.HasPrefix(clean, "/assets/") {
+				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+			if servePrecompressed(w, r, filepath.Join(dir, filepath.FromSlash(clean)), info.ModTime()) {
+				return
+			}
 			files.ServeHTTP(w, r)
 			return
 		}
@@ -127,6 +135,61 @@ func spaHandler(dir string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")
+		if info, err := os.Stat(index); err == nil && servePrecompressed(w, r, index, info.ModTime()) {
+			return
+		}
 		http.ServeFile(w, r, index)
 	}
+}
+
+// servePrecompressed answers with `<file>.br` or `<file>.gz` when the build left one next to the file and the client
+// accepts it (Vite does it at build time, vite.assets.ts), so the server compresses nothing: no CPU and no RAM per
+// request, only a file read. It reports false when it did not answer and the plain file must be served.
+func servePrecompressed(w http.ResponseWriter, r *http.Request, file string, modTime time.Time) bool {
+	w.Header().Add("Vary", "Accept-Encoding")
+	// a byte range of a compressed body is not a byte range of the file the client asked for
+	if r.Header.Get("Range") != "" {
+		return false
+	}
+	accepted := r.Header.Get("Accept-Encoding")
+	for _, enc := range []struct{ token, ext string }{{"br", ".br"}, {"gzip", ".gz"}} {
+		if !acceptsEncoding(accepted, enc.token) {
+			continue
+		}
+		f, err := os.Open(file + enc.ext)
+		if err != nil {
+			continue
+		}
+		defer f.Close()
+		// older than the file it compresses: a stale leftover of a previous build, not to be trusted
+		if info, err := f.Stat(); err != nil || info.IsDir() || info.ModTime().Before(modTime.Add(-time.Minute)) {
+			continue
+		}
+		w.Header().Set("Content-Encoding", enc.token)
+		// the type comes from the original name, since ServeContent would read ".br" as unknown
+		w.Header().Set("Content-Type", contentType(file))
+		http.ServeContent(w, r, "", modTime, f)
+		return true
+	}
+	return false
+}
+
+// acceptsEncoding is a small reading of Accept-Encoding: the token must be listed and not refused with q=0.
+func acceptsEncoding(header, token string) bool {
+	for _, part := range strings.Split(header, ",") {
+		name, params, _ := strings.Cut(strings.TrimSpace(part), ";")
+		if !strings.EqualFold(strings.TrimSpace(name), token) {
+			continue
+		}
+		q := strings.ReplaceAll(strings.ToLower(params), " ", "")
+		return q != "q=0" && q != "q=0.0" && q != "q=0.00" && q != "q=0.000"
+	}
+	return false
+}
+
+func contentType(file string) string {
+	if t := mime.TypeByExtension(filepath.Ext(file)); t != "" {
+		return t
+	}
+	return "application/octet-stream"
 }
