@@ -434,7 +434,7 @@ async fn six_devices_pair_at_once_each_finds_its_own_row_and_the_seventh_waits()
     let (status, _) = https_from(&r, Some(device(9)), "POST", "/server/pair/done", format!("id={id2}").as_bytes()).await;
     assert_eq!(status, 409);
     assert_eq!(
-        rows(&String::from_utf8(get(r.gw.addr, "/server/pair/sas").await.body.to_vec()).unwrap()).len(),
+        rows(std::str::from_utf8(&get(r.gw.addr, "/server/pair/sas").await.body).unwrap()).len(),
         5
     );
     r.gw.shutdown().await;
