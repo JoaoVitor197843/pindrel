@@ -189,6 +189,30 @@ ol { padding-left:20px; margin:8px 0; } li { margin:4px 0; }
 a { color:var(--accent-text); }
 :focus-visible { outline:2px solid var(--accent-line); outline-offset:2px; }
 .fp { font:14px monospace; word-spacing:6px; overflow-wrap:anywhere; }
+
+/* Motion: everything below is switched off for people who asked their system for less movement. */
+@keyframes rise { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+@keyframes pop { from { opacity:0; transform:scale(.92); } to { opacity:1; transform:none; } }
+@keyframes pulse { 0%,100% { box-shadow:0 0 0 0 rgba(143,176,133,.0); } 50% { box-shadow:0 0 0 6px rgba(143,176,133,.18); } }
+@keyframes spin { to { transform:rotate(360deg); } }
+@keyframes reveal { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+@media (prefers-reduced-motion: no-preference) {
+  /* The badge and the title are never animated from transparent: a page whose first paint is invisible has no first contentful paint. */
+  .local, #status, main > section, details.choice { animation:rise .55s cubic-bezier(.2,.7,.2,1) both; }
+  .local { animation-delay:.08s; } #status { animation-delay:.16s; }
+  main > section { animation-delay:.28s; } #web { animation-delay:.36s; } #app { animation-delay:.44s; } #why { animation-delay:.5s; }
+  details.choice, .btn, #status { transition:border-color .25s, background-color .25s, transform .2s, opacity .2s; }
+  details.choice:hover { border-color:var(--field); }
+  details.choice > summary::after { transition:transform .3s; }
+  details.choice[open] > summary::after { transform:rotate(180deg); }
+  details.choice[open] > :not(summary) { animation:reveal .35s ease both; }
+  .qr { animation:pop .45s .1s cubic-bezier(.2,.7,.2,1) both; }
+  .btn:not([aria-disabled="true"]):hover { transform:translateY(-2px); }
+  .btn:not([aria-disabled="true"]):active { transform:scale(.97); }
+  #status.ok { animation:pulse 2.4s ease-in-out 2; }
+  #status.wait::before { content:""; display:inline-block; width:12px; height:12px; margin-right:10px; vertical-align:-1px; border:2px solid var(--muted); border-top-color:transparent; border-radius:50%; animation:spin .8s linear infinite; }
+  .local svg { animation:pop .5s .3s both; }
+}
 </style>
 </head>
 <body>
@@ -201,7 +225,7 @@ a { color:var(--accent-text); }
 <div><strong>Este é um servidor da sua rede.</strong> Você está falando com o computador <code>@@MACHINE@@</code> (<code>@@IP@@</code>), dentro da sua rede local. Esta página só aparece para aparelhos da própria rede: de fora, ela nem existe.</div>
 </div>
 
-<div id="status" role="status" aria-live="polite">Verificando se este aparelho já confia neste servidor…</div>
+<div id="status" class="wait" role="status" aria-live="polite">Verificando se este aparelho já confia neste servidor…</div>
 
 <section aria-labelledby="what">
 <h2 id="what">O que esta página faz, e o que não faz</h2>
@@ -213,7 +237,7 @@ a { color:var(--accent-text); }
 </ul>
 </section>
 
-<details class="choice" open>
+<details class="choice" id="web" name="conexao">
 <summary>Vou usar no navegador</summary>
 <p style="margin-top:12px">Para abrir o Pindrel pelo navegador sem avisos, este aparelho precisa confiar uma vez na chave de segurança do servidor.</p>
 <ol>
@@ -234,7 +258,7 @@ a { color:var(--accent-text); }
 <p class="muted" style="margin-top:14px">Os nomes dos menus mudam entre versões e fabricantes.</p>
 </details>
 
-<details class="choice" id="app">
+<details class="choice" id="app" name="conexao">
 <summary>Tenho o app Pindrel</summary>
 <p style="margin-top:12px">Abra o app, escolha <strong>Adicionar servidor</strong> e leia o código abaixo com a câmera, ou cole o texto. O app passa a confiar somente neste servidor: não é preciso instalar nada no sistema.</p>
 <p class="muted">A tela de pareamento do app ainda está em desenvolvimento; até lá, use "Vou usar no navegador".</p>
@@ -256,6 +280,11 @@ a { color:var(--accent-text); }
   var s = document.getElementById('status'), open = document.getElementById('open');
   var stay = /[?&#]ficar\b/.test(location.search + location.hash);
   if (location.hash === '#app') document.getElementById('app').open = true;
+  // Older browsers ignore the name attribute that makes the two choices exclusive: do it by hand.
+  var choices = document.querySelectorAll('details.choice');
+  [].forEach.call(choices, function (d) { d.addEventListener('toggle', function () {
+    if (d.open) [].forEach.call(choices, function (o) { if (o !== d) o.open = false; });
+  }); });
   fetch('@@ORIGIN_JS@@/server/info/', { mode: 'no-cors', cache: 'no-store' }).then(function () {
     open.removeAttribute('aria-disabled'); open.className = 'btn';
     s.className = 'ok';
