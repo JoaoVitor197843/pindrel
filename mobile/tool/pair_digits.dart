@@ -25,16 +25,15 @@ Future<void> main(List<String> args) async {
     store: store,
     confirm: (p) async {
       print('Servidor: ${p.name} (${p.hostPort})');
-      print('Números no app:     ${p.grouped}  (meu endereço para o servidor: ${p.yourAddress.isEmpty ? '?' : p.yourAddress})');
+      print('Números no app:     ${p.grouped}');
       if (compare != null) {
         final c = HttpClient();
         final r = await (await c.getUrl(compare)).close();
         final body = await r.transform(const SystemEncoding().decoder).join();
         c.close();
-        // one line per device that is pairing: d=<digits>,<seconds left>,<address>; this device's is the one with its digits
-        final shownRows = RegExp(r'd=(\d{6}),\d+,([0-9a-fA-F:.]+)').allMatches(body).map((m) => (m.group(1)!, m.group(2)!)).toList();
-        print('Números na página:  ${shownRows.map((r) => '${r.$1} (${r.$2})').join(', ')}');
-        return shownRows.any((r) => r.$1 == p.digits && (p.yourAddress.isEmpty || r.$2 == p.yourAddress));
+        final shown = RegExp(r'sas=(\d{6})').firstMatch(body)?.group(1);
+        print('Números na página:  ${shown ?? '(nenhum)'}');
+        return shown == p.digits;
       }
       stdout.write('São iguais aos da página de conexão do servidor? [s/N] ');
       // not readLineSync: it would freeze the whole program (sockets included) while the person compares

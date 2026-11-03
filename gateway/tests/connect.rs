@@ -495,9 +495,6 @@ async fn the_app_choice_leads_with_the_six_digits_and_keeps_the_qr_as_a_second_w
     assert!(body.contains("/server/pair/sas") && body.contains("textContent") && body.contains("clearInterval"));
     assert!(!body.contains("innerHTML"), "what the server sends is shown as text");
     assert!(body.contains("Nenhum aparelho está pareando agora"));
-    // several devices may pair at once: one row each, with the address of the device, built as text (never as markup)
-    assert!(body.contains("sas-list") && body.contains("Confira a <strong>sua</strong>") && body.contains("createElement('li')"));
-    assert!(!body.contains("em desenvolvimento"), "the app screen exists now");
     // a device that already trusts the server is sent to HTTPS, but not while somebody is pairing: the numbers are here
     assert!(
         body.contains("Há um aparelho pareando agora") && body.contains("pairing"),
