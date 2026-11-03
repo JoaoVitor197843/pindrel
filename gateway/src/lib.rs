@@ -1,4 +1,6 @@
 //! Pindrel gateway: the single front-facing process of a deployment (see CLAUDE.md).
+#[cfg(feature = "tls")]
+pub mod certs;
 pub mod clientip;
 pub mod config;
 pub mod discovery;
@@ -10,6 +12,8 @@ pub mod known;
 pub mod limiter;
 pub mod pool;
 pub mod proto;
+#[cfg(feature = "selfcert")]
+pub mod selfcert;
 pub mod server;
 #[cfg(feature = "tls")]
 pub mod tls;

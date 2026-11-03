@@ -12,6 +12,13 @@ pub struct TlsConfig {
     pub port: u16,
     pub cert: std::path::PathBuf,
     pub key: std::path::PathBuf,
+    /// `TLS_AUTO=true`: the gateway keeps its own CA and server certificate in this directory instead of reading
+    /// `cert` and `key` (build feature `selfcert`).
+    pub auto_dir: Option<std::path::PathBuf>,
+    /// Extra names or addresses for the automatic certificate (`TLS_SANS`).
+    pub extra_sans: Vec<String>,
+    /// How often the certificate is looked at again (renewed files, a changed address); zero turns it off.
+    pub refresh: Duration,
     pub http3: bool,
 }
 
@@ -109,6 +116,7 @@ impl Config {
         let max_websockets = parse("MAX_WEBSOCKETS", "1024", 0, 100_000) as usize;
         let max_websockets_per_ip = parse("MAX_WEBSOCKETS_PER_IP", "32", 1, 100_000) as usize;
         let ws_idle = parse("WS_IDLE_SECS", "600", 0, 86_400);
+        let tls_refresh = parse("TLS_REFRESH_SECS", "3600", 0, 86_400 * 7);
         let mut flag = |key: &str, default: bool| -> bool {
             match get(key) {
                 None => default,
@@ -120,6 +128,7 @@ impl Config {
         };
         let mdns = flag("MDNS_ENABLED", true);
         let rate_limit = flag("RATE_LIMIT_ENABLED", true);
+        let tls_auto = flag("TLS_AUTO", false);
         let tls_port = get("TLS_PORT").map(|v| match v.parse::<u16>() {
             Ok(p) if p > 0 => p,
             _ => {
@@ -129,14 +138,27 @@ impl Config {
         });
         let tls_cert = get("TLS_CERT_FILE");
         let tls_key = get("TLS_KEY_FILE");
+        let tls_dir = get("TLS_DIR");
         let tls = tls_port.map(|port| {
-            if tls_cert.is_none() || tls_key.is_none() {
-                errs.push("TLS_CERT_FILE and TLS_KEY_FILE: required when TLS_PORT is set".into());
+            if tls_auto {
+                if tls_dir.is_none() {
+                    errs.push("TLS_DIR: required when TLS_AUTO is true".into());
+                }
+                if tls_cert.is_some() || tls_key.is_some() {
+                    errs.push("TLS_AUTO and TLS_CERT_FILE/TLS_KEY_FILE: choose one".into());
+                }
+            } else if tls_cert.is_none() || tls_key.is_none() {
+                errs.push("TLS_CERT_FILE and TLS_KEY_FILE: required when TLS_PORT is set (or use TLS_AUTO=true)".into());
             }
             TlsConfig {
                 port,
                 cert: tls_cert.clone().unwrap_or_default().into(),
                 key: tls_key.clone().unwrap_or_default().into(),
+                auto_dir: tls_auto.then(|| tls_dir.clone().unwrap_or_default().into()),
+                extra_sans: get("TLS_SANS")
+                    .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                    .unwrap_or_default(),
+                refresh: Duration::from_secs(tls_refresh),
                 http3: true,
             }
         });

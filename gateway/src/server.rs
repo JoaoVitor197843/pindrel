@@ -193,18 +193,66 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
 
 #[cfg(feature = "tls")]
 async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Receiver<bool>) -> io::Result<()> {
+    use crate::certs::{self, Reloadable, Source};
+    let source = match &t.auto_dir {
+        #[cfg(feature = "selfcert")]
+        Some(dir) => Source::Auto(crate::selfcert::AutoSettings {
+            dir: dir.clone(),
+            extra_sans: t.extra_sans.clone(),
+        }),
+        #[cfg(not(feature = "selfcert"))]
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "TLS_AUTO needs a build with --features selfcert",
+            ))
+        }
+        None => Source::Files {
+            cert: t.cert.clone(),
+            key: t.key.clone(),
+        },
+    };
+    let resolver = Reloadable::new(source)?;
+    if let Some((_, fp)) = resolver.ca() {
+        *app.ca.write().unwrap() = Some(resolver.ca().unwrap());
+        eprintln!("TLS: own CA, fingerprint {fp}");
+        // the address the other devices of the LAN use (the one of the default route), not the container bridges
+        if let Some(ip) = discovery::lan_ip() {
+            eprintln!("TLS: pairing code  pindrel://pair?host={ip}:{}&ca={fp}", t.port);
+        }
+    }
     let h3 = cfg!(feature = "http3") && t.http3;
     let tcp = TcpListener::bind(("0.0.0.0", t.port)).await?;
-    let tcp_cfg = crate::tls::server_config(&t.cert, &t.key, &[b"h2", b"http/1.1"])?;
+    let tcp_cfg = certs::server_config(resolver.clone(), &[b"h2", b"http/1.1"])?;
     let alt_svc = h3.then(|| format!("h3=\":{}\"; ma=86400", t.port));
     tokio::spawn(crate::tls::accept_loop(app.clone(), tcp, tcp_cfg, alt_svc, stop.clone()));
     eprintln!("TLS: HTTP/1.1 + HTTP/2 on port {}", t.port);
     #[cfg(feature = "http3")]
     if h3 {
-        let quic_cfg = crate::tls::server_config(&t.cert, &t.key, &[b"h3"])?;
+        let quic_cfg = certs::server_config(resolver.clone(), &[b"h3"])?;
         let endpoint = crate::h3::endpoint(quic_cfg, ([0, 0, 0, 0], t.port).into())?;
-        tokio::spawn(crate::h3::accept_loop(app.clone(), endpoint, stop));
+        tokio::spawn(crate::h3::accept_loop(app.clone(), endpoint, stop.clone()));
         eprintln!("TLS: HTTP/3 on udp port {}", t.port);
+    }
+    if !t.refresh.is_zero() {
+        let (every, mut stop, app) = (t.refresh, stop, app.clone());
+        tokio::spawn(async move {
+            let mut tick = time::interval_at(time::Instant::now() + every, every);
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => match resolver.refresh() {
+                        Ok(true) => {
+                            eprintln!("TLS: the certificate changed and is in use");
+                            *app.ca.write().unwrap() = resolver.ca();
+                        }
+                        Ok(false) => {}
+                        // a broken renewal keeps the old certificate in use
+                        Err(e) => eprintln!("TLS: could not reload the certificate ({e}); keeping the one in use"),
+                    },
+                    _ = stop.changed() => return,
+                }
+            }
+        });
     }
     Ok(())
 }
