@@ -3,7 +3,7 @@ use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc, sync::Rw
 
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, LengthLimitError, Limited};
-use hyper::{body::Incoming, header, Method, Request, Response, StatusCode};
+use hyper::{body::Body as HttpBody, header, Method, Request, Response, StatusCode};
 use hyper_util::{
     client::legacy::{connect::HttpConnector, Client},
     rt::TokioExecutor,
@@ -89,7 +89,12 @@ fn rate_limited(retry_after: Duration) -> Response<Body> {
     r
 }
 
-pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> Result<Response<Body>, Infallible> {
+/// Works for any request body: hyper's own `Incoming` (HTTP/1.1, HTTP/2) and the ones the HTTP/3 side builds.
+pub async fn handle<B>(app: Arc<App>, peer: SocketAddr, req: Request<B>) -> Result<Response<Body>, Infallible>
+where
+    B: HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     // the connection's peer, or the client a trusted proxy in front of us vouches for (never a header from anyone else)
     let ip = app.cfg.client_ip.resolve(peer.ip(), req.headers());
     if app.cfg.rate_limit {
@@ -127,7 +132,11 @@ pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> 
     Ok(proxy(&app, ip, via_proxy, req).await)
 }
 
-async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incoming>) -> Response<Body> {
+async fn proxy<B>(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<B>) -> Response<Body>
+where
+    B: HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let (parts, body) = req.into_parts();
     // The body is buffered once so that a request can be replayed on another replica when the
     // first one refuses the connection (safe even for POST: nothing was sent yet).
