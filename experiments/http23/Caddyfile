@@ -1,0 +1,24 @@
+# Reference terminator #2 (not part of Pindrel): Caddy in front of the same gateway; /ws goes to a WebSocket echo server.
+{
+	auto_https off
+	servers {
+		protocols h1 h2 h3
+	}
+	log {
+		output stdout
+		format json
+	}
+}
+https://:8460 {
+	tls /tls/cert.pem /tls/key.pem
+	log {
+		output stdout
+		format json
+	}
+	handle /ws {
+		reverse_proxy 127.0.0.1:9500
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8101
+	}
+}
