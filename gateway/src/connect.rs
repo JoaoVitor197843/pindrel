@@ -285,7 +285,11 @@ a { color:var(--accent-text); }
   [].forEach.call(choices, function (d) { d.addEventListener('toggle', function () {
     if (d.open) [].forEach.call(choices, function (o) { if (o !== d) o.open = false; });
   }); });
-  fetch('@@ORIGIN_JS@@/server/info/', { mode: 'no-cors', cache: 'no-store' }).then(function () {
+  // Without a limit a blocked port (a firewall that drops packets instead of refusing) leaves the browser waiting for minutes.
+  var ac = typeof AbortController === 'function' ? new AbortController() : null;
+  var timer = setTimeout(function () { if (ac) ac.abort(); }, 4000);
+  fetch('@@ORIGIN_JS@@/server/info/', { mode: 'no-cors', cache: 'no-store', signal: ac ? ac.signal : undefined }).then(function () {
+    clearTimeout(timer);
     open.removeAttribute('aria-disabled'); open.className = 'btn';
     s.className = 'ok';
     if (stay) { s.textContent = 'Este aparelho já confia neste servidor. Você pode abrir o Pindrel com HTTPS.'; return; }
@@ -295,7 +299,8 @@ a { color:var(--accent-text); }
     link.addEventListener('click', function (e) { e.preventDefault(); clearTimeout(go); s.textContent = 'Este aparelho já confia neste servidor. Você pode abrir o Pindrel com HTTPS.'; });
     s.appendChild(link);
   }).catch(function () {
-    s.className = 'todo'; s.textContent = 'Este aparelho ainda não confia neste servidor. Siga os passos abaixo, ou use o app.';
+    clearTimeout(timer);
+    s.className = 'todo'; s.textContent = 'Este aparelho ainda não confia neste servidor (ou não consegue chegar à porta segura). Siga os passos abaixo, ou use o app.';
   });
   var b = document.getElementById('copy');
   b.addEventListener('click', function () {
