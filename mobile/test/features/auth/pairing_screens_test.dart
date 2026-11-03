@@ -15,6 +15,7 @@ import '../../support/pairing_fakes.dart';
 /// Opens the app with the sample servers, none of them opened before, and the pairing replaced by a fake.
 Future<ProviderContainer> pump(
   WidgetTester tester, {
+  MemoryPairedStore? store,
   FakePairer? pairer,
   bool tls = true,
   ServerTrust? trust,
@@ -29,7 +30,7 @@ Future<ProviderContainer> pump(
     ProviderScope(
       overrides: [
         serverTrustProvider.overrideWithValue(trust ?? ServerTrust(MemoryKeyValueStore())),
-        pairedStoreProvider.overrideWithValue(MemoryPairedStore()),
+        pairedStoreProvider.overrideWithValue(store ?? MemoryPairedStore()),
         serverDiscoveryProvider.overrideWithValue(FakeDiscovery(sampleServers)),
         serverProbeProvider.overrideWithValue((_) async => true),
         digitsPairerProvider.overrideWithValue((pairer ?? FakePairer(['123456'])).call),
@@ -195,6 +196,51 @@ void main() {
     Finder codeField() => find.byKey(const ValueKey('pairing-code-field'));
     Finder addressField() => find.widgetWithText(TextField, AddServerDialog.addressLabel);
     bool codeEnabled(WidgetTester tester) => tester.widget<TextField>(codeField()).enabled ?? true;
+
+    testWidgets('o nome é opcional: vazio usa o do servidor; digitado, é o que aparece, e é guardado', (tester) async {
+      final store = MemoryPairedStore();
+      final c = await pump(tester, pairer: FakePairer(['123456'], name: 'Raspberry'), store: store);
+      await openAdd(tester);
+      expect(find.text(AddServerDialog.nameLabel), findsOneWidget);
+      await tester.enterText(addressField(), '192.168.1.5:8086');
+      await tester.enterText(find.byKey(const ValueKey('server-name-field')), '  Casa   da\tpraia \n');
+      await tester.tap(find.text('Buscar servidor'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('found-server')), findsOneWidget);
+      expect(find.textContaining('Raspberry'), findsWidgets, reason: 'the server\'s own name is shown before confirming');
+      await tester.enterText(codeField(), '123456');
+      await tester.pump();
+      await tester.tap(find.text('Parear'));
+      await tester.pumpAndSettle();
+      final selected = c.read(serverListControllerProvider).current.selected!;
+      expect(selected.name, 'Casa da praia', reason: 'cleaned up: squeezed spaces, no tabs or breaks');
+      expect(selected.trustName, 'Raspberry', reason: 'remembered by the server\'s own name');
+      expect((await store.all()).single.label, 'Casa da praia');
+      expect(find.text('CASA DA PRAIA'), findsOneWidget);
+    });
+
+    testWidgets('sem nome digitado, fica o nome que o servidor informa', (tester) async {
+      final c = await pump(tester, pairer: FakePairer(['123456'], name: 'Raspberry'));
+      await openAdd(tester);
+      await tester.enterText(addressField(), '192.168.1.5:8086');
+      await tester.tap(find.text('Buscar servidor'));
+      await tester.pumpAndSettle();
+      await tester.enterText(codeField(), '123456');
+      await tester.pump();
+      await tester.tap(find.text('Parear'));
+      await tester.pumpAndSettle();
+      expect(c.read(serverListControllerProvider).current.selected!.name, 'Raspberry');
+    });
+
+    testWidgets('o nome não pode passar de 64 caracteres, e some com espaços só', (tester) async {
+      await pump(tester);
+      await openAdd(tester);
+      await tester.enterText(find.byKey(const ValueKey('server-name-field')), 'x' * 200);
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byKey(const ValueKey('server-name-field'))).controller!.text.length, 64);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+    });
 
     testWidgets('endereço inválido é recusado com uma dica, sem buscar nada', (tester) async {
       final pairer = FakePairer(['123456']);

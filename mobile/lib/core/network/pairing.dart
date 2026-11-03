@@ -99,7 +99,7 @@ String confirmationCode(String fingerprint) {
 
 /// A server this device has paired with: only its CA is trusted, and only for it.
 class PairedServer {
-  const PairedServer({required this.hostPort, required this.fingerprint, required this.caPem, required this.name, this.serverId = ''});
+  const PairedServer({required this.hostPort, required this.fingerprint, required this.caPem, required this.name, this.serverId = '', this.label = ''});
 
   final String hostPort;
   final String fingerprint;
@@ -109,16 +109,31 @@ class PairedServer {
   /// The id the server announces for itself (`x-pindrel-id`), empty when it announced none.
   final String serverId;
 
-  Map<String, String> toJson() => {'hostPort': hostPort, 'fingerprint': fingerprint, 'caPem': caPem, 'name': name, 'serverId': serverId};
+  /// The name the person gave it (optional); [name] stays the server's own, which is what remembering it by name relies on.
+  final String label;
+
+  /// What to call it on screen.
+  String get shownName => label.isEmpty ? name : label;
+
+  PairedServer withLabel(String value) =>
+      PairedServer(hostPort: hostPort, fingerprint: fingerprint, caPem: caPem, name: name, serverId: serverId, label: cleanLabel(value));
+
+  Map<String, String> toJson() => {'hostPort': hostPort, 'fingerprint': fingerprint, 'caPem': caPem, 'name': name, 'serverId': serverId, 'label': label};
 
   static PairedServer? fromJson(Object? json) {
     if (json is! Map) return null;
     final h = json['hostPort'], f = json['fingerprint'], c = json['caPem'], n = json['name'];
     if (h is! String || f is! String || c is! String || n is! String) return null;
     if (fingerprintOfPem(c) != f) return null; // a stored CA that is not the one it says it is is not used
-    final id = json['serverId'];
-    return PairedServer(hostPort: h, fingerprint: f, caPem: c, name: n, serverId: id is String ? id : '');
+    final id = json['serverId'], label = json['label'];
+    return PairedServer(hostPort: h, fingerprint: f, caPem: c, name: n, serverId: id is String ? id : '', label: label is String ? cleanLabel(label) : '');
   }
+}
+
+/// A name typed by a person: no control characters, spaces squeezed, at most [PairingCode.maxNameLength] characters.
+String cleanLabel(String value) {
+  final text = value.replaceAll(RegExp(r'[\u0000-\u001f\u007f]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+  return text.length > PairingCode.maxNameLength ? text.substring(0, PairingCode.maxNameLength).trim() : text;
 }
 
 /// Where pairings are kept between runs (the app uses secure storage).

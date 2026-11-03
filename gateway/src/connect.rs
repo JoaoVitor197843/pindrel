@@ -305,12 +305,17 @@ a { color:var(--accent-text); }
     clearTimeout(timer);
     open.removeAttribute('aria-disabled'); open.className = 'btn';
     s.className = 'ok';
-    if (stay) { s.textContent = 'Este aparelho já confia neste servidor. Você pode abrir o Pindrel com HTTPS.'; return; }
-    s.textContent = 'Este aparelho já confia neste servidor: abrindo o Pindrel com HTTPS…';
-    var go = setTimeout(function () { location.href = open.href; }, 1800);
-    var link = document.createElement('a'); link.href = '#'; link.textContent = ' Ficar nesta página';
-    link.addEventListener('click', function (e) { e.preventDefault(); clearTimeout(go); s.textContent = 'Este aparelho já confia neste servidor. Você pode abrir o Pindrel com HTTPS.'; });
-    s.appendChild(link);
+    var trusted = 'Este aparelho já confia neste servidor. Você pode abrir o Pindrel com HTTPS.';
+    if (stay) { s.textContent = trusted; return; }
+    // Somebody who came to read the six numbers of a pairing must not be sent away from them.
+    fetch('/server/pair/sas', { cache: 'no-store' }).then(function (r) { return r.status === 200; }, function () { return false; }).then(function (pairing) {
+      if (pairing) { app.open = true; s.textContent = trusted + ' Há um aparelho pareando agora: os números estão na seção "Tenho o app Pindrel".'; return; }
+      s.textContent = 'Este aparelho já confia neste servidor: abrindo o Pindrel com HTTPS…';
+      var go = setTimeout(function () { location.href = open.href; }, 1800);
+      var link = document.createElement('a'); link.href = '#'; link.textContent = ' Ficar nesta página';
+      link.addEventListener('click', function (e) { e.preventDefault(); clearTimeout(go); s.textContent = trusted; });
+      s.appendChild(link);
+    });
   }).catch(function () {
     clearTimeout(timer);
     s.className = 'todo'; s.textContent = 'Este aparelho ainda não confia neste servidor (ou não consegue chegar à porta segura). Siga os passos abaixo, ou use o app.';
