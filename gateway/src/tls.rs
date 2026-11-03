@@ -1,5 +1,5 @@
 //! Optional TLS listener: HTTP/1.1 and HTTP/2 over TCP (negotiated by ALPN). Build feature `tls`.
-use std::{convert::Infallible, io, path::Path, sync::Arc, time::Duration};
+use std::{convert::Infallible, sync::Arc, time::Duration};
 
 use hyper::service::service_fn;
 use hyper_util::{
@@ -7,7 +7,6 @@ use hyper_util::{
     server::conn::auto,
 };
 use rustls::ServerConfig;
-use rustls_pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 use tokio::{
     net::TcpListener,
     sync::{watch, Semaphore},
@@ -19,24 +18,6 @@ use crate::{
     handler::{handle, App},
     limiter::ConnLimit,
 };
-
-/// The rustls configuration for `alpn` (`h2`/`http/1.1` for TCP, `h3` for QUIC), from PEM files.
-pub fn server_config(cert: &Path, key: &Path, alpn: &[&[u8]]) -> io::Result<Arc<ServerConfig>> {
-    let bad = |e: rustls_pki_types::pem::Error| io::Error::new(io::ErrorKind::InvalidData, e.to_string());
-    let certs = CertificateDer::pem_file_iter(cert)
-        .map_err(bad)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(bad)?;
-    let key = PrivateKeyDer::from_pem_file(key).map_err(bad)?;
-    let mut cfg = ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .with_safe_default_protocol_versions()
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?
-        .with_no_client_auth()
-        .with_single_cert(certs, key)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    cfg.alpn_protocols = alpn.iter().map(|p| p.to_vec()).collect();
-    Ok(Arc::new(cfg))
-}
 
 pub async fn accept_loop(
     app: Arc<App>,
@@ -107,4 +88,18 @@ pub async fn accept_loop(
         });
     }
     drop(listener);
+}
+
+/// The private IPv4 addresses of this machine, for the pairing codes printed at start.
+pub fn lan_addresses() -> Vec<std::net::Ipv4Addr> {
+    if_addrs::get_if_addrs()
+        .map(|v| {
+            v.into_iter()
+                .filter_map(|i| match i.ip() {
+                    std::net::IpAddr::V4(ip) if !ip.is_loopback() && ip.is_private() => Some(ip),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }

@@ -26,6 +26,8 @@ pub struct App {
     pub(crate) ws_slots: Arc<tokio::sync::Semaphore>,
     pub(crate) ws_per_ip: Arc<crate::limiter::ConnLimit>,
     pub ws_stop: tokio::sync::watch::Sender<bool>,
+    /// Public CA certificate (PEM) and its SHA-256 fingerprint, when the gateway keeps its own CA (`TLS_AUTO`).
+    pub ca: RwLock<Option<(String, String)>>,
 }
 
 impl App {
@@ -46,6 +48,7 @@ impl App {
             ws_slots: Arc::new(tokio::sync::Semaphore::new(cfg_ws)),
             ws_per_ip: crate::limiter::ConnLimit::new(cfg_ws_ip),
             ws_stop: tokio::sync::watch::channel(false).0,
+            ca: RwLock::new(None),
         }
     }
 }
@@ -62,6 +65,10 @@ pub const ADDRESS_HEADER: &str = "x-pindrel-address";
 /// Also on `GET /server/info/`: the id of this server (see `identity`), which a client that remembers servers by id can
 /// read from the page it is on. Unlike the address it is harmless for anyone to see, so a tunnel gets it too.
 pub const ID_HEADER: &str = "x-pindrel-id";
+
+/// SHA-256 of the CA certificate of this server, on `GET /server/info/` (see `selfcert`). Seeing it over plain HTTP proves
+/// nothing: a client trusts it only when it matches the fingerprint it was given out of band (a pairing code).
+pub const CA_HEADER: &str = "x-pindrel-ca";
 
 pub(crate) const HOP_BY_HOP: [&str; 8] = [
     "connection",
@@ -115,6 +122,18 @@ where
     }
     let path = req.uri().path();
     let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
+    if req.method() == Method::GET && path == "/server/ca.pem" {
+        // public by nature (it is a certificate); the fingerprint a client was given out of band is what makes it trusted
+        return Ok(match app.ca.read().ok().and_then(|c| c.clone()) {
+            Some((pem, _)) => {
+                let mut r = reply(StatusCode::OK, "application/x-x509-ca-cert", pem.into_bytes());
+                r.headers_mut()
+                    .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-cache"));
+                r
+            }
+            None => error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own"),
+        });
+    }
     if req.method() == Method::GET && path == "/server/discover/" {
         // the list is the map of the LAN (names, private addresses): only for clients that are on it, never for
         // whoever reaches a tunnel
@@ -193,11 +212,20 @@ where
                 }
                 p.headers.remove(ADDRESS_HEADER);
                 p.headers.remove(ID_HEADER);
+                p.headers.remove(CA_HEADER);
                 p.headers.remove(header::ACCESS_CONTROL_ALLOW_ORIGIN);
                 p.headers.remove(header::ACCESS_CONTROL_EXPOSE_HEADERS);
                 if parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     if let Ok(v) = header::HeaderValue::from_str(app.registry.id()) {
                         p.headers.insert(ID_HEADER, v);
+                    }
+                    if let Some(v) = app
+                        .ca
+                        .read()
+                        .ok()
+                        .and_then(|c| c.as_ref().and_then(|(_, fp)| header::HeaderValue::from_str(fp).ok()))
+                    {
+                        p.headers.insert(CA_HEADER, v);
                     }
                     // Public and read-only, no credentials: a web page opened from another server may read it to check
                     // that an address typed by the user is a Pindrel gateway. Only the id is exposed, never the address.

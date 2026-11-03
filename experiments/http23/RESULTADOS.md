@@ -85,3 +85,32 @@ nginx e Caddy: o gateway não soma latência mensurável.
 - Descoberta de HTTP/3 por `Alt-Svc` sem forçar: o gateway envia `alt-svc: h3=":PORTA"; ma=86400` (coberto por teste), mas
   o Chrome headless ficou em HTTP/2 nas 5 visitas, mesmo com a CA confiável num NSS temporário e com nome de domínio.
   Não consegui confirmar a troca automática; com `--origin-to-force-quic-on` o HTTP/3 funciona.
+
+# Quarta rodada: certificado sem domínio (opção 4 e comparação)
+
+## Opção 4 (CA do próprio gateway), o que foi verificado
+
+- **App (Dart, só com a CA do servidor, sem raízes do sistema):** pareia com o código certo; recusa o código com um caractere
+  errado; recusa um impostor que responde no lugar do servidor (outra CA, mesmo código); depois de a CA ser trocada, o app
+  pareado deixa de confiar até parear de novo; a renovação do certificado do servidor (mesma CA) passa sem novo pareamento.
+- **Navegador (Chrome, NSS temporário):** `http://IP` não é contexto seguro (sem service worker, `crypto.subtle` nem área de
+  transferência); `https://IP` sem a CA instalada não abre (`ERR_CERT_AUTHORITY_INVALID`); com a CA instalada tudo isso existe.
+- **curl/OpenSSL:** HTTP/1.1, HTTP/2 e HTTP/3 com a CA própria.
+- **Restrição de nomes da CA:** um certificado para `bank.example.com`, assinado de verdade com a chave da CA, é recusado
+  (`permitted subtree violation`). Só nomes DNS são restritos: o BoringSSL do Dart recusa uma CA com restrição de IP
+  (`unsupported name constraint type`), e um site público é alcançado por nome, não por endereço.
+- Geração de CA + certificado: 19 ms (binário nativo, diretório vazio). Chaves privadas com modo 0600.
+
+## Comparação das opções que não exigem domínio
+
+| | Imagem/processo | RAM ociosa | RAM após 3000 pedidos | 1000 WebSockets | Renovação | App nativo | Navegador |
+|---|---|---|---|---|---|---|---|
+| **4. CA própria no gateway** | 7,4 MB | 0,7 MiB | 3,1 / 3,5 / 3,5 MiB (h1/h2/h3) | 28 MiB | automática (anual ou ao mudar o IP), sem reiniciar | pareia uma vez | instalar a CA uma vez por aparelho |
+| 2. CA própria feita à mão (openssl/mkcert) + gateway | 7,2 MB | 0,7 MiB | 1,8 / 2,3 / 4,7 MiB | 28 MiB | manual; o gateway recarrega os arquivos | confiar na CA dentro do app | instalar a CA |
+| 3. Autoassinado com fixação do certificado | 7,2 MB | 0,7 MiB | igual à 2 | igual à 2 | a fixação quebra a cada renovação ou mudança de IP | fixa o certificado, repete o pareamento | aviso a cada aparelho; sem service worker |
+| nginx na frente (arquivos) | processo à parte | 3,0 MiB | 3,5 MiB | +43 MiB (só 507 abriram) | manual | como 2 | como 2 |
+| Caddy `tls internal` | processo à parte | 18,7 MiB | 30,5 MiB | +96 MiB | automática (certificado de 12 h) | como 2 | como 2 |
+| Nome DDNS grátis + Let's Encrypt (`lego`) + gateway | gateway + cliente ACME | 0,7 MiB + lego 10 a 12 MiB por ~1,3 s a cada ~60 dias | igual à 2 | igual à 2 | automática (cron do lego; o gateway recarrega) | confiável sem instalar nada | confiável sem instalar nada |
+
+A última linha foi medida só até a emissão: `lego` contra o Pebble (servidor de teste do Let's Encrypt), com limite de
+memória (OOM com 10 MB, ok com 12 MB) e 1,3 s por emissão. Não pedi um certificado real (depende de conta e serviço de terceiros).

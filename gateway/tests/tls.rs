@@ -2,7 +2,7 @@
 #![cfg(feature = "tls")]
 mod common;
 
-use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use common::*;
@@ -39,6 +39,9 @@ fn tls_cfg(port: u16, http3: bool) -> TlsConfig {
         port,
         cert: dir().join("cert.pem"),
         key: dir().join("key.pem"),
+        auto_dir: None,
+        extra_sans: Vec::new(),
+        refresh: Duration::ZERO,
         http3,
     }
 }
@@ -223,6 +226,7 @@ mod http3 {
     use super::*;
     use bytes::Buf;
     use quinn::crypto::rustls::QuicClientConfig;
+    use std::net::SocketAddr;
 
     async fn h3_request(port: u16, method: &str, path: &str, body: &str) -> (StatusCode, String, String) {
         let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
