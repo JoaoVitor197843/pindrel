@@ -10,6 +10,8 @@ pub mod handler;
 pub mod identity;
 pub mod known;
 pub mod limiter;
+#[cfg(feature = "selfcert")]
+pub mod pairing;
 pub mod pool;
 pub mod proto;
 #[cfg(feature = "selfcert")]
