@@ -100,7 +100,11 @@ async fn http2_over_tls_reaches_the_replica_with_method_path_and_body() {
 async fn http1_over_tls_still_works_and_the_plain_port_is_unchanged() {
     let a = Backend::start("a").await;
     let port = free_port();
-    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port, false))).await;
+    let gw = gateway_with(&[&a], |c| {
+        c.tls = Some(tls_cfg(port, false));
+        c.http_mode = pindrel_gateway::config::HttpMode::Full; // the default would send the plain port to HTTPS
+    })
+    .await;
     let mut s = tls_stream(port, &[b"http/1.1"]).await;
     s.write_all(b"GET /x HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .await

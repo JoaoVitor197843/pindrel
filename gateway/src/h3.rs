@@ -105,7 +105,7 @@ where
     .await;
     let (parts, ()) = req.into_parts();
     let response = match read {
-        Ok(Ok(true)) => match handle(app, peer, Request::from_parts(parts, Full::new(body.freeze()))).await {
+        Ok(Ok(true)) => match handle(app, peer, true, Request::from_parts(parts, Full::new(body.freeze()))).await {
             Ok(r) => r,
             Err(e) => match e {},
         },

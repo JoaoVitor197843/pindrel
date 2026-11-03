@@ -21,6 +21,35 @@ use crate::handler::{error, App, Body, CLIENT_ADDRESS};
 /// Per direction. A tunnel holds two of these for its whole life, so they are small: WebSocket messages are short.
 const BUFFER: usize = 4096;
 
+/// A browser always sends `Origin` on a WebSocket, and any page can ask it to open one to any server: without this check a
+/// page on another site could use the cookies of a logged-in user (Cross-Site WebSocket Hijacking). The origin must be this
+/// server's own (same host as `Host`) or listed in `WS_ALLOWED_ORIGINS`. Clients that are not browsers send no `Origin`.
+fn origin_allowed(app: &App, headers: &hyper::HeaderMap) -> bool {
+    let Some(origin) = headers.get(header::ORIGIN) else { return true };
+    let Ok(origin) = origin.to_str() else { return false };
+    let origin = origin.trim().trim_end_matches('/').to_lowercase();
+    if app.cfg.ws_allowed_origins.contains(&origin) {
+        return true;
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(|h| h.trim().to_lowercase());
+    let origin_host = origin.strip_prefix("https://").or_else(|| origin.strip_prefix("http://"));
+    match (origin_host, host) {
+        (Some(o), Some(h)) => {
+            // the same name, whatever the port: the page and the socket are on the same machine
+            let strip = |s: &str| {
+                s.rsplit_once(':')
+                    .filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit()))
+                    .map_or(s.to_string(), |(a, _)| a.to_string())
+            };
+            !o.is_empty() && strip(o) == strip(&h)
+        }
+        _ => false,
+    }
+}
+
 pub fn is_upgrade<B>(req: &Request<B>) -> bool {
     let has = |name, token: &str| {
         req.headers()
@@ -32,7 +61,7 @@ pub fn is_upgrade<B>(req: &Request<B>) -> bool {
     req.method() == Method::GET && has(header::CONNECTION, "upgrade") && has(header::UPGRADE, "websocket")
 }
 
-pub async fn tunnel<B>(app: &Arc<App>, client_ip: IpAddr, req: &mut Request<B>) -> Response<Body>
+pub async fn tunnel<B>(app: &Arc<App>, client_ip: IpAddr, secure: bool, req: &mut Request<B>) -> Response<Body>
 where
     B: HttpBody<Data = Bytes> + Send + 'static,
 {
@@ -43,6 +72,9 @@ where
             "WebSocket needs an HTTP/1.1 connection",
         );
     };
+    if !origin_allowed(app, req.headers()) {
+        return error(StatusCode::FORBIDDEN, "forbidden_origin", "this page may not open a WebSocket here");
+    }
     let Ok(permit) = app.ws_slots.clone().try_acquire_owned() else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "too_many_websockets", "too many open WebSockets");
     };
@@ -64,7 +96,12 @@ where
                 b = b.header(k, v);
             }
         }
-        let Ok(out) = b.header("x-forwarded-for", client_ip.to_string()).body(Full::new(Bytes::new())) else {
+        let proto = if secure { "https" } else { "http" };
+        let Ok(out) = b
+            .header("x-forwarded-for", client_ip.to_string())
+            .header("x-forwarded-proto", proto)
+            .body(Full::new(Bytes::new()))
+        else {
             return error(StatusCode::BAD_REQUEST, "bad_request", "invalid request");
         };
         match time::timeout(app.cfg.upstream_timeout, app.client.request(out)).await {

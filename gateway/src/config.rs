@@ -22,6 +22,15 @@ pub struct TlsConfig {
     pub http3: bool,
 }
 
+/// What the plain-HTTP port does when TLS is on. `Redirect`: only the public bootstrap routes answer (`/server/info/`,
+/// `/server/ca.pem`, `/server/connect/`, and a landing page at `/`); other GETs are sent to HTTPS and anything that could
+/// carry a password or a note (POST, WebSocket) is refused, so nothing private travels in clear. `Full`: as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpMode {
+    Full,
+    Redirect,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub port: u16,
@@ -52,6 +61,11 @@ pub struct Config {
     /// A tunnel with no byte in either direction for this long is closed (clients ping, so a live one never idles).
     pub ws_idle: Duration,
     pub rate_limit: bool,
+    /// Only used when `tls` is set.
+    pub http_mode: HttpMode,
+    /// Origins (besides the server's own) allowed to open a WebSocket from a browser (`WS_ALLOWED_ORIGINS`). Clients
+    /// that are not browsers send no `Origin` and are not affected.
+    pub ws_allowed_origins: Vec<String>,
     /// Who counts as the client behind a trusted proxy (`TRUSTED_PROXIES`, `CLIENT_IP_HEADER`); by default the peer.
     pub client_ip: ClientIp,
     pub max_body: usize,
@@ -81,6 +95,8 @@ impl Config {
             max_websockets_per_ip: 32,
             ws_idle: Duration::from_secs(600),
             rate_limit: true,
+            http_mode: HttpMode::Redirect,
+            ws_allowed_origins: Vec::new(),
             client_ip: ClientIp::direct(),
             max_body: 1 << 20,
             header_timeout: Duration::from_secs(10),
@@ -162,6 +178,22 @@ impl Config {
                 http3: true,
             }
         });
+        let http_mode = match get("HTTP_MODE").as_deref() {
+            None | Some("redirect") => HttpMode::Redirect,
+            Some("full") => HttpMode::Full,
+            Some(other) => {
+                errs.push(format!("HTTP_MODE: invalid value {other:?} (expected redirect or full)"));
+                HttpMode::Redirect
+            }
+        };
+        let ws_allowed_origins: Vec<String> = get("WS_ALLOWED_ORIGINS")
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().trim_end_matches('/').to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
         let upstreams = match get("UPSTREAMS") {
             None => {
                 errs.push("UPSTREAMS: required (e.g. 127.0.0.1:9000-9099)".into());
@@ -215,6 +247,8 @@ impl Config {
             max_websockets_per_ip,
             ws_idle: Duration::from_secs(ws_idle),
             rate_limit,
+            http_mode,
+            ws_allowed_origins,
             client_ip,
             max_body,
             ..Self::new(Vec::new())
