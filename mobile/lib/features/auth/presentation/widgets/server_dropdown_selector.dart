@@ -120,6 +120,29 @@ class _ServerDropdownSelectorState
     }
   }
 
+  /// The person asked to stop trusting [server]: asks, forgets, and pairs again if they want.
+  Future<void> _revoke(
+    ServerListController controller,
+    ServerOption server,
+    ServerOption? chosen,
+  ) async {
+    final choice = await RevokeTrustDialog.show(
+      context,
+      server,
+      chosen: chosen == server,
+    );
+    if (choice == RevokeChoice.cancel) return;
+    await controller.revokeTrust(server);
+    if (choice == RevokeChoice.repair && mounted) {
+      // the announced one when there is one (it carries the plain address that tells where the secure side is)
+      final again = controller.current.available
+              .where((s) => s.id == server.id)
+              .firstOrNull ??
+          server;
+      await PairingDialog.show(context, again);
+    }
+  }
+
   void _setOpen(bool open) {
     if (mounted && _open != open) setState(() => _open = open);
   }
@@ -167,6 +190,8 @@ class _ServerDropdownSelectorState
                   SnackBar(content: Text('${value.name} não respondeu.')),
                 );
               }
+            } else if (value is _RevokeRequest) {
+              await _revoke(controller, value.server, state.selected);
             } else {
               onAddServer?.call();
             }
@@ -260,6 +285,13 @@ class _SelectorButton extends StatelessWidget {
   }
 }
 
+/// Closes the menu asking to stop trusting [server].
+class _RevokeRequest {
+  const _RevokeRequest(this.server);
+
+  final ServerOption server;
+}
+
 /// The whole content of the menu, updated live.
 class _ServerMenuEntry extends PopupMenuEntry<Object> {
   const _ServerMenuEntry({required this.controller, required this.addValue});
@@ -310,6 +342,9 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
                 onTap: state.connecting != null
                     ? null
                     : () => Navigator.pop(context, server),
+                onRevoke: server.trusted
+                    ? () => Navigator.pop(context, _RevokeRequest(server))
+                    : null,
               ),
             if (disconnected.isNotEmpty) ...[
               const _SectionLabel(ServerDropdownSelector.disconnectedLabel),
@@ -321,6 +356,7 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
                   onTap: state.connecting != null
                       ? null
                       : () => Navigator.pop(context, server),
+                  onRevoke: () => Navigator.pop(context, _RevokeRequest(server)),
                 ),
             ],
             const Divider(height: 1, color: AppColors.border),
@@ -381,6 +417,7 @@ class _ServerItem extends StatelessWidget {
     required this.selected,
     required this.connected,
     required this.onTap,
+    this.onRevoke,
   });
 
   final ServerOption server;
@@ -389,6 +426,9 @@ class _ServerItem extends StatelessWidget {
   /// False in the "Desconectados" section.
   final bool connected;
   final VoidCallback? onTap;
+
+  /// Only a trusted server can have its trust taken away.
+  final VoidCallback? onRevoke;
 
   @override
   Widget build(BuildContext context) {
@@ -457,6 +497,16 @@ class _ServerItem extends StatelessWidget {
                   ),
                 ),
               if (selected) Icon(Icons.check, size: 18, color: highlight),
+              if (onRevoke != null)
+                IconButton(
+                  key: ValueKey('server-revoke-${server.id}'),
+                  tooltip: 'Remover confiança em ${server.name}',
+                  visualDensity: VisualDensity.compact,
+                  iconSize: 18,
+                  color: AppColors.textMuted,
+                  icon: const Icon(Icons.gpp_bad_outlined),
+                  onPressed: onRevoke,
+                ),
             ],
           ),
         ),

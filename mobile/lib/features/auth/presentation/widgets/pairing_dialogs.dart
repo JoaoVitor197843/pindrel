@@ -587,3 +587,58 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
     );
   }
 }
+
+/// What the person decides about a server they trust.
+enum RevokeChoice { cancel, remove, repair }
+
+/// "Remover confiança": the device forgets the pairing and, if the person wants, pairs again right away.
+class RevokeTrustDialog extends StatelessWidget {
+  const RevokeTrustDialog({super.key, required this.server, required this.chosen});
+
+  final ServerOption server;
+
+  /// The server is the one in use now.
+  final bool chosen;
+
+  static Future<RevokeChoice> show(BuildContext context, ServerOption server, {required bool chosen}) async =>
+      await showDialog<RevokeChoice>(
+        context: context,
+        builder: (_) => RevokeTrustDialog(server: server, chosen: chosen),
+      ) ??
+      RevokeChoice.cancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return _frame(
+      title: 'Remover confiança em ${server.name}?',
+      body: [
+        const Text(
+          'Este aparelho deixa de confiar na chave de segurança deste servidor e esquece que você já o abriu. '
+          'Para usá-lo de novo, será preciso parear outra vez, comparando os 6 números.',
+          style: _muted,
+        ),
+        if (chosen) ...[
+          const SizedBox(height: 10),
+          const Text('Ele também deixa de ser o servidor escolhido.', style: _muted),
+        ],
+      ],
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(RevokeChoice.cancel),
+          child: const Text('Cancelar', style: TextStyle(color: AppColors.textMuted)),
+        ),
+        TextButton(
+          key: const ValueKey('revoke-remove'),
+          onPressed: () => Navigator.of(context).pop(RevokeChoice.remove),
+          child: const Text('Remover confiança', style: TextStyle(color: AppColors.offline)),
+        ),
+        FilledButton(
+          key: const ValueKey('revoke-repair'),
+          style: _primary(),
+          onPressed: () => Navigator.of(context).pop(RevokeChoice.repair),
+          child: const Text('Remover e parear de novo'),
+        ),
+      ],
+    );
+  }
+}

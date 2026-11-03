@@ -175,6 +175,38 @@ class ServerListController {
     ];
   }
 
+  /// The person no longer trusts [server] (one they paired, opened before, or added by hand, announced or not). Its pairing
+  /// and what was remembered about it are forgotten; if it was the chosen one it is not any more. An announced server stays
+  /// in the list as a new one, so it can be paired again; one only known from the pairing disappears.
+  Future<void> revokeTrust(ServerOption server) async {
+    await _ready;
+    await _trust?.forget(server.trustName);
+    final paired = _paired;
+    if (paired != null) {
+      try {
+        for (final p in await paired.all()) {
+          if (ServerOption.idFor(p.name) == server.id &&
+              (server.serverId.isEmpty || p.serverId.isEmpty || p.serverId == server.serverId)) {
+            await paired.forget(p.hostPort);
+          }
+        }
+      } catch (_) {
+        // the list below is what the person sees; a store that fails cannot keep it trusted this session
+      }
+    }
+    _manual = [
+      for (final m in _manual)
+        if (m.id != server.id) m,
+    ];
+    _discovered = [
+      for (final d in _discovered) d.id == server.id ? d.withTrusted(false) : d,
+    ];
+    _rebuild();
+    if (_selected != null && _selected!.id == server.id) _selected = null;
+    if (_pending?.id == server.id) _pending = null;
+    _publish();
+  }
+
   /// The person confirmed the digits (or typed them): [server] is paired and becomes the chosen one. Its name and id are
   /// remembered, so from now on it is trusted without asking again.
   Future<void> completePairing(ServerOption server) async {

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +51,8 @@ Future<void> openMenu(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Selecionar servidor'));
   await tester.pumpAndSettle();
 }
+
+final _pem = File('test/fixtures/pairing/good-ca.pem').readAsStringSync();
 
 void main() {
   group('lista sem escolha automática', () {
@@ -183,6 +187,94 @@ void main() {
       expect(find.bySemanticsLabel('Número de conferência: 1 2 3 4 5 6'), findsOneWidget);
       await tester.tap(find.text('Cancelar'));
       await tester.pumpAndSettle();
+    });
+  });
+
+  group('retirar a confiança', () {
+    Future<ServerTrust> trustedCasa() async {
+      final trust = ServerTrust(MemoryKeyValueStore());
+      await trust.remember('Casa', '');
+      return trust;
+    }
+
+    testWidgets('só os confiáveis têm o botão, e tocar nele não escolhe o servidor', (tester) async {
+      final c = await pump(tester, trust: await trustedCasa());
+      await openMenu(tester);
+      expect(find.byKey(const ValueKey('server-revoke-casa')), findsOneWidget);
+      expect(find.byKey(const ValueKey('server-revoke-nuvem')), findsNothing, reason: 'a new server has nothing to remove');
+      expect(find.byTooltip('Remover confiança em Casa'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('server-revoke-casa')));
+      await tester.pumpAndSettle();
+      expect(find.text('Remover confiança em Casa?'), findsOneWidget);
+      expect(c.read(serverListControllerProvider).current.selected, isNull, reason: 'the tap on the button is not a choice');
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('server-badge-casa')), findsNothing);
+    });
+
+    testWidgets('Cancelar deixa tudo como estava', (tester) async {
+      final c = await pump(tester, trust: await trustedCasa());
+      await openMenu(tester);
+      await tester.tap(find.byKey(const ValueKey('server-revoke-casa')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(c.read(serverListControllerProvider).current.available.firstWhere((s) => s.name == 'Casa').trusted, isTrue);
+    });
+
+    testWidgets('remover: o servidor, ainda na rede, volta a pedir pareamento e deixa de ser o escolhido', (tester) async {
+      final c = await pump(tester, trust: await trustedCasa());
+      final controller = c.read(serverListControllerProvider);
+      await controller.select(controller.current.available.first);
+      await tester.pump();
+      expect(find.text('CASA'), findsOneWidget);
+      await openMenu(tester);
+      await tester.tap(find.byKey(const ValueKey('server-revoke-casa')));
+      await tester.pumpAndSettle();
+      expect(find.text('Ele também deixa de ser o servidor escolhido.'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('revoke-remove')));
+      await tester.pumpAndSettle();
+      expect(controller.current.selected, isNull);
+      expect(find.text('3 DISPONÍVEIS'), findsOneWidget);
+      await openMenu(tester);
+      expect(find.descendant(of: find.byKey(const ValueKey('server-item-casa')), matching: find.text('PAREAR')), findsOneWidget);
+      // and it can be paired again with a tap
+      await tester.tap(find.byKey(const ValueKey('server-item-casa')));
+      await tester.pumpAndSettle();
+      expect(find.text('Parear com Casa'), findsOneWidget);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('remover e parear de novo: abre a tela dos números na hora, e concluir o torna confiável outra vez', (tester) async {
+      final c = await pump(tester, trust: await trustedCasa());
+      await openMenu(tester);
+      await tester.tap(find.byKey(const ValueKey('server-revoke-casa')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('revoke-repair')));
+      await tester.pumpAndSettle();
+      expect(find.text('Parear com Casa'), findsOneWidget);
+      expect(find.text('123 456'), findsOneWidget);
+      await tester.tap(find.text('São iguais'));
+      await tester.pumpAndSettle();
+      final selected = c.read(serverListControllerProvider).current.selected!;
+      expect(selected.name, 'Casa');
+      expect(selected.trusted, isTrue);
+    });
+
+    testWidgets('o servidor que só existe pelo pareamento some da lista ao remover', (tester) async {
+      final store = MemoryPairedStore();
+      await store.save(PairedServer(hostPort: '192.168.1.50:8443', fingerprint: fingerprintOfPem(_pem), caPem: _pem, name: 'Sítio', serverId: 'sss'));
+      await pump(tester, store: store);
+      await openMenu(tester);
+      expect(find.byKey(const ValueKey('server-item-sitio')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('server-revoke-sitio')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('revoke-remove')));
+      await tester.pumpAndSettle();
+      await openMenu(tester);
+      expect(find.byKey(const ValueKey('server-item-sitio')), findsNothing);
+      expect(await store.all(), isEmpty);
     });
   });
 
