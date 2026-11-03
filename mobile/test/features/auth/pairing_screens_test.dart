@@ -112,16 +112,6 @@ void main() {
       expect(find.text('Parear com Casa'), findsOneWidget, reason: 'another new server asks');
     });
 
-    testWidgets('o modal diz qual linha da página é a do aparelho (vários podem parear ao mesmo tempo)', (tester) async {
-      await pump(tester);
-      await openMenu(tester);
-      await tester.tap(find.byKey(const ValueKey('server-item-casa')));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('ache a linha do seu aparelho (192.168.1.77)'), findsOneWidget);
-      await tester.tap(find.text('Cancelar'));
-      await tester.pumpAndSettle();
-    });
-
     testWidgets('Cancelar não escolhe nem guarda nada', (tester) async {
       final c = await pump(tester);
       await openMenu(tester);
@@ -340,17 +330,6 @@ void main() {
       await tester.enterText(find.byKey(const ValueKey('server-name-field')), 'x' * 200);
       await tester.pump();
       expect(tester.widget<TextField>(find.byKey(const ValueKey('server-name-field'))).controller!.text.length, 64);
-      await tester.tap(find.text('Cancelar'));
-      await tester.pumpAndSettle();
-    });
-
-    testWidgets('digitar: a dica também aponta a linha do aparelho', (tester) async {
-      await pump(tester);
-      await openAdd(tester);
-      await tester.enterText(addressField(), '192.168.1.5:8086');
-      await tester.tap(find.text('Buscar servidor'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('na linha do seu aparelho (192.168.1.77)'), findsOneWidget);
       await tester.tap(find.text('Cancelar'));
       await tester.pumpAndSettle();
     });

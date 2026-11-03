@@ -189,12 +189,7 @@ ol { padding-left:20px; margin:8px 0; } li { margin:4px 0; }
 a { color:var(--accent-text); }
 :focus-visible { outline:2px solid var(--accent-line); outline-offset:2px; }
 .sas { border:1px dashed var(--field); border-radius:14px; padding:6px 16px; margin:14px 0; }
-.sas-list { list-style:none; padding:0; margin:8px 0; }
-.sas-list li { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 0; border-top:1px solid var(--line); }
-.sas-list li:first-child { border-top:0; }
-.sas-list .who { font:13px monospace; color:var(--muted); }
-.sas-list .six { font:600 34px/1.1 monospace; letter-spacing:6px; }
-.sas-list .left { font:12px monospace; color:var(--muted); }
+.sas .short { font-size:44px; letter-spacing:8px; text-align:center; }
 .fp { font:14px monospace; word-spacing:6px; overflow-wrap:anywhere; }
 
 /* Motion: everything below is switched off for people who asked their system for less movement. */
@@ -267,13 +262,14 @@ a { color:var(--accent-text); }
 
 <details class="choice" id="app" name="conexao">
 <summary>Tenho o app Pindrel</summary>
-<p style="margin-top:12px">No app, toque neste servidor (ou escolha <strong>Adicionar servidor</strong>). O app vai mostrar <strong>6 números</strong> e o endereço do seu aparelho. Aqui embaixo, ache a linha com esse endereço: os 6 números dela devem ser iguais. Se forem, toque em <em>São iguais</em> no app. Só isso. Nada precisa ser instalado no sistema.</p>
+<p style="margin-top:12px">No app, escolha <strong>Adicionar servidor</strong> e toque neste servidor. O app vai mostrar <strong>6 números</strong>. Os mesmos 6 números aparecem aqui embaixo: se forem iguais, toque em <em>São iguais</em> no app. Só isso. Nada precisa ser instalado no sistema.</p>
+<p class="muted">A tela de pareamento do app ainda está em desenvolvimento; até lá, use "Vou usar no navegador".</p>
 <div id="sas" class="sas" aria-live="polite">
 <p class="muted" id="sas-idle">Nenhum aparelho está pareando agora. Quando você iniciar o pareamento no app, os números aparecem aqui.</p>
 <div id="sas-on" hidden>
-<p class="muted">Vários aparelhos podem parear ao mesmo tempo: cada um aparece numa linha, com o seu endereço. Confira a <strong>sua</strong>.</p>
-<ul id="sas-list" class="sas-list"></ul>
-<p class="muted">Cada conjunto vale por um minuto. Se os números forem diferentes, <strong>não confirme</strong>: toque em <em>Cancelar</em> no app.</p>
+<p class="muted">Confira com o app (aparelho <span class="mono" id="sas-from"></span>):</p>
+<div class="short" id="sas-digits"></div>
+<p class="muted">Vale por mais <span id="sas-left"></span> s. Se os números forem diferentes, <strong>não confirme</strong>: toque em <em>Cancelar</em> no app.</p>
 </div>
 </div>
 <p class="muted">Por que números? O app confere, com você, que está falando com este servidor e não com outro aparelho da rede que se passa por ele. Os números mudam a cada tentativa e só valem por um minuto, então não dá para decorar nem preparar um falso.</p>
@@ -335,21 +331,13 @@ a { color:var(--accent-text); }
     fetch('/server/pair/sas', { cache: 'no-store', signal: ac ? ac.signal : undefined }).then(function (r) {
       return r.status === 200 ? r.text() : '';
     }).then(function (t) {
-      // one line per device: d=<six digits>,<seconds left>,<address>
-      var list = document.getElementById('sas-list'), rows = [];
-      t.split('\n').forEach(function (l) {
-        var m = /^d=(\d{6}),(\d{1,2}),([0-9a-fA-F:.]{1,45})$/.exec(l.trim());
-        if (m) rows.push(m);
-      });
-      while (list.firstChild) list.removeChild(list.firstChild);
-      rows.slice(0, 64).forEach(function (m) {
-        var li = document.createElement('li'), who = document.createElement('span'), six = document.createElement('span'), left = document.createElement('span');
-        who.className = 'who'; who.textContent = 'aparelho ' + m[3];
-        six.className = 'six'; six.textContent = m[1].slice(0, 3) + ' ' + m[1].slice(3);
-        left.className = 'left'; left.textContent = m[2] + ' s';
-        li.appendChild(who); li.appendChild(six); li.appendChild(left); list.appendChild(li);
-      });
-      idle.hidden = rows.length > 0; on.hidden = rows.length === 0;
+      var v = {}; t.split('\n').forEach(function (l) { var i = l.indexOf('='); if (i > 0) v[l.slice(0, i)] = l.slice(i + 1); });
+      if (/^\d{6}$/.test(v.sas || '')) {
+        document.getElementById('sas-digits').textContent = v.sas.slice(0, 3) + ' ' + v.sas.slice(3);
+        document.getElementById('sas-left').textContent = String(parseInt(v.left, 10) || 0);
+        document.getElementById('sas-from').textContent = (v.from || '').replace(/[^0-9a-f:.]/gi, '');
+        idle.hidden = true; on.hidden = false;
+      } else { idle.hidden = false; on.hidden = true; }
     }).catch(function () {}).then(function () { clearTimeout(to); busy = false; });
   }
   function sync() {

@@ -57,8 +57,6 @@ pub struct Config {
     /// connection limits above do not count it).
     pub max_websockets: usize,
     pub max_websockets_per_ip: usize,
-    /// Devices that may be pairing at the same time (`PAIRING_MAX_SESSIONS`); each holds a few bytes for at most a minute.
-    pub max_pairings: usize,
     /// A tunnel with no byte in either direction for this long is closed (clients ping, so a live one never idles).
     pub ws_idle: Duration,
     pub rate_limit: bool,
@@ -94,7 +92,6 @@ impl Config {
             max_connections_per_ip: 64,
             max_websockets: 1024,
             max_websockets_per_ip: 32,
-            max_pairings: 6,
             ws_idle: Duration::from_secs(600),
             rate_limit: true,
             http_mode: HttpMode::Redirect,
@@ -133,7 +130,6 @@ impl Config {
         let max_body = parse("MAX_BODY_BYTES", "1048576", 1, 64 << 20) as usize;
         let max_websockets = parse("MAX_WEBSOCKETS", "1024", 0, 100_000) as usize;
         let max_websockets_per_ip = parse("MAX_WEBSOCKETS_PER_IP", "32", 1, 100_000) as usize;
-        let max_pairings = parse("PAIRING_MAX_SESSIONS", "6", 1, 64) as usize;
         let ws_idle = parse("WS_IDLE_SECS", "600", 0, 86_400);
         let tls_refresh = parse("TLS_REFRESH_SECS", "3600", 0, 86_400 * 7);
         let mut flag = |key: &str, default: bool| -> bool {
@@ -237,7 +233,6 @@ impl Config {
             max_connections_per_ip,
             max_websockets,
             max_websockets_per_ip,
-            max_pairings,
             ws_idle: Duration::from_secs(ws_idle),
             rate_limit,
             http_mode,
