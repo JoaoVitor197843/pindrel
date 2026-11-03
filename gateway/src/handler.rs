@@ -38,8 +38,6 @@ impl App {
         let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
         #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
         let max_pairings = cfg.max_pairings;
-        #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
-        let master_codes = cfg.master_codes;
         let pool = Pool::new(cfg.upstreams.clone());
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(4)
@@ -57,7 +55,7 @@ impl App {
             ws_stop: tokio::sync::watch::channel(false).0,
             ca: RwLock::new(None),
             #[cfg(feature = "selfcert")]
-            pairing: crate::pairing::Pairing::with_codes(max_pairings, master_codes),
+            pairing: crate::pairing::Pairing::new(max_pairings),
         }
     }
 }
@@ -405,7 +403,7 @@ pub const ROOM_HEADER: &str = "x-pindrel-room";
 /// Prints a master code the log has not shown yet. It is the only place the code is ever written.
 #[cfg(feature = "selfcert")]
 pub fn announce_master(app: &App) {
-    for code in app.pairing.take_notices() {
+    if let Some(code) = app.pairing.take_notice() {
         print_master(&code);
     }
 }

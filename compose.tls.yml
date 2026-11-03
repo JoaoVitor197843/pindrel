@@ -23,6 +23,5 @@ services:
       # redirect: the plain port only serves the connection page; full: as without TLS
       - HTTP_MODE=${HTTP_MODE:-redirect}
       - PAIRING_MAX_ROOMS=${PAIRING_MAX_ROOMS:-6}
-      - PAIRING_MASTER_CODES=${PAIRING_MASTER_CODES:-1}
       # origins, besides the server's own, whose pages may open a WebSocket (comma-separated)
       - WS_ALLOWED_ORIGINS=${WS_ALLOWED_ORIGINS:-}

@@ -235,7 +235,7 @@ async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Re
                 loop {
                     tokio::select! {
                         _ = tick.tick() => {
-                            for code in app.pairing.tick(std::time::Instant::now()) {
+                            if let Some(code) = app.pairing.tick(std::time::Instant::now()) {
                                 crate::handler::print_master(&code);
                             }
                         }

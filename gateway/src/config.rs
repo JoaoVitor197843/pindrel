@@ -59,8 +59,6 @@ pub struct Config {
     pub max_websockets_per_ip: usize,
     /// Pairing rooms open at the same time (`PAIRING_MAX_ROOMS`): that many people can pair at once, each seeing only theirs.
     pub max_pairings: usize,
-    /// Master codes good at the same time (`PAIRING_MASTER_CODES`, 1 to 6, default 1); each works once.
-    pub master_codes: usize,
     /// A tunnel with no byte in either direction for this long is closed (clients ping, so a live one never idles).
     pub ws_idle: Duration,
     pub rate_limit: bool,
@@ -97,7 +95,6 @@ impl Config {
             max_websockets: 1024,
             max_websockets_per_ip: 32,
             max_pairings: 6,
-            master_codes: 1,
             ws_idle: Duration::from_secs(600),
             rate_limit: true,
             http_mode: HttpMode::Redirect,
@@ -137,7 +134,6 @@ impl Config {
         let max_websockets = parse("MAX_WEBSOCKETS", "1024", 0, 100_000) as usize;
         let max_websockets_per_ip = parse("MAX_WEBSOCKETS_PER_IP", "32", 1, 100_000) as usize;
         let max_pairings = parse("PAIRING_MAX_ROOMS", "6", 1, 64) as usize;
-        let master_codes = parse("PAIRING_MASTER_CODES", "1", 1, 6) as usize;
         let ws_idle = parse("WS_IDLE_SECS", "600", 0, 86_400);
         let tls_refresh = parse("TLS_REFRESH_SECS", "3600", 0, 86_400 * 7);
         let mut flag = |key: &str, default: bool| -> bool {
@@ -242,7 +238,6 @@ impl Config {
             max_websockets,
             max_websockets_per_ip,
             max_pairings,
-            master_codes,
             ws_idle: Duration::from_secs(ws_idle),
             rate_limit,
             http_mode,
@@ -361,20 +356,13 @@ mod tests {
     #[test]
     fn the_pairing_limits_have_defaults_and_bounds() {
         let c = load(&[("UPSTREAMS", "127.0.0.1:1")]).unwrap();
-        assert_eq!((c.max_pairings, c.master_codes), (6, 1), "six rooms, one master code");
-        let c = load(&[
-            ("UPSTREAMS", "127.0.0.1:1"),
-            ("PAIRING_MAX_ROOMS", "12"),
-            ("PAIRING_MASTER_CODES", "4"),
-        ])
-        .unwrap();
-        assert_eq!((c.max_pairings, c.master_codes), (12, 4));
+        assert_eq!(c.max_pairings, 6, "six people at once unless told otherwise");
+        let c = load(&[("UPSTREAMS", "127.0.0.1:1"), ("PAIRING_MAX_ROOMS", "12")]).unwrap();
+        assert_eq!(c.max_pairings, 12);
         for (key, bad) in [
             ("PAIRING_MAX_ROOMS", "0"),
             ("PAIRING_MAX_ROOMS", "65"),
-            ("PAIRING_MASTER_CODES", "0"),
-            ("PAIRING_MASTER_CODES", "7"),
-            ("PAIRING_MASTER_CODES", "many"),
+            ("PAIRING_MAX_ROOMS", "many"),
         ] {
             let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), (key, bad)]).unwrap_err();
             assert!(errs.iter().any(|e| e.starts_with(key)), "{key}={bad}: {errs:?}");

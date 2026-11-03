@@ -6,15 +6,27 @@ import 'package:mobile/core/api/api_client.dart';
 import 'package:mobile/shared/protos/auth.pb.dart';
 import 'package:http/http.dart' as http;
 
+import '../../support/live_server.dart';
+
 void main() {
   stressTests();
   test('Testa a chamada de api para o go', () async {
+    // The server decides how it is reached: plain HTTP, or HTTPS only (HTTP_MODE=redirect); with nothing running there is
+    // nothing to test against, and that is said instead of failing.
+    final live = await findLiveServer();
+    if (live.mode == LiveMode.none) {
+      markTestSkipped('nenhum servidor respondendo em localhost:8086 (suba o Docker para rodar este teste)');
+      return;
+    }
+    addTearDown(live.close);
+    printOnFailure('servidor ao vivo: $live');
+
     var bytes = LoginInput(
       email: 'testemail@t.com',
       password: 'testpassword1223',
     );
-    final response = await http.post(
-      Uri.parse('http://localhost:8086/auth/login/'),
+    final response = await live.client.post(
+      live.base.resolve('/auth/login/'),
       headers: {'Content-Type': 'application/x-protobuf'},
       body: bytes.writeToBuffer(),
     );
