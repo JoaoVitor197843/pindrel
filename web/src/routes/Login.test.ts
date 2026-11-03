@@ -9,7 +9,7 @@ import Login from './Login.svelte'
 
 const click = (el: HTMLElement) => fireEvent.click(el)
 
-const openMenu = () => click(screen.getByRole('button', { name: 'Selecionar servidor' }))
+const openMenu = () => click(screen.getByRole('button', { name: /^Selecionar servidor/ }))
 
 beforeEach(async () => {
   stubLocalStorage()
@@ -133,7 +133,7 @@ describe('Login — seletor de servidor', () => {
 
     // the menu closes, the button shows the switch and the form fades without accepting taps
     expect(screen.queryByRole('menu')).toBeNull()
-    expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Abrindo Escritório…')
+    expect(screen.getByRole('button', { name: /^Selecionar servidor/ }).textContent).toContain('Abrindo Escritório…')
     const form = screen.getByRole('heading', { name: 'Bem-vindo de volta' }).closest('.transition-opacity')
     expect(form?.className).toContain('opacity-30')
     await vi.waitFor(() => expect(go).toHaveBeenCalledWith('http://192.168.0.20:8095'))
@@ -147,7 +147,7 @@ describe('Login — seletor de servidor', () => {
     await click(screen.getByRole('menuitemradio', { name: /Escritório/ }))
     await vi.waitFor(() => expect(screen.getByRole('status').textContent).toContain('Escritório não respondeu.'))
     expect(screen.getByRole('heading', { name: 'Bem-vindo de volta' }).closest('.transition-opacity')?.className).not.toContain('opacity-30')
-    expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Embutido')
+    expect(screen.getByRole('button', { name: /^Selecionar servidor/ }).textContent).toContain('Embutido')
   })
 
   it('o servidor embutido é o padrão', () => {
@@ -191,7 +191,7 @@ describe('Login — servidor com outra identidade', () => {
     const go = vi.spyOn(navigation, 'go').mockImplementation(() => {})
     await chooseOffice('bbb')
     expect(screen.getByRole('heading', { name: 'Este servidor mudou' })).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Selecionar servidor' }).textContent).toContain('Embutido')
+    expect(screen.getByRole('button', { name: /^Selecionar servidor/ }).textContent).toContain('Embutido')
     await click(screen.getByRole('button', { name: 'Cancelar' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(go).not.toHaveBeenCalled()

@@ -47,7 +47,8 @@ export function parseAddress(input: string): ParseResult {
   } catch {
     return { ok: false, error: 'invalid' }
   }
-  const hostname = url.hostname
+  // `host.` and `host` are the same server: one spelling, so the origin (the list's key) is too
+  const hostname = url.hostname.replace(/\.$/, '')
   const ipv6 = hostname.startsWith('[') && hostname.endsWith(']')
   if (!ipv6 && !HOST_NAME.test(hostname)) return { ok: false, error: 'invalid' }
   // the port is read from the text: the URL parser drops the default one of `http` (80), which is not the default of https
@@ -67,35 +68,82 @@ export type Inspection =
  */
 export type Failure = 'invalid' | 'blocked' | 'timeout' | 'unreachable'
 
-/** Whether something answers at `url`, readable or not (`no-cors`: only "there was an answer" is learned). */
-export async function reach(url: string, signal?: AbortSignal): Promise<boolean> {
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal.aborted) return resolve()
+    const done = () => {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    signal.addEventListener('abort', done)
+  })
+
+/**
+ * Runs `fn` with a signal that aborts after `ms` or as soon as `outer` does, and always releases the timer and the
+ * listener. `timedOut()` tells the two apart. One place for what `reach` and `inspect` both need.
+ */
+async function withTimeout<T>(
+  ms: number,
+  outer: AbortSignal | undefined,
+  fn: (signal: AbortSignal, timedOut: () => boolean) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), REACH_TIMEOUT_MS)
+  let expired = false
+  const timer = setTimeout(() => {
+    expired = true
+    controller.abort()
+  }, ms)
   const onAbort = () => controller.abort()
-  signal?.addEventListener('abort', onAbort)
+  if (outer?.aborted) controller.abort()
+  else outer?.addEventListener('abort', onAbort)
   try {
-    await fetch(`${url}/server/info/`, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', signal: controller.signal })
-    return true
-  } catch {
-    return false
+    return await fn(controller.signal, () => expired)
   } finally {
     clearTimeout(timer)
-    signal?.removeEventListener('abort', onAbort)
+    outer?.removeEventListener('abort', onAbort)
   }
 }
 
-async function readCapped(res: Response, max: number): Promise<Uint8Array | null> {
+/** Whether something answers at `url`, readable or not (`no-cors`: only "there was an answer" is learned). */
+export function reach(url: string, signal?: AbortSignal): Promise<boolean> {
+  return withTimeout(REACH_TIMEOUT_MS, signal, async (s) => {
+    try {
+      await fetch(`${url}/server/info/`, { mode: 'no-cors', cache: 'no-store', credentials: 'omit', signal: s })
+      return true
+    } catch {
+      return false
+    }
+  })
+}
+
+/** Rejects when `signal` aborts, whatever the body stream does: a server that drips a byte at a time must not hold us. */
+const whenAborted = (signal: AbortSignal) =>
+  new Promise<never>((_, reject) => {
+    if (signal.aborted) return reject(new Error('aborted'))
+    signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+  })
+
+async function readCapped(res: Response, max: number, signal: AbortSignal): Promise<Uint8Array | null> {
   const declared = Number(res.headers.get('content-length'))
   if (declared > max) return null
-  if (!res.body) {
-    const all = new Uint8Array(await res.arrayBuffer())
-    return all.length <= max ? all : null
-  }
+  // without a stream the only way to read it is all at once, which is exactly what the cap is there to prevent
+  if (!res.body) return null
   const reader = res.body.getReader()
   const parts: Uint8Array[] = []
   let total = 0
+  const aborted = whenAborted(signal)
+  aborted.catch(() => {}) // the race below is what observes it
   for (;;) {
-    const { done, value } = await reader.read()
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await Promise.race([reader.read(), aborted])
+    } catch (e) {
+      void reader.cancel().catch(() => {})
+      throw e
+    }
+    const { done, value } = chunk
     if (done) break
     total += value.length
     if (total > max) {
@@ -117,22 +165,18 @@ async function readCapped(res: Response, max: number): Promise<Uint8Array | null
  * Asks `origin` who it is. `invalid`: it answered but is not a Pindrel gateway (wrong status or type, body that is not
  * a `ServerInfo`, no id, a redirect to another host); `unreachable`: no answer at all.
  */
-export async function inspect(origin: string, signal?: AbortSignal): Promise<Inspection> {
-  const timeout = new AbortController()
-  const timer = setTimeout(() => timeout.abort(), TIMEOUT_MS)
-  const onAbort = () => timeout.abort()
-  signal?.addEventListener('abort', onAbort)
-  try {
+export function inspect(origin: string, signal?: AbortSignal): Promise<Inspection> {
+  return withTimeout(TIMEOUT_MS, signal, async (s, timedOut): Promise<Inspection> => {
     let res: Response
     try {
       res = await fetch(`${origin}/server/info/`, {
         cache: 'no-store',
         credentials: 'omit',
         headers: { Accept: 'application/x-protobuf' },
-        signal: timeout.signal,
+        signal: s,
       })
     } catch {
-      if (timeout.signal.aborted) return { ok: false, reason: signal?.aborted ? 'unreachable' : 'timeout' }
+      if (s.aborted) return { ok: false, reason: timedOut() ? 'timeout' : 'unreachable' }
       // same failure for "nobody there" and "blocked by CORS": asking again without reading tells them apart
       return { ok: false, reason: (await reach(origin, signal)) ? 'blocked' : 'unreachable' }
     }
@@ -141,19 +185,21 @@ export async function inspect(origin: string, signal?: AbortSignal): Promise<Ins
     if (res.url) {
       const got = new URL(res.url)
       if ((got.protocol !== 'http:' && got.protocol !== 'https:') || got.hostname !== final.hostname) {
+        void res.body?.cancel()
         return { ok: false, reason: 'invalid' }
       }
       final = got
     }
     const id = res.headers.get('x-pindrel-id') ?? ''
     if (res.status !== 200 || !res.headers.get('content-type')?.startsWith('application/x-protobuf') || !SERVER_ID.test(id)) {
+      void res.body?.cancel()
       return { ok: false, reason: 'invalid' }
     }
     let body: Uint8Array | null
     try {
-      body = await readCapped(res, MAX_BODY)
+      body = await readCapped(res, MAX_BODY, s)
     } catch {
-      return { ok: false, reason: 'unreachable' }
+      return { ok: false, reason: timedOut() ? 'timeout' : 'unreachable' }
     }
     if (!body) return { ok: false, reason: 'invalid' }
     try {
@@ -163,15 +209,53 @@ export async function inspect(origin: string, signal?: AbortSignal): Promise<Ins
     } catch {
       return { ok: false, reason: 'invalid' }
     }
-  } finally {
-    clearTimeout(timer)
-    signal?.removeEventListener('abort', onAbort)
-  }
+  })
 }
 
 export type FindResult =
   | { ok: true; name: string; serverId: string; origin: string }
   | { ok: false; error: 'empty' | 'invalid' | 'mixed' | 'invalid-server' | Exclude<Failure, 'invalid'>; host?: string; https?: boolean }
+
+/** http gets a head start; https joins if http has not answered by then (or has already failed). */
+const STAGGER_MS = 250
+
+/**
+ * Tries the schemes with a short stagger instead of one after the other (the worst case was the sum of the timeouts)
+ * and keeps the first valid answer. The loser is aborted, so no request outlives the call.
+ */
+async function firstValid(
+  host: string,
+  schemes: ('http' | 'https')[],
+  signal?: AbortSignal,
+): Promise<{ winner?: Extract<Inspection, { ok: true }>; reasons: Failure[] }> {
+  const group = new AbortController()
+  const relay = () => group.abort()
+  if (signal?.aborted) group.abort()
+  else signal?.addEventListener('abort', relay)
+  let winner: Extract<Inspection, { ok: true }> | undefined
+  const reasons: Failure[] = []
+  const run = async (scheme: string) => {
+    const r = await inspect(`${scheme}://${host}`, group.signal)
+    if (r.ok) {
+      winner ??= r
+      group.abort()
+    } else if (!winner) {
+      reasons.push(r.reason)
+    }
+  }
+  try {
+    const [head, ...tail] = schemes
+    const first = run(head)
+    const rest = tail.map(async (scheme) => {
+      await Promise.race([sleep(STAGGER_MS, group.signal), first])
+      if (!group.signal.aborted) await run(scheme)
+    })
+    await Promise.all([first, ...rest])
+  } finally {
+    signal?.removeEventListener('abort', relay)
+  }
+  return { winner, reasons }
+}
 
 /**
  * http when the user typed no scheme, then https; exactly what was typed otherwise. A page served over https cannot
@@ -184,34 +268,11 @@ export async function findServer(input: string, signal?: AbortSignal): Promise<F
   const host = port ? `${hostname}:${port}` : hostname
   const pageIsHttps = window.location.protocol === 'https:'
   const schemes: ('http' | 'https')[] = scheme ? [scheme] : pageIsHttps ? ['https'] : ['http', 'https']
+  const { winner, reasons } = await firstValid(host, schemes, signal)
+  if (winner) return winner
   const rank: Record<Failure, number> = { invalid: 3, blocked: 2, timeout: 1, unreachable: 0 }
-  let worst: Failure = 'unreachable'
-  for (const s of schemes) {
-    const r = await inspect(`${s}://${host}`, signal)
-    if (r.ok) return r
-    if (signal?.aborted) break
-    if (rank[r.reason] > rank[worst]) worst = r.reason
-  }
+  const worst = reasons.reduce<Failure>((a, b) => (rank[b] > rank[a] ? b : a), 'unreachable')
   if (worst === 'invalid') return { ok: false, error: 'invalid-server', host }
   if (worst === 'unreachable' && pageIsHttps && scheme === 'http') return { ok: false, error: 'mixed', host }
   return { ok: false, error: worst, host, https: schemes.includes('https') }
-}
-
-export function errorText(r: Extract<FindResult, { ok: false }>): string {
-  switch (r.error) {
-    case 'empty':
-      return 'Digite o endereço do servidor.'
-    case 'invalid':
-      return 'Endereço inválido. Use algo como 192.168.0.20:8095 ou meu.servidor.com.'
-    case 'mixed':
-      return 'Esta página usa https e o navegador bloqueia servidores http. Use o endereço https do servidor.'
-    case 'invalid-server':
-      return `${r.host} respondeu, mas não é um servidor Pindrel (gateway) válido.`
-    case 'blocked':
-      return `${r.host} respondeu, mas o navegador não deixou a página ler a resposta (CORS). Provavelmente o gateway desse servidor é de uma versão antiga: atualize-o.`
-    case 'timeout':
-      return `${r.host} não respondeu a tempo. Confira se o aparelho está ligado e se você está na mesma rede ou VPN.`
-    case 'unreachable':
-      return `Não foi possível conectar a ${r.host}: a conexão foi recusada ou o endereço não existe. Confira o endereço e a porta${r.https ? ' (e, em https, se o certificado é confiável)' : ''}.`
-  }
 }

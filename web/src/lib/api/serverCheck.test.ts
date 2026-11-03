@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ServerInfo } from '../../types/shared/protos/server'
-import { errorText, findServer, inspect, MAX_INPUT_LENGTH, parseAddress } from './serverCheck'
+import { findServer, inspect, MAX_INPUT_LENGTH, parseAddress } from './serverCheck'
+import { errorText } from './serverCheckText'
 
 const realLocation = window.location
 afterEach(() => {

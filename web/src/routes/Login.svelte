@@ -35,13 +35,26 @@
   const addServer = () => (adding = true)
 </script>
 
-<main class="min-h-screen bg-bg">
+<!-- first stop of the keyboard: jump over the server selector straight to the form -->
+<a
+  href="#entrar"
+  class="sr-only z-50 rounded-field bg-cream px-4 py-2 font-semibold text-on-cream focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
+  onclick={(e) => {
+    e.preventDefault()
+    document.getElementById('entrar')?.querySelector<HTMLElement>('input, button')?.focus()
+  }}
+>
+  Ir para o formulário
+</a>
+
+<!-- while a dialog is open the page behind is out of reach (keyboard, pointer and screen reader alike) -->
+<main class="min-h-screen bg-bg" inert={adding || !!selection.pendingChange}>
   {#if desktop.current}
     <div class="grid min-h-screen grid-cols-[11fr_12fr]">
       <DesktopPanel onaddserver={addServer} />
       <div class="flex flex-col">
         <div class="flex flex-1 items-center justify-center px-12 py-8">
-          <div class="w-full max-w-[480px] {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
+          <div id="entrar" class="w-full max-w-[480px] {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
             <AuthForm showSubtitle {oncontinueoffline} />
           </div>
         </div>
@@ -60,7 +73,7 @@
     </div>
   {:else}
     <AuthHeader onaddserver={addServer} />
-    <div class="mx-auto max-w-[480px] px-6 pt-7 pb-6 {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
+    <div id="entrar" class="mx-auto max-w-[480px] px-6 pt-7 pb-6 {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
       <AuthForm {oncontinueoffline} />
     </div>
   {/if}

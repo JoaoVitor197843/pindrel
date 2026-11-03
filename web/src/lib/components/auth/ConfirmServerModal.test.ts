@@ -7,7 +7,7 @@ const props = () => ({ name: 'Casa', onconfirm: vi.fn(), oncancel: vi.fn() })
 describe('ConfirmServerModal', () => {
   it('é um diálogo modal que nomeia o servidor e avisa do risco', () => {
     render(ConfirmServerModal, props())
-    expect(screen.getByRole('dialog').getAttribute('aria-modal')).toBe('true')
+    expect(screen.getByRole('alertdialog').getAttribute('aria-modal')).toBe('true')
     expect(screen.getByRole('heading', { name: 'Este servidor mudou' })).toBeTruthy()
     expect(screen.getByText(/“Casa”/)).toBeTruthy()
     expect(screen.getByText(/senha/)).toBeTruthy()
@@ -31,12 +31,12 @@ describe('ConfirmServerModal', () => {
     render(ConfirmServerModal, p)
     await fireEvent.keyDown(window, { key: 'Enter' })
     await fireEvent.keyDown(window, { key: ' ' })
-    await fireEvent.click(screen.getByRole('dialog'))
+    await fireEvent.click(screen.getByRole('alertdialog'))
     expect(p.oncancel).not.toHaveBeenCalled()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }))
     await fireEvent.keyDown(window, { key: 'Escape' })
-    await fireEvent.click(screen.getByRole('button', { name: 'Fechar' }))
+    await fireEvent.click(screen.getByTestId('backdrop'))
     expect(p.oncancel).toHaveBeenCalledTimes(3)
     expect(p.onconfirm).not.toHaveBeenCalled()
   })
@@ -44,6 +44,6 @@ describe('ConfirmServerModal', () => {
   it('nome gigante ou com tags aparece como texto, sem quebrar nem virar HTML', () => {
     render(ConfirmServerModal, { ...props(), name: `<img src=x onerror=alert(1)>${'N'.repeat(5000)}` })
     expect(document.querySelector('img')).toBeNull()
-    expect(screen.getByRole('dialog').textContent).toContain('<img src=x onerror=alert(1)>')
+    expect(screen.getByRole('alertdialog').textContent).toContain('<img src=x onerror=alert(1)>')
   })
 })
