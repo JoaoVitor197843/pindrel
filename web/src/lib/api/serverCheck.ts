@@ -14,6 +14,13 @@ const REACH_TIMEOUT_MS = 3000
 const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/
 const SERVER_ID = /^[A-Za-z0-9-]{1,64}$/
 
+/** The port of the secure side of a server (`x-pindrel-tls`), when the header says something that can be a port. */
+export function parsePort(value: string | null): number | undefined {
+  if (!value || !/^\d{1,5}$/.test(value.trim())) return undefined
+  const n = Number(value)
+  return n >= 1 && n <= 65535 ? n : undefined
+}
+
 export interface Address {
   /** Only when the user typed it. */
   scheme?: 'http' | 'https'
@@ -58,7 +65,7 @@ export function parseAddress(input: string): ParseResult {
 }
 
 export type Inspection =
-  | { ok: true; name: string; serverId: string; origin: string }
+  | { ok: true; name: string; serverId: string; origin: string; tlsPort?: number }
   | { ok: false; reason: Failure }
 
 /**
@@ -205,7 +212,7 @@ export function inspect(origin: string, signal?: AbortSignal): Promise<Inspectio
     try {
       const name = ServerInfo.decode(body).name.trim()
       if (!name || name.length > MAX_NAME_LENGTH) return { ok: false, reason: 'invalid' }
-      return { ok: true, name, serverId: id, origin: final.origin }
+      return { ok: true, name, serverId: id, origin: final.origin, tlsPort: parsePort(res.headers.get('x-pindrel-tls')) }
     } catch {
       return { ok: false, reason: 'invalid' }
     }
@@ -213,7 +220,7 @@ export function inspect(origin: string, signal?: AbortSignal): Promise<Inspectio
 }
 
 export type FindResult =
-  | { ok: true; name: string; serverId: string; origin: string }
+  | { ok: true; name: string; serverId: string; origin: string; tlsPort?: number }
   | { ok: false; error: 'empty' | 'invalid' | 'mixed' | 'invalid-server' | Exclude<Failure, 'invalid'>; host?: string; https?: boolean }
 
 /** http gets a head start; https joins if http has not answered by then (or has already failed). */

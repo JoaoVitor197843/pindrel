@@ -48,6 +48,8 @@ export interface ManualServer {
   url: string
   /** `host[:port]` */
   address: string
+  /** Only when the server has a secure side this browser does not trust yet: the page that explains how to connect. */
+  connectUrl?: string
 }
 
 export type ManualHealth = 'connected' | 'disconnected'
@@ -62,12 +64,22 @@ function valid(e: unknown): e is ManualServer {
       (u.protocol === 'http:' || u.protocol === 'https:') &&
       u.origin === m.url &&
       m.id === m.url &&
+      (m.connectUrl === undefined || (typeof m.connectUrl === 'string' && sameHostPage(m.connectUrl, u))) &&
       m.address === u.host &&
       (m.name as string).length > 0 &&
       (m.name as string).length <= MAX_NAME_LENGTH &&
       (m.trustName as string).length > 0 &&
       (m.trustName as string).length <= MAX_NAME_LENGTH
     )
+  } catch {
+    return false
+  }
+}
+
+function sameHostPage(connectUrl: string, server: URL): boolean {
+  try {
+    const c = new URL(connectUrl)
+    return (c.protocol === 'http:' || c.protocol === 'https:') && c.hostname === server.hostname && c.pathname === '/server/connect/'
   } catch {
     return false
   }
@@ -116,19 +128,30 @@ export class ManualServers {
       if (this.list.length >= MAX_MANUAL) return { ok: false, error: `Limite de ${MAX_MANUAL} servidores adicionados.` }
       const found = await findServer(input, signal)
       if (!found.ok) return { ok: false, error: signal?.aborted ? 'Cancelado.' : errorText(found) }
-      if (found.origin === window.location.origin) return { ok: false, error: 'Este é o servidor desta página.' }
-      if (this.list.some((s) => s.id === found.origin)) return { ok: false, error: 'Este servidor já foi adicionado.' }
+      // The server has a secure side: use it when this browser already trusts it; otherwise keep the plain address and
+      // remember the page that explains how to connect securely (the certificate is installed once per device).
+      let origin = found.origin
+      let connectUrl: string | undefined
+      if (found.tlsPort && origin.startsWith('http:')) {
+        const u = new URL(origin)
+        const secure = await inspect(`https://${u.hostname.includes(':') ? `[${u.hostname.replace(/^\[|\]$/g, '')}]` : u.hostname}:${found.tlsPort}`, signal)
+        if (secure.ok && secure.serverId === found.serverId) origin = secure.origin
+        else connectUrl = `${origin}/server/connect/`
+      }
+      if (origin === window.location.origin || found.origin === window.location.origin) return { ok: false, error: 'Este é o servidor desta página.' }
+      if (this.list.some((s) => s.id === origin || s.id === found.origin)) return { ok: false, error: 'Este servidor já foi adicionado.' }
       if (this.list.some((s) => s.serverId === found.serverId)) {
         return { ok: false, error: 'Este servidor já foi adicionado com outro endereço.' }
       }
       if (this.list.length >= MAX_MANUAL) return { ok: false, error: `Limite de ${MAX_MANUAL} servidores adicionados.` }
       const server: ManualServer = {
-        id: found.origin,
+        id: origin,
         name: cleanName(name) || found.name,
         trustName: found.name,
         serverId: found.serverId,
-        url: found.origin,
-        address: new URL(found.origin).host,
+        url: origin,
+        address: new URL(origin).host,
+        ...(connectUrl ? { connectUrl } : {}),
       }
       // an id that differs from the one this name had must not be learned silently: opening it will ask
       if (trustOf(server.trustName, server.serverId) !== 'changed') remember(server.trustName, server.serverId)

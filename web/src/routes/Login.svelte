@@ -9,6 +9,7 @@
   import { manual } from '../lib/stores/manual.svelte'
   import { fade as fadeTransition } from 'svelte/transition'
   import StatusDot from '../lib/components/auth/StatusDot.svelte'
+  import SecureNotice from '../lib/components/auth/SecureNotice.svelte'
   import { ms } from '../lib/motion'
   import { toast } from '../lib/stores/toast.svelte'
 
@@ -69,6 +70,7 @@
             {selection.shownAddress}
           </span>
         </p>
+        <div class="px-6 pb-6"><SecureNotice /></div>
       </div>
     </div>
   {:else}
@@ -76,6 +78,7 @@
     <div id="entrar" class="mx-auto max-w-[480px] px-6 pt-7 pb-6 {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
       <AuthForm {oncontinueoffline} />
     </div>
+    <div class="px-6 pb-8"><SecureNotice /></div>
   {/if}
 </main>
 

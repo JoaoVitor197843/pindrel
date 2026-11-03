@@ -20,7 +20,7 @@
 
   /** What the arrow keys visit: every menu entry that can take the focus right now. */
   const entries = () =>
-    menu ? [...menu.querySelectorAll<HTMLButtonElement>('button[role^="menuitem"]:not(:disabled)')] : []
+    menu ? [...menu.querySelectorAll<HTMLElement>('button[role^="menuitem"]:not(:disabled), a[role="menuitem"]')] : []
 
   /**
    * A health check or a new server can rebuild the list under the person's finger, destroying the very entry that has
@@ -147,9 +147,29 @@
       {#if manual.health[m.id]}<StatusDot {tone} fontSize={11} />{/if}
       <span class="min-w-0">
         <span class="block truncate text-sm font-semibold">{m.name}</span>
-        <span class="block truncate font-mono text-[11px] tracking-[0.4px] text-muted">{m.address}</span>
+        <span class="flex items-center gap-1.5 font-mono text-[11px] tracking-[0.4px] text-muted">
+          {#if m.url.startsWith('https:')}
+            <svg class="size-3 shrink-0 text-accent-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" role="img" aria-label="Conexão segura">
+              <rect x="5" y="11" width="14" height="9" rx="2" />
+              <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+            </svg>
+          {/if}
+          <span class="truncate">{m.address}</span>
+        </span>
       </span>
     </button>
+    {#if m.connectUrl}
+      <a
+        href={m.connectUrl}
+        target="_blank"
+        rel="noopener"
+        role="menuitem"
+        title="Este servidor tem conexão segura, mas este navegador ainda não confia nela"
+        class="shrink-0 self-center rounded-lg px-2 py-1 font-mono text-[10px] tracking-[0.4px] text-accent-text uppercase transition-colors duration-150 hover:bg-line/40"
+      >
+        Conectar com segurança
+      </a>
+    {/if}
     <button
       type="button"
       role="menuitem"
