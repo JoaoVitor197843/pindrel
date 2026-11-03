@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"pindrel/internal/api"
 	"pindrel/internal/validator"
+	"strings"
 	"time"
 
 	"pindrel/internal/api/dto"
@@ -152,7 +153,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Name:     "refresh_token",
 		Value:    tokens.RefreshToken,
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   secureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",
 		MaxAge:   int(h.refreshExpireIn.Seconds()),
@@ -188,7 +189,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		Name:     "refresh_token",
 		Value:    "",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   secureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",
 		MaxAge:   -1,
@@ -251,4 +252,12 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		Email:    user.Email,
 		Username: user.Username,
 	})
+}
+
+// secureRequest says whether the client reached the server over TLS: directly, or through the gateway (or a tunnel),
+// which ends the TLS itself and says so in X-Forwarded-Proto. The cookie is then marked Secure, so the browser never
+// sends it over plain HTTP. The header is trusted without a list of proxies because the only thing a forged one can do is
+// make the forger's own cookie Secure.
+func secureRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }

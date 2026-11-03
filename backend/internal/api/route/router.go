@@ -28,6 +28,7 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	r.Use(middleware.RequestID)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(AuthMiddleware.SecurityHeaders)
 
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:*", "https://seu-app.com"},
@@ -77,6 +78,13 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 }
 
 func noMiddleware(next http.Handler) http.Handler { return next }
+
+// webCSP is the Content-Security-Policy of the web page: scripts only from this server (plus WebAssembly, for libsodium),
+// styles may be inline (the build puts the stylesheet inside index.html), nothing can be framed or embedded, and the page
+// may talk to other Pindrel servers the person added (any http or https address, and WebSockets).
+const webCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
+	"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; " +
+	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 // publicDir is where the Docker image places the web build.
 const publicDir = "./public"
@@ -135,6 +143,7 @@ func spaHandler(dir string) http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Security-Policy", webCSP)
 		if info, err := os.Stat(index); err == nil && servePrecompressed(w, r, index, info.ModTime()) {
 			return
 		}
