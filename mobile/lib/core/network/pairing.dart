@@ -82,7 +82,18 @@ class PairingCode {
   /// `host:port`, with brackets around an IPv6 address.
   String get hostPort => host.contains(':') ? '[$host]:$port' : '$host:$port';
 
+  /// What to show the person so they can compare it with the server's page: see [confirmationCode].
+  String get confirmation => confirmationCode(fingerprint);
+
   Uri get baseUri => Uri(scheme: 'https', host: host, port: port);
+}
+
+/// The short code people compare with the one on the server's connection page and in its log: the first 48 bits of the
+/// fingerprint as `3DC3-39F4-232A`. Empty when the fingerprint is not long enough to give one.
+String confirmationCode(String fingerprint) {
+  if (fingerprint.length < 12 || !RegExp(r'^[0-9a-fA-F]+$').hasMatch(fingerprint)) return '';
+  final up = fingerprint.toUpperCase();
+  return '${up.substring(0, 4)}-${up.substring(4, 8)}-${up.substring(8, 12)}';
 }
 
 /// A server this device has paired with: only its CA is trusted, and only for it.

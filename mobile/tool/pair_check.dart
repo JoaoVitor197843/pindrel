@@ -15,6 +15,7 @@ Future<void> main(List<String> args) async {
   final result = await pair(code, store);
   switch (result) {
     case Paired(:final server):
+      stdout.writeln('Código de conferência: ${code.confirmation} (deve ser igual ao da página e ao do log do servidor)');
       stdout.writeln('Pareado com "${server.name}" (${server.hostPort}), CA ${server.fingerprint.substring(0, 16)}…');
       final client = clientFor(server);
       try {

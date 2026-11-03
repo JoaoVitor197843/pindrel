@@ -216,6 +216,11 @@ async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Re
     if let Some((_, fp)) = resolver.ca() {
         *app.ca.write().unwrap() = Some(resolver.ca().unwrap());
         eprintln!("TLS: own CA, fingerprint {fp}");
+        #[cfg(feature = "selfcert")]
+        eprintln!(
+            "TLS: confirmation code {} (the connection page and the app show the same one)",
+            crate::connect::confirmation(&fp)
+        );
         // the address the other devices of the LAN use (the one of the default route), not the container bridges
         if let Some(ip) = discovery::lan_ip() {
             eprintln!("TLS: pairing code  pindrel://pair?host={ip}:{}&ca={fp}", t.port);

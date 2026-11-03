@@ -355,3 +355,111 @@ async fn a_flood_of_hostile_plain_requests_is_answered_and_the_gateway_stays_up(
         .starts_with("HTTP/1.1 200"));
     gw.shutdown().await;
 }
+
+#[tokio::test]
+async fn the_page_and_the_ca_exist_only_for_the_local_network_never_through_a_tunnel() {
+    // a declared proxy in front (a tunnel): the peer is the proxy, and the person behind it is on the internet
+    let (_a, gw, _d, _tls) = started(|c| {
+        c.client_ip =
+            pindrel_gateway::clientip::ClientIp::new(pindrel_gateway::clientip::parse_trusted("127.0.0.1").unwrap(), "x-forwarded-for")
+                .unwrap();
+    })
+    .await;
+    for path in ["/server/connect/", "/server/ca.crt", "/server/ca.pem"] {
+        let (head, _) = raw(gw.addr, &req("GET", path, "casa.example.com", "X-Forwarded-For: 203.0.113.9\r\n")).await;
+        assert!(head.starts_with("HTTP/1.1 404"), "{path}: {head}");
+    }
+    // and the plain landing page is not offered to them either
+    let (head, body) = raw(
+        gw.addr,
+        &req(
+            "GET",
+            "/",
+            "casa.example.com",
+            "Accept: text/html\r\nX-Forwarded-For: 203.0.113.9\r\n",
+        ),
+    )
+    .await;
+    assert!(!body.contains("Conectar a"), "{head}");
+    // what is public stays public
+    assert!(raw(
+        gw.addr,
+        &req("GET", "/server/info/", "casa.example.com", "X-Forwarded-For: 203.0.113.9\r\n")
+    )
+    .await
+    .0
+    .starts_with("HTTP/1.1 200"));
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_page_tells_whose_machine_it_is_and_what_it_does_not_do() {
+    let (_a, gw, _d, _tls) = started(|_| {}).await;
+    let (_, body) = raw(gw.addr, &req("GET", "/server/connect/", "192.168.1.5", "")).await;
+    let machine = gethostname::gethostname().to_string_lossy().to_string();
+    assert!(
+        body.contains(&format!("<code>{}</code>", connect::escape(&machine))),
+        "the machine name is not on the page"
+    );
+    assert!(body.contains("Este é um servidor da sua rede") && body.contains("só aparece para aparelhos da própria rede"));
+    for promise in [
+        "Não pede senha",
+        "Não envia nada para a internet",
+        "Não instala nada sozinha",
+        "Não contém senha",
+    ] {
+        assert!(body.contains(promise), "missing: {promise}");
+    }
+    // the QR is behind a choice, not the first thing seen: the browser path is open, the app path is closed
+    assert!(body.contains("<details class=\"choice\" open>\n<summary>Vou usar no navegador"));
+    assert!(body.contains("<details class=\"choice\" id=\"app\">\n<summary>Tenho o app Pindrel"));
+    assert!(
+        body.find("Vou usar no navegador").unwrap() < body.find("<svg xmlns").unwrap(),
+        "the QR comes before the explanation"
+    );
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn the_short_code_is_the_start_of_the_fingerprint_and_is_on_the_page_and_in_the_log_format() {
+    let (_a, gw, _d, _tls) = started(|_| {}).await;
+    let (_, pem) = raw(gw.addr, &req("GET", "/server/ca.pem", "x", "")).await;
+    let fp = pindrel_gateway::selfcert::fingerprint_of_pem(&pem).unwrap();
+    let short = connect::confirmation(&fp);
+    assert_eq!(short.len(), 14);
+    assert!(short.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '-'));
+    assert_eq!(short.replace('-', "").to_lowercase(), fp[..12]);
+    let (_, body) = raw(gw.addr, &req("GET", "/server/connect/", "casa.lan", "")).await;
+    assert_eq!(
+        body.matches(&short).count(),
+        2,
+        "on the page once for the browser path and once for the app path"
+    );
+    gw.shutdown().await;
+}
+
+#[test]
+fn confirmation_survives_odd_input() {
+    assert_eq!(connect::confirmation(&"ab".repeat(32)), "ABAB-ABAB-ABAB");
+    assert_eq!(connect::confirmation(""), "--");
+    assert_eq!(connect::confirmation("abc"), "--");
+    assert_eq!(connect::confirmation("日本語日本語日本語"), "--");
+}
+
+#[tokio::test]
+async fn a_device_that_already_trusts_the_server_is_sent_on_unless_it_asks_to_stay() {
+    let (_a, gw, _d, _tls) = started(|_| {}).await;
+    let (_, body) = raw(gw.addr, &req("GET", "/server/connect/", "casa.lan", "")).await;
+    // the script jumps to HTTPS when the secure side answers, gives a way to stay, and honours ?ficar
+    assert!(
+        body.contains("location.href = open.href") && body.contains("Ficar nesta página") && body.contains("ficar"),
+        "no automatic hand-over"
+    );
+    assert!(
+        body.contains("setTimeout(function () { location.href"),
+        "it must wait a moment, not jump at once"
+    );
+    // the address it jumps to is the one checked, never taken from the page's own query
+    assert!(!body.contains("location.search +") || !body.contains("location.href = location.search"));
+    gw.shutdown().await;
+}

@@ -131,7 +131,7 @@ where
     let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
     // a tunnel or proxy that ended the TLS itself (declared in TRUSTED_PROXIES) is as good as TLS here
     if !secure && !via_proxy {
-        if let Some(resp) = plain_policy(&app, &req) {
+        if let Some(resp) = plain_policy(&app, peer.ip(), &req) {
             return Ok(resp);
         }
     }
@@ -139,6 +139,10 @@ where
         return Ok(crate::websocket::tunnel(&app, ip, secure || via_proxy, &mut req).await);
     }
     let path = req.uri().path();
+    // the CA and the page that explains it are for the people on the network of this server, never for a tunnel or the internet
+    if matches!(path, "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") && (via_proxy || !lan_peer(peer.ip())) {
+        return Ok(error(StatusCode::NOT_FOUND, "not_found", "not found"));
+    }
     if matches!(path, "/server/connect/" | "/server/ca.crt") && matches!(*req.method(), Method::GET | Method::HEAD) {
         return Ok(public_ca_routes(&app, &req));
     }
@@ -324,7 +328,7 @@ fn wants_html<B>(req: &Request<B>) -> bool {
 }
 
 /// What the plain-HTTP port does while TLS is on (see `HttpMode`). `None`: carry on as usual.
-fn plain_policy<B>(app: &App, req: &Request<B>) -> Option<Response<Body>> {
+fn plain_policy<B>(app: &App, peer: IpAddr, req: &Request<B>) -> Option<Response<Body>> {
     let tls = app.cfg.tls.as_ref()?;
     if app.cfg.http_mode != crate::config::HttpMode::Redirect {
         return None;
@@ -343,7 +347,7 @@ fn plain_policy<B>(app: &App, req: &Request<B>) -> Option<Response<Body>> {
             "this server accepts this only over HTTPS",
         ));
     }
-    if path == "/" && wants_html(req) && app.ca.read().ok().is_some_and(|c| c.is_some()) {
+    if path == "/" && wants_html(req) && app.ca.read().ok().is_some_and(|c| c.is_some()) && lan_peer(peer) {
         return Some(public_ca_routes(app, req)); // the landing page: how to connect securely
     }
     let Some(host) = clean_host(req) else {
@@ -381,8 +385,10 @@ fn public_ca_routes<B>(app: &App, req: &Request<B>) -> Response<Body> {
         let mut raw = [0u8; 16];
         let _ = getrandom::fill(&mut raw);
         let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let machine = gethostname::gethostname().to_string_lossy().to_string();
         let page = crate::connect::Page {
             server_name: &app.cfg.server_name,
+            machine: &machine,
             fingerprint: &fingerprint,
             host: &host,
             tls_port: tls.port,
@@ -407,4 +413,59 @@ fn public_ca_routes<B>(app: &App, req: &Request<B>) -> Response<Body> {
     }
     #[cfg(not(feature = "selfcert"))]
     error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own")
+}
+
+/// Is the peer on the local network of this machine (loopback, private, link-local, unique-local)? `100.64.0.0/10` (carrier
+/// grade NAT, where VPNs such as Tailscale live) is not.
+pub(crate) fn lan_peer(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
+        IpAddr::V6(v) => {
+            let seg = v.segments();
+            v.is_loopback()
+                || (seg[0] & 0xffc0) == 0xfe80
+                || (seg[0] & 0xfe00) == 0xfc00
+                || v.to_ipv4_mapped()
+                    .is_some_and(|m| m.is_loopback() || m.is_private() || m.is_link_local())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lan_peer;
+
+    #[test]
+    fn only_addresses_of_the_local_network_count() {
+        for ok in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.9",
+            "172.31.255.255",
+            "192.168.1.163",
+            "169.254.1.1",
+            "::1",
+            "fe80::1",
+            "fd12:3456::1",
+            "::ffff:192.168.0.5",
+        ] {
+            assert!(lan_peer(ok.parse().unwrap()), "{ok}");
+        }
+        for bad in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "172.32.0.1",
+            "172.15.0.1",
+            "100.64.0.1",
+            "100.100.100.100",
+            "192.169.0.1",
+            "11.0.0.1",
+            "2001:4860:4860::8888",
+            "::ffff:8.8.8.8",
+            "fec0::1",
+            "0.0.0.0",
+        ] {
+            assert!(!lan_peer(bad.parse().unwrap()), "{bad}");
+        }
+    }
 }
