@@ -4,7 +4,7 @@ import { found, mockDiscover } from '../../../test/discovery'
 import { directory, navigation, selection } from '../../stores/servers.svelte'
 import ServerSelector from './ServerSelector.svelte'
 
-const button = () => screen.getByRole('button', { name: 'Selecionar servidor' })
+const button = () => screen.getByRole('button', { name: /^Selecionar servidor/ })
 
 beforeEach(async () => {
   selection.connecting = null

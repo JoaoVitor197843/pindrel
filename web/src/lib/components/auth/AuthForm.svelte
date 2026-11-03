@@ -19,7 +19,7 @@
   let recoveryOpen = $state(false)
 
   const field =
-    'w-full rounded-field border border-line bg-surface px-4 py-4 text-fg placeholder:text-muted transition-colors duration-200 focus:border-accent-line focus:outline-none'
+    'w-full rounded-field border border-field-line bg-surface px-4 py-4 text-fg placeholder:text-muted transition-colors duration-200 focus:border-accent-line focus:outline-none'
 
   function continueOffline() {
     if (oncontinueoffline) return oncontinueoffline()
@@ -107,7 +107,7 @@
   <button
     type="button"
     onclick={continueOffline}
-    class="h-13.5 rounded-field border border-line text-fg transition duration-150 hover:bg-surface active:scale-[0.98]"
+    class="h-13.5 rounded-field border border-field-line text-fg transition duration-150 hover:bg-surface active:scale-[0.98]"
   >
     Continuar offline neste dispositivo
   </button>
