@@ -481,24 +481,34 @@ async fn a_device_that_already_trusts_the_server_is_sent_on_unless_it_asks_to_st
 }
 
 #[tokio::test]
-async fn the_app_choice_leads_with_the_six_digits_and_keeps_the_qr_as_a_second_way() {
+async fn the_app_choice_leads_with_a_private_room_and_keeps_the_qr_and_the_master_code_as_other_ways() {
     let (_a, gw, _d, _tls) = started(|_| {}).await;
     let (head, body) = raw(gw.addr, &req("GET", "/server/connect/", "192.168.1.5:8080", "")).await;
     assert!(
         head.to_lowercase().contains("connect-src 'self' https://"),
-        "the page asks the server for the digits: {head}"
+        "the page asks the server for its room: {head}"
     );
-    // the digits come first, the QR sits inside a closed "prefer a QR" box after them
-    let (digits, qr) = (body.find("6 números").unwrap(), body.find("Prefiro ler um QR code").unwrap());
-    assert!(digits < qr && qr < body.find("<svg xmlns").unwrap());
-    // live: asks for them only while the choice is open, never stores them, and fills the text (not HTML)
-    assert!(body.contains("/server/pair/sas") && body.contains("textContent") && body.contains("clearInterval"));
-    assert!(!body.contains("innerHTML"), "what the server sends is shown as text");
-    assert!(body.contains("Nenhum aparelho está pareando agora"));
-    // a device that already trusts the server is sent to HTTPS, but not while somebody is pairing: the numbers are here
+    // the room comes first, the master code is explained next, the QR sits inside a closed "prefer a QR" box after them
+    let (room, master, qr) = (
+        body.find("Gerar código de pareamento").unwrap(),
+        body.find("Use o código mestre").unwrap(),
+        body.find("Prefiro ler um QR code").unwrap(),
+    );
+    assert!(room < master && master < qr && qr < body.find("<svg xmlns").unwrap());
+    // the room: asked on click (never on load), the secret in a header and in memory only, shown as text
+    assert!(body.contains("/server/pair/room") && body.contains("x-pindrel-room") && body.contains("textContent"));
     assert!(
-        body.contains("Há um aparelho pareando agora") && body.contains("pairing"),
-        "the redirect must wait for a pairing"
+        body.contains("clearInterval") && body.contains("pagehide"),
+        "it stops watching and closes the room when left"
     );
+    assert!(!body.contains("innerHTML"), "what the server sends is shown as text");
+    assert!(
+        !body.contains("localStorage") && !body.contains("sessionStorage"),
+        "the token is never stored"
+    );
+    assert!(!body.contains("/server/pair/sas"), "the public list of digits is gone");
+    // the page explains the master code but never shows one
+    assert!(body.contains("PAIR: código mestre XXXX-XXXX-XXXX-XXXX"));
+    assert!(!body.contains("em desenvolvimento"), "the app screen exists now");
     gw.shutdown().await;
 }

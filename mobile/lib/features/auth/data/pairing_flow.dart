@@ -24,8 +24,9 @@ enum FlowPhase {
   cancelled,
 }
 
-/// How the person answers: compares the numbers of the two screens and taps, or types the numbers the server shows.
-enum FlowMode { compare, type }
+/// How the person answers: compares the numbers of the two screens and taps, or types the numbers the server shows, or has
+/// the master code of the server's log (nothing to compare: the app and the server prove the code to each other).
+enum FlowMode { compare, type, master }
 
 class PairingFlowState {
   const PairingFlowState({
@@ -89,6 +90,9 @@ class PairingFlow extends ChangeNotifier {
     required this.store,
     required this.pairer,
     required this.offerFor,
+    this.room = '',
+    this.master = '',
+    this.masterPairer = pairWithMaster,
     this.maxRounds = 10,
     this.maxWrongTries = 3,
     this.timeout = pairingTimeout,
@@ -101,6 +105,13 @@ class PairingFlow extends ChangeNotifier {
   final PairedStore store;
   final DigitsPairer pairer;
   final Future<TlsOffer?> Function(Uri base) offerFor;
+
+  /// The code of the room the person opened on a page of the server (modes `compare` and `type`).
+  final String room;
+
+  /// The master code from the server's log (mode `master`).
+  final String master;
+  final MasterPairer masterPairer;
 
   /// Sets of digits asked for before giving up (a forgotten screen does not ask forever).
   final int maxRounds;
@@ -139,11 +150,30 @@ class PairingFlow extends ChangeNotifier {
       return;
     }
     _set(_state.copy(tlsPort: offer.port, serverId: offer.serverId));
+    if (mode == FlowMode.master) {
+      final result = await masterPairer(
+        host: base.host,
+        port: offer.port,
+        master: master,
+        store: store,
+        serverId: offer.serverId,
+        timeout: timeout,
+      );
+      if (_stopped) return;
+      switch (result) {
+        case Paired(:final server):
+          _set(_state.copy(phase: FlowPhase.paired, paired: server, clearPrompt: true));
+        case PairingFailed(:final reason):
+          _set(_state.copy(phase: FlowPhase.failed, failure: reason, clearPrompt: true));
+      }
+      return;
+    }
     for (var round = 1; round <= maxRounds && !_stopped; round++) {
       _set(_state.copy(round: round, clearPrompt: true, phase: round == 1 ? FlowPhase.looking : FlowPhase.renewing));
       final result = await pairer(
         host: base.host,
         port: offer.port,
+        room: room,
         store: store,
         serverId: offer.serverId,
         timeout: timeout,

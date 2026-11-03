@@ -206,6 +206,12 @@ enum PairingFailure {
 
   /// The server answered something the protocol does not say: another program, or a different version.
   protocol,
+
+  /// The room code is not one the server has (a typo, one that expired, or one another device already joined).
+  badRoom,
+
+  /// The master code was refused, or the server could not prove it knows it: a wrong or spent code, or not the right server.
+  badCode,
 }
 
 class PairingFailed extends PairingResult {
@@ -311,6 +317,7 @@ String _field(String body, String key) {
 typedef DigitsPairer = Future<PairingResult> Function({
   required String host,
   required int port,
+  required String room,
   required PairedStore store,
   required Future<bool> Function(SasPrompt prompt) confirm,
   Duration timeout,
@@ -334,6 +341,7 @@ const sasConfirmTimeout = Duration(seconds: 58);
 Future<PairingResult> pairWithDigits({
   required String host,
   required int port,
+  required String room,
   required PairedStore store,
   required Future<bool> Function(SasPrompt prompt) confirm,
   Duration timeout = pairingTimeout,
@@ -374,7 +382,8 @@ Future<PairingResult> pairWithDigits({
     if (fp == null) return const PairingFailed(PairingFailure.notACertificate);
 
     final a = List<int>.generate(16, (_) => rng.nextInt(256));
-    final (startStatus, startBody) = await call('POST', '/server/pair/start', 'c=${sha256.convert(a)}\n');
+    final (startStatus, startBody) = await call('POST', '/server/pair/start', 'c=${sha256.convert(a)}\nroom=$room\n');
+    if (startStatus == 404) return const PairingFailed(PairingFailure.badRoom);
     if (startStatus == 429) return PairingFailed(startBody.contains('pairing_locked') ? PairingFailure.locked : PairingFailure.busy);
     if (startStatus != 200) return refusal(startStatus)!;
     final id = _field(startBody, 'id');
@@ -425,6 +434,161 @@ Future<PairingResult> pairWithDigits({
     if (!same) return PairingFailed(expired ? PairingFailure.expired : PairingFailure.declined);
     if (told == 409) return const PairingFailed(PairingFailure.expired); // new digits are asked for, not a pairing on old ones
     if (told != 204) return const PairingFailed(PairingFailure.unreachable); // never pair on a confirmation the server did not acknowledge
+    final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name, serverId: serverId);
+    await store.save(server);
+    return Paired(server);
+  } on TimeoutException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on SocketException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on HandshakeException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on HttpException {
+    return const PairingFailed(PairingFailure.unreachable);
+  } on FormatException {
+    return const PairingFailed(PairingFailure.protocol);
+  } finally {
+    client.close(force: true);
+  }
+}
+
+/// The 80-bit master code the gateway prints in its log (`K7Q2-9XMD-4R8T-0HZ3`) from what a person types: any case, dashes and
+/// spaces ignored, `O` read as `0` and `I`/`L` as `1` (Crockford base32). `null` when it is not exactly 16 such characters.
+List<int>? parseMasterCode(String text) {
+  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  final symbols = <int>[];
+  for (final rune in text.runes) {
+    var c = String.fromCharCode(rune).toUpperCase();
+    if (c == '-' || RegExp(r'\s').hasMatch(c)) continue;
+    if (c == 'O') c = '0';
+    if (c == 'I' || c == 'L') c = '1';
+    final i = alphabet.indexOf(c);
+    if (c.length != 1 || i < 0) return null;
+    symbols.add(i);
+  }
+  if (symbols.length != 16) return null;
+  final out = <int>[];
+  var acc = 0, bits = 0;
+  for (final s in symbols) {
+    acc = (acc << 5) | s;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      out.add((acc >> bits) & 0xff);
+      acc &= (1 << bits) - 1;
+    }
+  }
+  return out;
+}
+
+/// The inverse, for the tests: 10 bytes as `XXXX-XXXX-XXXX-XXXX`.
+String formatMasterCode(List<int> bytes) {
+  const alphabet = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  final out = StringBuffer();
+  var acc = 0, bits = 0, n = 0;
+  for (final b in bytes) {
+    acc = (acc << 8) | b;
+    bits += 8;
+    while (bits >= 5) {
+      bits -= 5;
+      if (n > 0 && n % 4 == 0) out.write('-');
+      out.write(alphabet[(acc >> bits) & 31]);
+      n++;
+    }
+    acc &= (1 << bits) - 1;
+  }
+  return out.toString();
+}
+
+/// The proof one side gives the other (`tag` is `pindrel-master-a` from the app, `pindrel-master-s` from the server): an
+/// HMAC-SHA256 keyed with the master code over the fingerprint of the CA as that side sees it and both fresh numbers.
+List<int> masterProof(List<int> master, String tag, List<int> caFingerprint, List<int> nonceA, List<int> nonceS) =>
+    Hmac(sha256, master).convert([...utf8.encode(tag), ...caFingerprint, ...nonceA, ...nonceS]).bytes;
+
+bool _sameBytes(List<int>? a, List<int> b) {
+  if (a == null || a.length != b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i];
+  }
+  return diff == 0;
+}
+
+/// The shape of [pairWithMaster], so a screen can be tested with a fake.
+typedef MasterPairer = Future<PairingResult> Function({
+  required String host,
+  required int port,
+  required String master,
+  required PairedStore store,
+  Duration timeout,
+  Random? random,
+  String serverId,
+});
+
+/// Pairs with the server using the master code its log shows, with nothing to compare: the app and the server prove to each
+/// other that they know the code (an HMAC over the code, the CA each side sees and both fresh numbers) without sending it.
+///
+/// Somebody in between with another CA cannot produce the server's proof, and 80 bits cannot be searched from a proof that was
+/// watched. The code works once and is replaced after, so a wrong, spent or expired one is refused ([PairingFailure.badCode]).
+Future<PairingResult> pairWithMaster({
+  required String host,
+  required int port,
+  required String master,
+  required PairedStore store,
+  Duration timeout = pairingTimeout,
+  Random? random,
+  String serverId = '',
+}) async {
+  final key = parseMasterCode(master);
+  if (key == null) return const PairingFailed(PairingFailure.badCode);
+  final rng = random ?? Random.secure();
+  final base = Uri(scheme: 'https', host: host, port: port);
+  final hostPort = host.contains(':') ? '[$host]:$port' : '$host:$port';
+  final client = HttpClient()..connectionTimeout = timeout;
+  client.badCertificateCallback = (_, h, p) => h == host && p == port;
+
+  Future<(int, String)> call(String method, String path, [String body = '']) async {
+    final request = await (method == 'GET' ? client.getUrl(base.resolve(path)) : client.postUrl(base.resolve(path))).timeout(timeout);
+    if (method == 'POST') {
+      request.headers.contentType = ContentType.text;
+      request.write(body);
+    }
+    final response = await request.close().timeout(timeout);
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in response.timeout(timeout)) {
+      bytes.add(chunk);
+      if (bytes.length > _maxCaBytes) throw const FormatException('answer too large');
+    }
+    return (response.statusCode, utf8.decode(bytes.takeBytes(), allowMalformed: true));
+  }
+
+  try {
+    final (caStatus, pem) = await call('GET', '/server/ca.pem');
+    if (caStatus != 200) return const PairingFailed(PairingFailure.notACertificate);
+    final fp = fingerprintOfPemOrNull(pem);
+    if (fp == null) return const PairingFailed(PairingFailure.notACertificate);
+    final fpBytes = _unhex(fp, 32)!;
+
+    final a = List<int>.generate(16, (_) => rng.nextInt(256));
+    final (startStatus, startBody) = await call('POST', '/server/pair/master/start', 'c=${sha256.convert(a)}\n');
+    if (startStatus == 429) return PairingFailed(startBody.contains('pairing_locked') ? PairingFailure.locked : PairingFailure.busy);
+    if (startStatus != 200) return const PairingFailed(PairingFailure.protocol);
+    final id = _field(startBody, 'id');
+    final s = _unhex(_field(startBody, 'n'), 16);
+    if (_unhex(id, 16) == null || s == null) return const PairingFailed(PairingFailure.protocol);
+    var name = _field(startBody, 'name').replaceAll(RegExp(r'[\u0000-\u001f\u007f]'), '').trim();
+    if (name.isEmpty || name.length > PairingCode.maxNameLength) name = host;
+
+    final proof = masterProof(key, 'pindrel-master-a', fpBytes, a, s);
+    final (status, body) = await call('POST', '/server/pair/master/finish', 'id=$id\na=${_hex(a)}\np=${_hex(proof)}\n');
+    if (status == 403) return const PairingFailed(PairingFailure.badCode);
+    if (status == 429) return const PairingFailed(PairingFailure.locked);
+    if (status != 200) return const PairingFailed(PairingFailure.protocol);
+    // the server's proof: only somebody who knows the code, over the CA this app saw, can have made it
+    final theirs = _unhex(_field(body, 'p'), 32);
+    if (!_sameBytes(theirs, masterProof(key, 'pindrel-master-s', fpBytes, a, s))) {
+      return const PairingFailed(PairingFailure.badCode);
+    }
     final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name, serverId: serverId);
     await store.save(server);
     return Paired(server);

@@ -255,8 +255,9 @@ void main() {
     expect(find.text('+ Adicionar servidor...'), findsNothing);
     expect(find.text('Adicionar servidor'), findsOneWidget);
     expect(find.text(AddServerDialog.addressLabel), findsOneWidget);
+    expect(find.text(AddServerDialog.roomLabel), findsOneWidget);
     expect(find.text(AddServerDialog.codeLabel), findsOneWidget);
-    expect(find.textContaining('obrigatório'), findsOneWidget);
+    expect(find.textContaining('obrigatório'), findsWidgets);
     final code = tester.widget<TextField>(find.byKey(const ValueKey('pairing-code-field')));
     expect(code.enabled, isFalse, reason: 'the numbers exist only after the server was reached');
   });
@@ -584,6 +585,10 @@ void main() {
         );
         await chooseOffice(tester);
         await tester.tap(find.text('Continuar mesmo assim'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byKey(const ValueKey('room-field')), '4821');
+        await tester.pump();
+        await tester.tap(find.text('Continuar'));
         await tester.pumpAndSettle();
         expect(find.textContaining('Não consegui falar com o servidor'), findsOneWidget);
         expect(find.text('CASA'), findsOneWidget);

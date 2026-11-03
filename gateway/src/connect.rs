@@ -188,8 +188,8 @@ details.os > summary { cursor:pointer; font-weight:600; padding:4px 0; }
 ol { padding-left:20px; margin:8px 0; } li { margin:4px 0; }
 a { color:var(--accent-text); }
 :focus-visible { outline:2px solid var(--accent-line); outline-offset:2px; }
-.sas { border:1px dashed var(--field); border-radius:14px; padding:6px 16px; margin:14px 0; }
-.sas .short { font-size:44px; letter-spacing:8px; text-align:center; }
+.sas { border:1px dashed var(--field); border-radius:14px; padding:14px 16px; margin:14px 0; }
+.six { font:600 44px/1.1 monospace; letter-spacing:8px; text-align:center; margin:8px 0; }
 .fp { font:14px monospace; word-spacing:6px; overflow-wrap:anywhere; }
 
 /* Motion: everything below is switched off for people who asked their system for less movement. */
@@ -262,16 +262,26 @@ a { color:var(--accent-text); }
 
 <details class="choice" id="app" name="conexao">
 <summary>Tenho o app Pindrel</summary>
-<p style="margin-top:12px">No app, escolha <strong>Adicionar servidor</strong> e toque neste servidor. O app vai mostrar <strong>6 números</strong>. Os mesmos 6 números aparecem aqui embaixo: se forem iguais, toque em <em>São iguais</em> no app. Só isso. Nada precisa ser instalado no sistema.</p>
-<p class="muted">A tela de pareamento do app ainda está em desenvolvimento; até lá, use "Vou usar no navegador".</p>
-<div id="sas" class="sas" aria-live="polite">
-<p class="muted" id="sas-idle">Nenhum aparelho está pareando agora. Quando você iniciar o pareamento no app, os números aparecem aqui.</p>
-<div id="sas-on" hidden>
-<p class="muted">Confira com o app (aparelho <span class="mono" id="sas-from"></span>):</p>
-<div class="short" id="sas-digits"></div>
-<p class="muted">Vale por mais <span id="sas-left"></span> s. Se os números forem diferentes, <strong>não confirme</strong>: toque em <em>Cancelar</em> no app.</p>
+<p style="margin-top:12px">Para parear o app, toque em <strong>Gerar código de pareamento</strong>. Aparece um <strong>código de 4 dígitos</strong>: digite-o no app (ao tocar neste servidor, ou em <em>Adicionar servidor</em>). Depois o app e esta página mostram <strong>6 números</strong>: se forem iguais, toque em <em>São iguais</em> no app. Nada precisa ser instalado no sistema.</p>
+<div id="room" class="sas" aria-live="polite">
+<div class="row" id="room-start"><button class="btn" id="room-open" type="button">Gerar código de pareamento</button></div>
+<div id="room-on" hidden>
+<p class="muted">Digite no app o <strong>código da sala</strong>:</p>
+<div class="six" id="room-code"></div>
+<p class="muted" id="room-state">Esperando o app…</p>
+<div id="room-digits-box" hidden>
+<p class="muted">Confira com o app (aparelho <span class="mono" id="room-phone"></span>):</p>
+<div class="six" id="room-digits"></div>
+<p class="muted">Se os números forem diferentes, <strong>não confirme</strong>: toque em <em>Cancelar</em> no app.</p>
 </div>
+<p class="muted">A sala fecha em <span id="room-left"></span> s. Os números são só desta sala: outras pessoas pareando ao mesmo tempo não os veem, nem você os delas.</p>
+<div class="row"><button class="btn ghost" id="room-new" type="button">Gerar outro código</button><button class="btn ghost" id="room-close" type="button">Fechar</button></div>
 </div>
+<p class="muted" id="room-err" hidden></p>
+</div>
+<details class="os"><summary>Sem uma tela para olhar? Use o código mestre</summary>
+<p>Quem tem acesso ao computador do servidor encontra, no registro (log) do gateway, uma linha <code>PAIR: código mestre XXXX-XXXX-XXXX-XXXX</code>. No app, escolha <em>Tenho o código mestre</em> e digite-o: o app e o servidor provam um ao outro que o conhecem, sem enviá-lo pela rede, e não é preciso comparar números. O código vale <strong>uma vez</strong> (e por até 24 h): depois de usado, um novo aparece no registro. Esta página nunca o mostra.</p>
+</details>
 <p class="muted">Por que números? O app confere, com você, que está falando com este servidor e não com outro aparelho da rede que se passa por ele. Os números mudam a cada tentativa e só valem por um minuto, então não dá para decorar nem preparar um falso.</p>
 <details class="os"><summary>Prefiro ler um QR code</summary>
 <p>O código abaixo contém só o endereço do servidor e a impressão digital da chave dele. Não contém senha.</p>
@@ -307,44 +317,65 @@ a { color:var(--accent-text); }
     s.className = 'ok';
     var trusted = 'Este aparelho já confia neste servidor. Você pode abrir o Pindrel com HTTPS.';
     if (stay) { s.textContent = trusted; return; }
-    // Somebody who came to read the six numbers of a pairing must not be sent away from them.
-    fetch('/server/pair/sas', { cache: 'no-store' }).then(function (r) { return r.status === 200; }, function () { return false; }).then(function (pairing) {
-      if (pairing) { app.open = true; s.textContent = trusted + ' Há um aparelho pareando agora: os números estão na seção "Tenho o app Pindrel".'; return; }
-      s.textContent = 'Este aparelho já confia neste servidor: abrindo o Pindrel com HTTPS…';
-      var go = setTimeout(function () { location.href = open.href; }, 1800);
-      var link = document.createElement('a'); link.href = '#'; link.textContent = ' Ficar nesta página';
-      link.addEventListener('click', function (e) { e.preventDefault(); clearTimeout(go); s.textContent = trusted; });
-      s.appendChild(link);
-    });
+    s.textContent = 'Este aparelho já confia neste servidor: abrindo o Pindrel com HTTPS…';
+    var go = setTimeout(function () { location.href = open.href; }, 1800);
+    var link = document.createElement('a'); link.href = '#'; link.textContent = ' Ficar nesta página';
+    link.addEventListener('click', function (e) { e.preventDefault(); clearTimeout(go); s.textContent = trusted; });
+    s.appendChild(link);
   }).catch(function () {
     clearTimeout(timer);
     s.className = 'todo'; s.textContent = 'Este aparelho ainda não confia neste servidor (ou não consegue chegar à porta segura). Siga os passos abaixo, ou use o app.';
   });
 
-  // While the app choice is open, ask every 2 s whether a device is pairing and show its six digits (nothing else is stored).
-  var app = document.getElementById('app'), idle = document.getElementById('sas-idle'), on = document.getElementById('sas-on');
-  var poll = null, busy = false;
-  function tick() {
-    if (busy || document.hidden) return; busy = true;
+  // The room: a 4-digit code for the app, and the six digits of the app's session, shown only here (the token never leaves
+  // this page's memory and travels in a header, not a URL).
+  var app = document.getElementById('app'), token = null, poller = null, wait = false;
+  function el(id) { return document.getElementById(id); }
+  function view(on, err) { el('room-start').hidden = on; el('room-on').hidden = !on; el('room-err').hidden = !err; el('room-err').textContent = err || ''; }
+  function stopPolling() { if (poller) { clearInterval(poller); poller = null; } }
+  function leave() {
+    if (token) { try { fetch('/server/pair/room/close', { method: 'POST', headers: { 'x-pindrel-room': token }, keepalive: true }).catch(function () {}); } catch (e) {} }
+    token = null; stopPolling();
+  }
+  function lines(t) { var v = {}; String(t).split('\n').forEach(function (l) { var i = l.indexOf('='); if (i > 0) v[l.slice(0, i)] = l.slice(i + 1).trim(); }); return v; }
+  function look() {
+    if (!token || wait || document.hidden) return; wait = true;
     var ac = typeof AbortController === 'function' ? new AbortController() : null;
     var to = setTimeout(function () { if (ac) ac.abort(); }, 3000);
-    fetch('/server/pair/sas', { cache: 'no-store', signal: ac ? ac.signal : undefined }).then(function (r) {
-      return r.status === 200 ? r.text() : '';
-    }).then(function (t) {
-      var v = {}; t.split('\n').forEach(function (l) { var i = l.indexOf('='); if (i > 0) v[l.slice(0, i)] = l.slice(i + 1); });
-      if (/^\d{6}$/.test(v.sas || '')) {
-        document.getElementById('sas-digits').textContent = v.sas.slice(0, 3) + ' ' + v.sas.slice(3);
-        document.getElementById('sas-left').textContent = String(parseInt(v.left, 10) || 0);
-        document.getElementById('sas-from').textContent = (v.from || '').replace(/[^0-9a-f:.]/gi, '');
-        idle.hidden = true; on.hidden = false;
-      } else { idle.hidden = false; on.hidden = true; }
-    }).catch(function () {}).then(function () { clearTimeout(to); busy = false; });
+    fetch('/server/pair/room', { cache: 'no-store', headers: { 'x-pindrel-room': token }, signal: ac ? ac.signal : undefined }).then(function (r) {
+      if (r.status === 404) { token = null; stopPolling(); view(false, 'Este código venceu, foi usado ou foi fechado. Gere outro.'); return; }
+      return r.text().then(function (t) {
+        var v = lines(t), m = /^(\d{6}),(\d{1,2})$/.exec(v.d || '');
+        el('room-left').textContent = String(Math.min(180, parseInt(v.left, 10) || 0));
+        if (m) {
+          el('room-digits').textContent = m[1].slice(0, 3) + ' ' + m[1].slice(3);
+          el('room-phone').textContent = (v.phone || '').replace(/[^0-9a-fA-F:.]/g, '').slice(0, 45);
+          el('room-digits-box').hidden = false; el('room-state').textContent = 'O app entrou na sala.';
+        } else {
+          el('room-digits-box').hidden = true;
+          el('room-state').textContent = v.phone ? 'O app entrou. Gerando os números…' : 'Esperando o app…';
+        }
+      });
+    }).catch(function () {}).then(function () { clearTimeout(to); wait = false; });
   }
-  function sync() {
-    if (app.open && !poll) { tick(); poll = setInterval(tick, 2000); }
-    if (!app.open && poll) { clearInterval(poll); poll = null; }
+  function openRoom() {
+    leave();
+    fetch('/server/pair/room', { method: 'POST', cache: 'no-store' }).then(function (r) {
+      if (r.status === 429) { view(false, 'Há pessoas demais pareando agora. Tente de novo em um minuto.'); return; }
+      if (r.status !== 200) { view(false, 'Não foi possível abrir a sala agora.'); return; }
+      return r.text().then(function (t) {
+        var v = lines(t);
+        if (!/^\d{4}$/.test(v.code || '') || !/^[0-9a-f]{32}$/.test(v.token || '')) { view(false, 'O servidor respondeu algo inesperado.'); return; }
+        token = v.token; el('room-code').textContent = v.code; el('room-digits-box').hidden = true; el('room-state').textContent = 'Esperando o app…';
+        el('room-left').textContent = String(Math.min(180, parseInt(v.ttl, 10) || 180));
+        view(true); stopPolling(); poller = setInterval(look, 2000);
+      });
+    }).catch(function () { view(false, 'Não foi possível falar com o servidor.'); });
   }
-  app.addEventListener('toggle', sync); sync();
+  el('room-open').addEventListener('click', openRoom);
+  el('room-new').addEventListener('click', openRoom);
+  el('room-close').addEventListener('click', function () { leave(); view(false); });
+  window.addEventListener('pagehide', leave);
   var b = document.getElementById('copy');
   b.addEventListener('click', function () {
     var t = document.getElementById('code').textContent;

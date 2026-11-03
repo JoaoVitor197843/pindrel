@@ -48,6 +48,7 @@ final tlsOfferProvider = Provider<Future<TlsOffer?> Function(Uri)>(
   (ref) => (base) => fetchTlsOffer(base),
 );
 final digitsPairerProvider = Provider<DigitsPairer>((ref) => pairWithDigits);
+final masterPairerProvider = Provider<MasterPairer>((ref) => pairWithMaster);
 
 /// The login screen's server list: the available ones, the chosen one and whether it
 /// is still on the network. The screen follows it with a `StreamBuilder` on
