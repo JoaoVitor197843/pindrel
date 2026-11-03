@@ -77,7 +77,7 @@ cd /mnt/ssd-data/services/pindrel
 
 # 1. os compose e o deploy/ vêm do repositório (sparse checkout, sem baixar web/, mobile/ etc.) no mesmo diretório
 git init -q -b main && git remote add origin https://raspberry-joao.tail7a986c.ts.net/joao_vitor/Pindrel.git
-git sparse-checkout set --no-cone /.gitignore /compose.yml /compose.lb.yml /compose.registry.yml /deploy/
+git sparse-checkout set --no-cone /.gitignore /compose.yml /compose.lb.yml /compose.registry.yml /compose.tls.yml /deploy/
 git fetch -q origin main && git checkout -f -q main
 
 # 2. compose.pi.yml sem as linhas image:/build: (agora vêm do compose.registry.yml)
@@ -116,6 +116,38 @@ rollback devolve a versão antiga (o erro no log é `relation "users" already ex
 O usuário precisa estar no grupo `docker`. Ver o que aconteceu: `journalctl -u pindrel-update -e`.
 Parar de atualizar: `sudo systemctl disable --now pindrel-update.timer`. Fixar uma versão: `PINDREL_TAG=<commit>`
 no ambiente da unit (`systemctl edit pindrel-update.service`).
+
+## HTTPS e pareamento no Raspberry Pi
+
+A imagem `pindrel-gateway` publicada já traz o código de HTTPS (amd64 e arm64, compilada na máquina do build com o `zig` como
+compilador C do alvo, sem emulação; ver `gateway/Dockerfile` e `gateway/cross/`). Ele fica **desligado** até o ambiente pedir:
+numa Pi que não faz nada disso, nada muda. Para ligar, com as imagens do registry:
+
+```sh
+cd /mnt/ssd-data/services/plany          # onde está a pilha
+
+# 1. traga o compose.tls.yml para o checkout (o sparse checkout só tinha os outros)
+git sparse-checkout add /compose.tls.yml && git pull --ff-only
+
+# 2. coloque-o por último no COMPOSE_FILE do .env (depois do registry e do compose.pi.yml)
+sed -i 's#^COMPOSE_FILE=.*#&:compose.tls.yml#' .env
+grep ^COMPOSE_FILE .env
+
+# 3. opcional, no .env: outros nomes no certificado (o nome da Pi na rede) e quantas pessoas pareiam ao mesmo tempo
+#    TLS_SANS=raspberrypi.local
+#    PAIRING_MAX_ROOMS=6
+
+# 4. a porta segura (8443/tcp) precisa estar liberada no firewall da Pi, se houver um
+sudo ufw allow 8443/tcp 2>/dev/null || true
+
+sh deploy/update.sh
+```
+
+- O volume `gateway-data` guarda a autoridade certificadora (`/data/tls`): **não apague**, senão todo aparelho pareado precisa
+  parear de novo. O `update.sh` troca só a imagem, não o volume.
+- O código mestre aparece no log do gateway (`docker logs <gateway> | grep "código mestre"`), uma vez por início e depois de cada uso.
+- A RAM do gateway com HTTPS é de poucos MiB em repouso; o teto de 48 MiB do `compose.tls.yml` cobre ~1000 WebSockets.
+- O mDNS continua anunciando a porta comum; o app descobre a porta segura em `/server/info/`.
 
 ## Variáveis do `update.sh`
 
