@@ -18,7 +18,7 @@
 
 main() {
   cd "$(dirname "$0")/.."
-  : "${REGISTRY:=raspberry-joao.tail7a986c.ts.net}" "${REGISTRY_OWNER:=joao_vitor}" "${PINDREL_TAG:=latest}"
+  : "${REGISTRY:=ghcr.io}" "${REGISTRY_OWNER:=joaovitor197843}" "${PINDREL_TAG:=latest}"
   : "${PINDREL_REPLICAS:=}" "${WAIT_TIMEOUT:=120}" "${PINDREL_STATE_DIR:=./.deploy-state}" "${UPDATE_GIT:=1}"
   export REGISTRY REGISTRY_OWNER PINDREL_TAG
 

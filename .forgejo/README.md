@@ -7,7 +7,7 @@ Um workflow por projeto, cada um só dispara quando os caminhos que ele cobre mu
 | `backend.yml` | `backend/**`, `shared/protos/**` | `ci` | `gofmt`, `go vet` | `go test` sem os que usam Postgres |
 | `web.yml` | `web/**`, `shared/protos/**` | `ci` | `yarn check` (svelte-check + tsc) | `vitest` (jsdom) |
 | `mobile.yml` | `mobile/**`, `shared/protos/**` | `ci-flutter` | `flutter analyze` | `flutter test` sem o que chama o servidor |
-| `release.yml` | push na `main` (`backend/**`, `web/**`, `gateway/**`, `Dockerfile`) | `build` | — | monta e publica as imagens amd64+arm64 (ver `deploy/README.md`) |
+| `release.yml` | push na `main` (`backend/**`, `web/**`, `gateway/**`, `Dockerfile`) | `build` | — | só chama os quatro de teste; as imagens amd64+arm64 são montadas no GitHub (`.github/workflows/release-images.yml`, ver `deploy/README.md`) |
 
 ## Testes que dependem do servidor (não rodam no CI)
 
@@ -39,11 +39,11 @@ serviço, tire a folga daqui antes.
 Religar uma ferramenta: `docker update --restart=unless-stopped <nome> && docker start <nome>`.
 Os limites de Forgejo e runner estão no `compose.yml` do Forgejo no Pi (backup: `compose.yml.bak-pre-limites`).
 
-## A release só acontece com tudo verde
+## Os testes da `main`
 
 Em push na `main` o `release.yml` **chama os quatro workflows de CI** (`uses: ./.forgejo/workflows/<x>.yml`; todos
-têm `on: workflow_call`) e o job `images` tem `needs:` de todos. Se qualquer teste falhar, nada é publicado: a tag
-`latest` não muda e o Pi continua na versão que já roda. O mesmo workflow roda em push na `dev`/PR (com filtro de
+têm `on: workflow_call`) e nada mais. **Publicar não depende dele:** o GitHub monta as imagens assim que o espelho recebe o push, sem esperar
+estes testes; rode-os (aqui ou localmente) antes de empurrar para a `main`. O mesmo workflow roda em push na `dev`/PR (com filtro de
 caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar em dobro).
 
 | Job | Onde | O quê |
@@ -52,8 +52,6 @@ caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar e
 | `web` | PC (`build`, imagem `ci-pc:1`) | `yarn check` e vitest |
 | `gateway` | PC (`build`, imagem `ci-pc:1`) | rustfmt, clippy, `cargo test` (o Pi não tem Rust) |
 | `mobile` | PC (`flutter`, imagem `ci-flutter:1` do PC) | `flutter analyze` e `flutter test` |
-| `release` / `prebuild` | PC (`build`, imagem `ci-docker:1`) | compila as imagens sem publicar, **enquanto os testes rodam**, para o cache do buildkit estar quente |
-| `release` / `images` | PC (`build`, imagem `ci-docker:1`) | só roda se todos acima passarem; empurra as camadas já prontas para o registry do Forgejo e, por último, copia as imagens (mesmo digest) para o Docker Hub (`joaovitor2753/pindrel` e `pindrel-gateway`; secret `DOCKERHUB_TOKEN`) |
 
 Tudo roda no PC, em paralelo (`capacity: 4`). O runner do Pi (`ci`, `ci-flutter`) tem um slot só e era o gargalo:
 backend (~5 min) + web (~2 min) + mobile (~6 min) rodavam em fila, ~13 min no total; no PC cada um leva segundos a
@@ -88,7 +86,7 @@ Mantenha a `main` protegida (só merge por revisão) e não registre este label 
 
 ## Release versionada (tag `v*`)
 
-`release.yml` publica as imagens a cada push na `main`; o `release-tag.yml` é o que gera a **release que o usuário baixa**.
+As imagens saem do GitHub a cada push na `main`; o `release-tag.yml` é o que gera a **release que o usuário baixa**.
 
 ```sh
 git tag v1.2.0 && git push origin v1.2.0      # v1.2.0-rc1 vira pré-release
@@ -96,14 +94,14 @@ git tag v1.2.0 && git push origin v1.2.0      # v1.2.0-rc1 vira pré-release
 
 1. Roda os mesmos quatro workflows de teste. Se um falhar, nada é criado.
 2. Cria a release como **rascunho** (`.forgejo/scripts/release.sh create`), com as notas geradas do `git log` desde a tag anterior.
-3. Em paralelo no PC: `gateway` (binários estáticos musl `amd64` e `arm64`, `.tar.gz`), `linux` (bundle do app Flutter, amd64), `android` (APK assinado) e `docker-tags` (tags `1.2.0` e `1.2` nas imagens que o `release.yml` já publicou para o commit, no registry do Forgejo e no Docker Hub; sem `1.2` em pré-release).
+3. Em paralelo no PC: `gateway` (binários estáticos musl `amd64` e `arm64`, `.tar.gz`), `linux` (bundle do app Flutter, amd64) e `android` (APK assinado); o mesmo push da tag, espelhado no GitHub, faz o `release-images.yml` pôr as tags de versão (`1.2.0`, `1.2`) nas imagens do commit.
 4. Só quando todos terminam, `publish` tira o rascunho. Um build que falha deixa o rascunho invisível; basta rodar de novo (o upload substitui arquivos de mesmo nome) ou apagar o rascunho.
 
 Cada arquivo sobe com o seu `.sha256`. O build number do app é a contagem de commits (só precisa crescer).
 
 - **Imagem do job de app:** `ci-release:1` (ci-flutter + toolchain de desktop Linux: clang, cmake, ninja, GTK, libsecret; o plugin `sodium` compila a libsodium) **mais os caches do build Android** (distribuição e dependências do Gradle, NDK, CMake, pacotes do pub), copiados do próprio PC. A internet do PC é lenta (~150 KB/s medidos) e o job do Android, baixando tudo a cada run, estourou os 45 min; com os caches o build leva ~3 min. Para construir, rode antes um `flutter build apk --release` em `mobile/` no PC (isso enche `~/.gradle` e `~/Android/Sdk`) e depois, na raiz: `docker buildx build -f .forgejo/images/ci-release.Dockerfile -t ci-release:1 --load --build-context gradle-home=$HOME/.gradle --build-context android-sdk=$HOME/Android/Sdk --build-context pub-cache=$HOME/.pub-cache .forgejo/images`. Se o app passar a pedir outra versão do NDK ou do CMake, ajuste as versões no Dockerfile (o log do job diz `Install NDK ... v.X`). Os jobs a usam com `runs-on: build` + `container:`, então não é preciso mexer nos labels do runner.
 - **Token:** o job tenta o token automático do Forgejo; se ele não puder criar releases, crie o secret `RELEASE_TOKEN` (token de acesso com `write:repository`).
-- **A imagem do commit precisa existir:** `docker-tags` falha com uma mensagem clara se o commit marcado não gerou imagem (mudança fora dos caminhos do `release.yml`); rode o `release.yml` à mão na `main` e repita.
+- **A imagem do commit precisa existir:** o job `version-tags` do GitHub falha com uma mensagem clara se o commit marcado não gerou imagem (mudança fora dos caminhos do `release-images.yml`); rode-o à mão na `main`, no GitHub, e repita.
 - **Testes do script da API:** `sh .forgejo/scripts/test_release.sh` (roda o `release.sh` contra uma API falsa do Forgejo; não está no CI, como o `deploy/test_update.sh`).
 - **Assinatura do Android:** secrets `ANDROID_KEYSTORE_BASE64` (o `.jks` em base64) e `ANDROID_KEYSTORE_PASSWORD` (mesma senha para a loja e a chave; alias `pindrel`, certificado `CN=Pindrel`, PKCS12 de 4096 bits). **A mesma chave tem de assinar todas as versões**, senão quem já instalou não consegue atualizar: guarde um backup fora do PC. O job confere o certificado do APK e falha se for o de debug.
 

@@ -3,16 +3,16 @@
 O Pi **puxa** as versões novas: nada entra nele de fora, e ele não compila nada.
 
 ```
-push na main ─▶ Forgejo Actions (runner do PC) ─▶ imagens amd64+arm64 no registry do Forgejo
+push na main ─▶ espelho no GitHub ─▶ GitHub Actions ─▶ imagens amd64+arm64 no ghcr.io
                                                           │
-            timer do systemd no Pi (a cada 1 min) ◀───────┘  docker compose pull → up --wait → rollback
+            timer do systemd no Pi (a cada 5 min) ◀───────┘  docker compose pull → up --wait → rollback
 ```
 
 ## O que faz cada peça
 
 | Peça | Onde | O quê |
 |---|---|---|
-| `.forgejo/workflows/release.yml` | runner do PC (label `build`) | monta `pindrel` e `pindrel-gateway` (amd64 + arm64, sem emulação) e publica com as tags `<commit>` e `latest` |
+| `.github/workflows/release-images.yml` | GitHub Actions | monta `pindrel` e `pindrel-gateway` (amd64 + arm64, sem emulação) e publica em `ghcr.io/joaovitor197843` com as tags `<commit completo>` e `latest` (e copia para o Docker Hub se houver o secret `DOCKERHUB_TOKEN`). Os testes continuam no Forgejo (`.forgejo/workflows/release.yml`) |
 | `compose.registry.yml` | Pi | troca `build:` por `image:` do registry |
 | `deploy/update.sh` | Pi | baixa, recria, espera ficar saudável, volta atrás se não ficar |
 | `deploy/install-timer.sh` | Pi | instala o timer do systemd que roda o `update.sh` |
@@ -38,18 +38,17 @@ tempo todo (o gateway repete numa outra réplica uma conexão que falhou, e vê 
 coluna deixa o código antigo sem chão. Escreva-as em duas etapas (primeiro adiciona e passa a usar, depois
 remove numa release seguinte) para a versão anterior sempre funcionar contra o schema novo.
 
-## Preparar o registry (uma vez, no Forgejo)
+## Preparar o registry (uma vez, no GitHub)
 
-1. Conta `joao_vitor` > Configurações > Aplicativos: dois tokens.
-   - `pindrel-ci`, escopo **write:package** (publicar). Vira secret do repositório (abaixo).
-   - `pindrel-pi`, escopo **read:package** (só puxar). Fica no Pi.
-2. Repositório Pindrel > Configurações > Actions > Secrets: `REGISTRY_USER` = `joao_vitor` e
-   `REGISTRY_TOKEN` = o token `pindrel-ci`.
-3. O registry fica em `https://raspberry-joao.tail7a986c.ts.net` (Tailscale `serve` + `ROOT_URL` do Forgejo).
+1. Não precisa de token: o workflow usa o `GITHUB_TOKEN` do próprio GitHub Actions.
+2. Na primeira publicação os pacotes nascem **privados**: em GitHub > seu perfil > Packages, abra `pindrel` e `pindrel-gateway`
+   > Package settings > Change visibility > Public. Depois disso a Pi puxa sem login.
+3. Opcional, Docker Hub: secret `DOCKERHUB_TOKEN` (Read & Write) no repositório do GitHub; sem ele o passo é pulado.
+4. Para a Pi puxar de outro lugar (ex.: Docker Hub), ponha no `.env` dela `REGISTRY=docker.io` e `REGISTRY_OWNER=joaovitor2753`.
 
-## Preparar o runner (uma vez, no PC)
+## Runner do PC
 
-Ver `.forgejo/README.md`, seção "Runner de release": imagem `ci-docker:1`, label `build` e o socket do Docker.
+O runner do PC só roda os testes (imagem `ci-pc:1`); não compila mais as imagens. Ver `.forgejo/README.md`.
 
 ## Preparar o Pi (uma vez)
 
@@ -60,7 +59,6 @@ git clone https://raspberry-joao.tail7a986c.ts.net/joao_vitor/Pindrel.git ~/pind
 # configuração: o .env da RAIZ (não o backend/.env, ver o comentário no arquivo)
 cp deploy/env.example .env && nano .env      # PORT livre, DB_PASSWORD e JWT_SECRET de verdade
 
-docker login raspberry-joao.tail7a986c.ts.net -u joao_vitor   # opcional enquanto os pacotes forem públicos; senha: o token pindrel-pi
 sh deploy/update.sh                                   # primeira subida, para ver funcionando
 sudo sh deploy/install-timer.sh                       # liga o timer
 ```
@@ -104,8 +102,7 @@ sed -i 's#^COMPOSE_FILE=.*#COMPOSE_FILE=compose.yml:compose.lb.yml:compose.regis
 #    ou, direto no contêiner, o mesmo que o `force` faz (tabela e linha no formato do golang-migrate):
 docker exec pindrel-postgres-1 sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "CREATE TABLE IF NOT EXISTS schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL); INSERT INTO schema_migrations SELECT 1, false WHERE NOT EXISTS (SELECT 1 FROM schema_migrations)"'
 
-# 4. login no registry (token pindrel-pi) e primeira atualização
-docker login raspberry-joao.tail7a986c.ts.net -u joao_vitor
+# 4. primeira atualização (os pacotes do ghcr.io são públicos: sem login)
 sh deploy/update.sh && sudo sh deploy/install-timer.sh
 ```
 
