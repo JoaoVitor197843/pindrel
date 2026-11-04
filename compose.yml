@@ -7,6 +7,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        GO_TAGS: ${GO_TAGS:-}
 
     restart: unless-stopped
     mem_limit: 128m
@@ -37,7 +39,7 @@ services:
       - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       - CLIENT_IP_HEADER=${CLIENT_IP_HEADER:-X-Forwarded-For}
       # Go soft memory limit, kept below mem_limit so the GC works before the container is killed
-      - GOMEMLIMIT=${GOMEMLIMIT:-100MiB}
+      - GOMEMLIMIT=${GOMEMLIMIT:-64MiB}
     depends_on:
       postgres:
         condition: service_healthy

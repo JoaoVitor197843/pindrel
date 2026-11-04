@@ -7,7 +7,7 @@
 # page that explains how to connect securely (see CLAUDE.md, "TLS"). Open http://<this machine>:${PORT:-8080}/ to start.
 services:
   gateway:
-    # 1000 open WebSockets measured 28 MiB; the default 16m of compose.lb.yml is for a gateway without TLS
+    # 1000 open WebSockets measured 28 MiB; compose.lb.yml now has the same 48m cap
     mem_limit: 48m
     memswap_limit: 48m
     environment:
