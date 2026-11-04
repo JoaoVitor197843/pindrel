@@ -21,6 +21,22 @@ void main() {
   testWidgets('abre o app, mostra o login e responde aos toques', (
     tester,
   ) async {
+    // Keeps the full report of every framework error (an overflow names the widget, its constraints and the render tree),
+    // because `takeException` alone only says "overflowed by N pixels" and the emulator log is all there is to go on.
+    final reports = <String>[];
+    final original = FlutterError.onError;
+    FlutterError.onError = (details) {
+      reports.add(details.toString());
+      original?.call(details);
+    };
+    addTearDown(() => FlutterError.onError = original);
+    String screen() {
+      final v = tester.view;
+      final size = v.physicalSize / v.devicePixelRatio;
+      return 'tela: ${size.width.toStringAsFixed(1)} x ${size.height.toStringAsFixed(1)} dp, '
+          'escala do texto ${tester.platformDispatcher.textScaleFactor}';
+    }
+
     app.main();
     await frames(tester);
 
@@ -30,7 +46,8 @@ void main() {
     expect(
       tester.takeException(),
       isNull,
-      reason: 'a primeira tela não pode lançar',
+      reason:
+          'a primeira tela não pode lançar\n${screen()}\n${reports.join('\n---\n')}',
     );
 
     // typing into a field (not the placeholder text, which would match twice)
@@ -56,6 +73,10 @@ void main() {
     await frames(tester, 3);
     expect(find.text('Notas locais chegam em breve.'), findsOneWidget);
 
-    expect(tester.takeException(), isNull);
+    expect(
+      tester.takeException(),
+      isNull,
+      reason: '${screen()}\n${reports.join('\n---\n')}',
+    );
   });
 }
