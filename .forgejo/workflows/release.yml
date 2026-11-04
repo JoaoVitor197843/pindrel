@@ -1,6 +1,6 @@
 # Release gate: on push to main, runs ALL the tests (backend with a database, web, gateway, mobile) on the PC's runner.
 #
-# The images are NOT built here any more: the build runs on GitHub (.github/workflows/release-images.yml, ghcr.io), which
+# The images are NOT built here any more: the build runs on GitHub (.github/workflows/release-images.yml, Docker Hub), which
 # is faster than this PC's connection and reaches the Raspberry Pi without Tailscale. This repository is mirrored to
 # GitHub, so a push to main starts that build there on its own. It does not wait for these tests: run them
 # (they are what this workflow does, or locally) before pushing to main.
