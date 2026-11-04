@@ -79,24 +79,40 @@ const (
 	argonKeyLen     = uint32(32)
 )
 
+// One word per line, trimmed, byte-sorted (LC_ALL=C sort -u) and newline-terminated. It is searched in place
+// with a binary search: a map of the 100k words cost ~4 MiB of live heap, this costs none (the text stays in the
+// binary and only the pages a lookup touches are loaded).
+//
 //go:embed data/100k_most_common_passwords.txt
 var commonPasswordsRaw string
 
-var commonPasswords = buildSet(commonPasswordsRaw)
+func IsCommonPassword(password string) bool {
+	return inSortedLines(commonPasswordsRaw, password)
+}
 
-func buildSet(raw string) map[string]struct{} {
-	lines := strings.Split(raw, "\n")
-	set := make(map[string]struct{}, len(lines))
-	for _, line := range lines {
-		if word := strings.TrimSpace(line); word != "" {
-			set[word] = struct{}{}
+// inSortedLines reports whether word is one of the lines of raw (sorted bytewise, each ending in '\n').
+func inSortedLines(raw, word string) bool {
+	if word == "" || strings.IndexByte(word, '\n') >= 0 {
+		return false
+	}
+	lo, hi := 0, len(raw)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		start := strings.LastIndexByte(raw[:mid], '\n') + 1
+		end := len(raw)
+		if i := strings.IndexByte(raw[start:], '\n'); i >= 0 {
+			end = start + i
+		}
+		switch line := raw[start:end]; {
+		case line == word:
+			return true
+		case line < word:
+			lo = end + 1
+		default:
+			hi = start
 		}
 	}
-	return set
-}
-func IsCommonPassword(password string) bool {
-	_, found := commonPasswords[password]
-	return found
+	return false
 }
 func CheckPassword(password string) (bool, error) {
 	if len(password) < 8 {
