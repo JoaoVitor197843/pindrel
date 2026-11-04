@@ -110,6 +110,24 @@ jobs:
       - name: Dependências
         run: flutter pub get
 
+      # Gradle installs the NDK by itself, but a download that arrives corrupted (seen once: "ZipFile.populateFromCentralDirectory")
+      # fails the whole build. Installing it first, with retries, turns that flake into a retry.
+      - name: NDK do Android (com tentativas)
+        working-directory: .
+        run: |
+          # the NDK the pinned Flutter asks for (`flutter.ndkVersion` in its Gradle plugin; the app does not set its own)
+          root=$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")
+          ndk=$(sed -n 's/.*val ndkVersion: String = "\([0-9.]*\)".*/\1/p' "$root/packages/flutter_tools/gradle/src/main/kotlin/FlutterExtension.kt" | head -1)
+          echo "NDK pedido pelo Flutter: ${ndk:-nenhum}"
+          [ -n "$ndk" ] || exit 0
+          for i in 1 2 3; do
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" > /dev/null && exit 0
+            echo "tentativa $i falhou; limpando e tentando de novo"
+            rm -rf "$ANDROID_HOME/ndk/$ndk"
+            sleep 5
+          done
+          exit 1
+
       - name: Abrir o app no emulador Android
         uses: reactivecircus/android-emulator-runner@v2
         with:
