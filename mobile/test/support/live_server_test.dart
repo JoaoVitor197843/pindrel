@@ -46,6 +46,18 @@ void main() {
     expect(live.mode, LiveMode.none);
   });
 
+  test('outro programa na porta (responde 404 ou erro em /server/info/): "none", não é o servidor', () async {
+    for (final status in [404, 403, 500, 301]) {
+      final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      s.listen((req) async {
+        req.response.statusCode = status;
+        await req.response.close();
+      });
+      expect((await findLiveServer(host: '127.0.0.1', port: s.port)).mode, LiveMode.none, reason: '$status');
+      await s.close(force: true);
+    }
+  });
+
   test('sem TLS: HTTP puro, usando a mesma porta', () async {
     final s = await plainPort();
     addTearDown(() => s.close(force: true));

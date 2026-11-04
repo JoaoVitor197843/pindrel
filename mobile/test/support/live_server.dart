@@ -41,6 +41,8 @@ Future<LiveServer> findLiveServer({String host = 'localhost', int port = 8086, D
   final probe = http.Client();
   try {
     final info = await probe.get(plain.resolve('/server/info/')).timeout(timeout);
+    // something else listening on that port (any other program) is not the server this is looking for
+    if (info.statusCode != 200) return LiveServer._(LiveMode.none, plain, null);
     final tls = int.tryParse(info.headers['x-pindrel-tls'] ?? '');
     if (tls == null || tls < 1 || tls > 65535) return LiveServer._(LiveMode.plain, plain, null);
     // A harmless request that the plain port refuses with 426 when it only serves the bootstrap routes.
