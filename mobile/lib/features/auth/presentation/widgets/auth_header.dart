@@ -71,15 +71,26 @@ class AuthBrandAndServerRow extends StatelessWidget {
   /// Smallest useful width of the button (dot, a piece of the name and the arrow).
   static const minSelectorWidth = 96.0;
 
-  /// Width of the button in a row of [rowWidth]: what is left after the brand,
-  /// between [minSelectorWidth] and [maxSelectorWidth].
-  static double selectorWidthFor(double rowWidth, double maxSelectorWidth) =>
-      (rowWidth - gap - AuthBrandRow.minWidth)
+  /// Width of the button in a row of [rowWidth]: what is left after the brand ([brandWidth], at least
+  /// [AuthBrandRow.minWidth]), between [minSelectorWidth] and [maxSelectorWidth].
+  static double selectorWidthFor(
+    double rowWidth,
+    double maxSelectorWidth, [
+    double brandWidth = AuthBrandRow.minWidth,
+  ]) =>
+      (rowWidth -
+              gap -
+              (brandWidth < AuthBrandRow.minWidth
+                  ? AuthBrandRow.minWidth
+                  : brandWidth))
           .clamp(minSelectorWidth, maxSelectorWidth)
           .toDouble();
 
   @override
   Widget build(BuildContext context) {
+    // The brand's own width depends on the font the system really draws ("Pindrel" in the Android serif is not as wide as in
+    // the font the widget tests use), so it is measured, not assumed: a constant was 9.7 px short on a 320 dp emulator.
+    final brand = AuthBrandRow.neededWidth(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         return Row(
@@ -91,6 +102,7 @@ class AuthBrandAndServerRow extends StatelessWidget {
               maxWidth: selectorWidthFor(
                 constraints.maxWidth,
                 maxSelectorWidth,
+                brand,
               ),
             ),
           ],
@@ -103,17 +115,39 @@ class AuthBrandAndServerRow extends StatelessWidget {
 class AuthBrandRow extends StatelessWidget {
   const AuthBrandRow({super.key});
 
-  /// Width of the brand and the name, without the tag (which shrinks with an ellipsis).
+  /// Smallest width the brand is given when nothing is measured (a floor, never less).
   static const minWidth = 132.0;
+
+  static const _logo = 36.0;
+  static const _gap = 10.0;
+
+  /// What is left of the tag when it has shrunk as far as it goes: padding (12), border (2) and an ellipsis (~6), with a margin.
+  static const _tagFloor = 24.0;
+
+  static const _nameSize = 24.0;
+
+  /// Width the brand needs to show the logo and the whole name with the tag shrunk to its floor, for the font and the text
+  /// scale the system really uses.
+  static double neededWidth(BuildContext context) {
+    final painter = TextPainter(
+      text: TextSpan(text: 'Pindrel', style: AppText.serif(_nameSize)),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final name = painter.width;
+    painter.dispose();
+    return _logo + _gap + name + _gap + _tagFloor;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         const LogoMark(),
-        const SizedBox(width: 10),
-        Text('Pindrel', style: AppText.serif(24)),
-        const SizedBox(width: 10),
+        const SizedBox(width: _gap),
+        Text('Pindrel', style: AppText.serif(_nameSize)),
+        const SizedBox(width: _gap),
         const Flexible(child: _Tag('SELF-HOSTED')),
       ],
     );

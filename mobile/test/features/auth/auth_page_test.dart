@@ -1001,7 +1001,8 @@ void main() {
             )
             .width;
 
-        await pumpApp(tester, width: 450, discovery: FakeDiscovery([longName]));
+        // 500, not 450: the test font draws "Pindrel" far wider than a real phone does, and the brand is measured now
+        await pumpApp(tester, width: 500, discovery: FakeDiscovery([longName]));
         final mobile = buttonWidth();
         expect(
           mobile,
