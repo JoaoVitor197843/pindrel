@@ -3,7 +3,7 @@
 O Pi **puxa** as versões novas: nada entra nele de fora, e ele não compila nada.
 
 ```
-push na main ─▶ espelho no GitHub ─▶ GitHub Actions ─▶ imagens amd64+arm64 no ghcr.io
+push na main ─▶ espelho no GitHub ─▶ GitHub Actions ─▶ imagens amd64+arm64 no Docker Hub
                                                           │
             timer do systemd no Pi (a cada 5 min) ◀───────┘  docker compose pull → up --wait → rollback
 ```
@@ -12,7 +12,7 @@ push na main ─▶ espelho no GitHub ─▶ GitHub Actions ─▶ imagens amd64
 
 | Peça | Onde | O quê |
 |---|---|---|
-| `.github/workflows/release-images.yml` | GitHub Actions | monta `pindrel` e `pindrel-gateway` (amd64 + arm64, sem emulação) e publica em `ghcr.io/joaovitor197843` com as tags `<commit completo>` e `latest` (e copia para o Docker Hub se houver o secret `DOCKERHUB_TOKEN`). Os testes continuam no Forgejo (`.forgejo/workflows/release.yml`) |
+| `.github/workflows/release-images.yml` | GitHub Actions | monta `pindrel` e `pindrel-gateway` (amd64 + arm64, sem emulação) e publica no Docker Hub (`joaovitor2753/...`) com as tags `<commit completo>` e `latest`. Os testes continuam no Forgejo (`.forgejo/workflows/release.yml`) |
 | `compose.registry.yml` | Pi | troca `build:` por `image:` do registry |
 | `deploy/update.sh` | Pi | baixa, recria, espera ficar saudável, volta atrás se não ficar |
 | `deploy/install-timer.sh` | Pi | instala o timer do systemd que roda o `update.sh` |
@@ -40,11 +40,11 @@ remove numa release seguinte) para a versão anterior sempre funcionar contra o 
 
 ## Preparar o registry (uma vez, no GitHub)
 
-1. Não precisa de token: o workflow usa o `GITHUB_TOKEN` do próprio GitHub Actions.
-2. Na primeira publicação os pacotes nascem **privados**: em GitHub > seu perfil > Packages, abra `pindrel` e `pindrel-gateway`
-   > Package settings > Change visibility > Public. Depois disso a Pi puxa sem login.
-3. Opcional, Docker Hub: secret `DOCKERHUB_TOKEN` (Read & Write) no repositório do GitHub; sem ele o passo é pulado.
-4. Para a Pi puxar de outro lugar (ex.: Docker Hub), ponha no `.env` dela `REGISTRY=docker.io` e `REGISTRY_OWNER=joaovitor2753`.
+1. Docker Hub > Account settings > Personal access tokens: crie um token **Read & Write**.
+2. Repositório no GitHub > Settings > Secrets and variables > Actions > New repository secret: `DOCKERHUB_TOKEN` = o token.
+   Sem ele o `release-images.yml` para logo no início com uma mensagem clara.
+3. Os repositórios `joaovitor2753/pindrel` e `joaovitor2753/pindrel-gateway` são públicos: a Pi puxa sem login.
+4. Para a Pi puxar de outro lugar, ponha no `.env` dela `REGISTRY` e `REGISTRY_OWNER` (o padrão é `docker.io` e `joaovitor2753`).
 
 ## Runner do PC
 
@@ -102,7 +102,7 @@ sed -i 's#^COMPOSE_FILE=.*#COMPOSE_FILE=compose.yml:compose.lb.yml:compose.regis
 #    ou, direto no contêiner, o mesmo que o `force` faz (tabela e linha no formato do golang-migrate):
 docker exec pindrel-postgres-1 sh -c 'psql -U $POSTGRES_USER -d $POSTGRES_DB -c "CREATE TABLE IF NOT EXISTS schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL); INSERT INTO schema_migrations SELECT 1, false WHERE NOT EXISTS (SELECT 1 FROM schema_migrations)"'
 
-# 4. primeira atualização (os pacotes do ghcr.io são públicos: sem login)
+# 4. primeira atualização (as imagens do Docker Hub são públicas: sem login)
 sh deploy/update.sh && sudo sh deploy/install-timer.sh
 ```
 
