@@ -3,7 +3,7 @@
 O Pi **puxa** as versões novas: nada entra nele de fora, e ele não compila nada.
 
 ```
-push na main ─▶ espelho no GitHub ─▶ GitHub Actions ─▶ imagens amd64+arm64 no Docker Hub
+push na main ─▶ testes no Forgejo ─▶ (todos verdes) ─▶ GitHub Actions ─▶ imagens amd64+arm64 no Docker Hub
                                                           │
             timer do systemd no Pi (a cada 5 min) ◀───────┘  docker compose pull → up --wait → rollback
 ```
@@ -12,7 +12,7 @@ push na main ─▶ espelho no GitHub ─▶ GitHub Actions ─▶ imagens amd64
 
 | Peça | Onde | O quê |
 |---|---|---|
-| `.github/workflows/release-images.yml` | GitHub Actions | monta `pindrel` e `pindrel-gateway` (amd64 + arm64, sem emulação) e publica no Docker Hub (`joaovitor2753/...`) com as tags `<commit completo>` e `latest`. Os testes continuam no Forgejo (`.forgejo/workflows/release.yml`) |
+| `.github/workflows/release-images.yml` | GitHub Actions | monta `pindrel` e `pindrel-gateway` (amd64 + arm64, sem emulação) e publica no Docker Hub (`joaovitor2753/...`) com as tags `<commit completo>` e `latest`. Os testes rodam no Forgejo (`.forgejo/workflows/release.yml`), que só pede o build ao GitHub se todos passarem |
 | `compose.registry.yml` | Pi | troca `build:` por `image:` do registry |
 | `deploy/update.sh` | Pi | baixa, recria, espera ficar saudável, volta atrás se não ficar |
 | `deploy/install-timer.sh` | Pi | instala o timer do systemd que roda o `update.sh` |
@@ -43,6 +43,8 @@ remove numa release seguinte) para a versão anterior sempre funcionar contra o 
 1. Docker Hub > Account settings > Personal access tokens: crie um token **Read & Write**.
 2. Repositório no GitHub > Settings > Secrets and variables > Actions > New repository secret: `DOCKERHUB_TOKEN` = o token.
    Sem ele o `release-images.yml` para logo no início com uma mensagem clara.
+   O Forgejo dispara esse workflow pela API: o secret `GH_RELEASE_TOKEN` do **Forgejo** (token fino do GitHub para este
+   repositório) precisa de **Contents: Read and write** e **Actions: Read and write**.
 3. Os repositórios `joaovitor2753/pindrel` e `joaovitor2753/pindrel-gateway` são públicos: a Pi puxa sem login.
 4. Para a Pi puxar de outro lugar, ponha no `.env` dela `REGISTRY` e `REGISTRY_OWNER` (o padrão é `docker.io` e `joaovitor2753`).
 
