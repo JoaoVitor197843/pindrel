@@ -30,13 +30,14 @@ RUN case "$TARGETARCH" in \
 ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static"
 # dependencies first, so source changes do not rebuild them
 COPY Cargo.toml Cargo.lock ./
-# One registry cache per target: buildx builds amd64 and arm64 at the same time, and two cargo processes unpacking the same crate
-# into one shared cache failed with "failed to unpack package ... .cargo-ok: File exists" (GitHub run 41782918100).
-RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETARCH} \
+# One registry cache per target, and locked: two cargo processes unpacking the same crate into a shared cache fail with
+# "failed to unpack package ... .cargo-ok: File exists". Per-target ids separate amd64 from arm64; sharing=locked also
+# serialises two builds of the same target running at once.
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETARCH},sharing=locked \
     mkdir src && echo '' > src/lib.rs && echo 'fn main() {}' > src/main.rs \
     && cargo build --release --locked --target "$(cat /rust-target)" ${FEATURES:+--features "$FEATURES"} && rm -rf src
 COPY src ./src
-RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETARCH} \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,id=cargo-registry-${TARGETARCH},sharing=locked \
     touch src/lib.rs src/main.rs && cargo build --release --locked --target "$(cat /rust-target)" ${FEATURES:+--features "$FEATURES"} \
     && cp "target/$(cat /rust-target)/release/gateway" /gateway
 
