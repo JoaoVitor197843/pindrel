@@ -146,6 +146,22 @@ sh deploy/update.sh
 - A RAM do gateway com HTTPS é de poucos MiB em repouso; o teto de 48 MiB do `compose.tls.yml` cobre ~1000 WebSockets.
 - O mDNS continua anunciando a porta comum; o app descobre a porta segura em `/server/info/`.
 
+## DNS da Pi com Tailscale
+
+O `git pull` do `update.sh` usa o nome do Forgejo no tailnet (`raspberry-joao.tail7a986c.ts.net`). Com o NetworkManager, o
+`/etc/resolv.conf` pode listar o DNS do roteador primeiro, que responde "no such host" a esse nome (e o resolvedor para aí,
+sem tentar o seguinte). Sintoma no `journalctl -u pindrel-update`: `Could not resolve host`. Correção (na Pi, com o nome do
+perfil Wi-Fi que `nmcli con show --active` mostra):
+
+```sh
+sudo nmcli con mod "<perfil>" ipv4.dns "100.100.100.100 <ip do roteador>" ipv4.ignore-auto-dns yes
+sudo nmcli dev reapply wlan0       # sem derrubar a conexão
+```
+
+O `100.100.100.100` resolve os nomes do tailnet e repassa o resto; o do roteador fica de reserva. Para desfazer:
+`sudo nmcli con mod "<perfil>" ipv4.dns "" ipv4.ignore-auto-dns no && sudo nmcli dev reapply wlan0`. Teste com uma reversão
+agendada (`systemd-run --on-active=240 ...`) antes de confiar, para não perder o acesso se algo der errado.
+
 ## Variáveis do `update.sh`
 
 `REGISTRY`, `REGISTRY_OWNER`, `PINDREL_TAG` (`latest`), `PINDREL_REPLICAS` (vazio: o que os compose definem), `WAIT_TIMEOUT` (120),
