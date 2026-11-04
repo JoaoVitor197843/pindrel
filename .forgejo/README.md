@@ -7,7 +7,7 @@ Um workflow por projeto, cada um só dispara quando os caminhos que ele cobre mu
 | `backend.yml` | `backend/**`, `shared/protos/**` | `ci` | `gofmt`, `go vet` | `go test` sem os que usam Postgres |
 | `web.yml` | `web/**`, `shared/protos/**` | `ci` | `yarn check` (svelte-check + tsc) | `vitest` (jsdom) |
 | `mobile.yml` | `mobile/**`, `shared/protos/**` | `ci-flutter` | `flutter analyze` | `flutter test` sem o que chama o servidor |
-| `release.yml` | push na `main` (`backend/**`, `web/**`, `gateway/**`, `Dockerfile`) | `build` | — | só chama os quatro de teste; as imagens amd64+arm64 são montadas no GitHub (`.github/workflows/release-images.yml`, ver `deploy/README.md`) |
+| `release.yml` | push na `main` (`backend/**`, `web/**`, `gateway/**`, `Dockerfile`) | `build` | — | chama os quatro de teste e, se todos passarem, pede ao GitHub o build das imagens amd64+arm64 (`dispatch-images.sh`, ver `deploy/README.md`) |
 
 ## Testes que dependem do servidor (não rodam no CI)
 
@@ -42,8 +42,11 @@ Os limites de Forgejo e runner estão no `compose.yml` do Forgejo no Pi (backup:
 ## Os testes da `main`
 
 Em push na `main` o `release.yml` **chama os quatro workflows de CI** (`uses: ./.forgejo/workflows/<x>.yml`; todos
-têm `on: workflow_call`) e nada mais. **Publicar não depende dele:** o GitHub monta as imagens assim que o espelho recebe o push, sem esperar
-estes testes; rode-os (aqui ou localmente) antes de empurrar para a `main`. O mesmo workflow roda em push na `dev`/PR (com filtro de
+têm `on: workflow_call`) e, só se todos passarem, o job `images` pede ao GitHub o build das imagens para aquele commit
+(`.forgejo/scripts/dispatch-images.sh`, que espera o espelho trazer o commit e chama a API do GitHub; o GitHub não alcança o
+Forgejo, que só existe no Tailscale). Teste vermelho = nenhuma imagem: a tag `latest` não muda e a Pi continua na versão que roda.
+O secret `GH_RELEASE_TOKEN` precisa de **Actions: Read and write** (além de Contents, que a cópia da release já usa).
+Teste do script: `sh .forgejo/scripts/test_dispatch_images.sh`. O mesmo workflow roda em push na `dev`/PR (com filtro de
 caminhos), e na `main` só pelo release (`branches-ignore: [main]` evita rodar em dobro).
 
 | Job | Onde | O quê |

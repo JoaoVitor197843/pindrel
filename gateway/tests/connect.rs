@@ -63,6 +63,8 @@ async fn started(tweak: impl FnOnce(&mut pindrel_gateway::config::Config)) -> (B
     let d = dir.0.clone();
     let gw = gateway_with(&[&a], move |c| {
         c.tls = Some(auto(port, &d));
+        // the default is `full` now; these tests are about the redirect mode unless they say otherwise
+        c.http_mode = HttpMode::Redirect;
         tweak(c);
     })
     .await;

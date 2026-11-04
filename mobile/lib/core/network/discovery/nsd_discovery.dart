@@ -218,6 +218,7 @@ class NsdDiscovery implements ServerDiscovery {
       ),
       port: port,
       id: serverIdFromTxt(service.txt),
+      tlsPort: tlsPortFromTxt(service.txt),
     );
   }
 }

@@ -92,6 +92,7 @@ class DiscoveredServer extends $pb.GeneratedMessage {
     $core.Iterable<$core.String>? addresses,
     $core.int? port,
     $core.String? id,
+    $core.int? tlsPort,
   }) {
     final result = DiscoveredServer._();
     if (name != null) result.name = name;
@@ -99,6 +100,7 @@ class DiscoveredServer extends $pb.GeneratedMessage {
     if (addresses != null) result.addresses.addAll(addresses);
     if (port != null) result.port = port;
     if (id != null) result.id = id;
+    if (tlsPort != null) result.tlsPort = tlsPort;
     return result;
   }
 
@@ -120,6 +122,7 @@ class DiscoveredServer extends $pb.GeneratedMessage {
     ..pPS(3, _omitFieldNames ? '' : 'addresses')
     ..aI(4, _omitFieldNames ? '' : 'port')
     ..aOS(5, _omitFieldNames ? '' : 'id')
+    ..aI(6, _omitFieldNames ? '' : 'tlsPort')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -184,6 +187,17 @@ class DiscoveredServer extends $pb.GeneratedMessage {
   $core.bool hasId() => $_has(4);
   @$pb.TagNumber(5)
   void clearId() => $_clearField(5);
+
+  /// Port of the server's HTTPS side (the `tls` entry of the mDNS record); 0 when it announces none. `port` stays the
+  /// plain HTTP port: a client that prefers HTTPS uses this one and falls back to `port`.
+  @$pb.TagNumber(6)
+  $core.int get tlsPort => $_getIZ(5);
+  @$pb.TagNumber(6)
+  set tlsPort($core.int value) => $_setSignedInt32(5, value);
+  @$pb.TagNumber(6)
+  $core.bool hasTlsPort() => $_has(5);
+  @$pb.TagNumber(6)
+  void clearTlsPort() => $_clearField(6);
 }
 
 class DiscoveredServers extends $pb.GeneratedMessage {

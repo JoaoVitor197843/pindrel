@@ -116,6 +116,51 @@ void main() {
 
     Uint8List bytes(String s) => Uint8List.fromList(utf8.encode(s));
 
+    test('a porta HTTPS do TXT do nsd: só portas válidas, o resto vira 0', () {
+      expect(tlsPortFromTxt({'tls': bytes('8443')}), 8443);
+      expect(tlsPortFromTxt({'id': bytes('abc'), 'tls': bytes('1024')}), 1024);
+      for (final bad in ['80', '1023', '65536', '-1', 'abc', '', '84 43', '8443.0', '0', '123456']) {
+        expect(tlsPortFromTxt({'tls': bytes(bad)}), 0, reason: bad);
+      }
+      expect(tlsPortFromTxt(null), 0);
+      expect(tlsPortFromTxt({}), 0);
+      expect(tlsPortFromTxt({'tls': null}), 0);
+      expect(tlsPortFromTxt({'tls': bytes('9' * 5000)}), 0);
+      expect(tlsPortFromTxt({'tls': Uint8List.fromList([0xff, 0xfe, 0x38])}), 0);
+    });
+
+    test('a porta HTTPS do texto do multicast_dns', () {
+      expect(tlsPortFromTxtText('name=Casa\nid=abc\ntls=8443'), 8443);
+      expect(tlsPortFromTxtText('tls=8443'), 8443);
+      expect(tlsPortFromTxtText('name=Casa\nid=abc'), 0);
+      expect(tlsPortFromTxtText(''), 0);
+      for (final bad in ['tls=80', 'tls=', 'tls=abc', 'tls=999999', 'tls=${'9' * 500}', 'xtls=8443']) {
+        expect(tlsPortFromTxtText(bad), 0, reason: bad);
+      }
+    });
+
+    test('o servidor com HTTPS oferece o endereço seguro; sem HTTPS só o comum', () {
+      const secure = DiscoveredServer(
+        name: 'Casa',
+        host: 'casa',
+        addresses: ['192.168.1.10'],
+        port: 8080,
+        tlsPort: 8443,
+      );
+      expect(secure.secureUri.toString(), 'https://192.168.1.10:8443');
+      expect(secure.baseUri.toString(), 'http://192.168.1.10:8080');
+      const plain = DiscoveredServer(
+        name: 'Casa',
+        host: 'casa',
+        addresses: ['192.168.1.10'],
+        port: 8080,
+      );
+      expect(plain.secureUri, isNull);
+      expect(plain.baseUri.toString(), 'http://192.168.1.10:8080');
+      expect(secure == plain, isFalse, reason: 'a porta HTTPS conta na igualdade');
+      expect(secure.hashCode == plain.hashCode, isFalse);
+    });
+
     test('do TXT do nsd: o id válido passa, o resto vira vazio', () {
       expect(
         serverIdFromTxt({'id': bytes('abc-1'), 'name': bytes('Casa')}),

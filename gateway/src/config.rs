@@ -23,7 +23,9 @@ pub struct TlsConfig {
 
 /// What the plain-HTTP port does when TLS is on. `Redirect`: only the public bootstrap routes answer (`/server/info/`,
 /// `/server/ca.pem`, `/server/connect/`, and a landing page at `/`); other GETs are sent to HTTPS and anything that could
-/// carry a password or a note (POST, WebSocket) is refused, so nothing private travels in clear. `Full`: as before.
+/// carry a password or a note (POST, WebSocket) is refused, so nothing private travels in clear. `Full` (the default): the
+/// plain port answers everything as if TLS were off, so a client that has no HTTPS side keeps working; clients that know
+/// the HTTPS side prefer it (the `tls` entry of the mDNS record and `x-pindrel-tls`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMode {
     Full,
@@ -97,7 +99,7 @@ impl Config {
             max_pairings: 6,
             ws_idle: Duration::from_secs(600),
             rate_limit: true,
-            http_mode: HttpMode::Redirect,
+            http_mode: HttpMode::Full,
             ws_allowed_origins: Vec::new(),
             client_ip: ClientIp::direct(),
             max_body: 1 << 20,
@@ -181,11 +183,11 @@ impl Config {
             }
         });
         let http_mode = match get("HTTP_MODE").as_deref() {
-            None | Some("redirect") => HttpMode::Redirect,
-            Some("full") => HttpMode::Full,
+            None | Some("full") => HttpMode::Full,
+            Some("redirect") => HttpMode::Redirect,
             Some(other) => {
-                errs.push(format!("HTTP_MODE: invalid value {other:?} (expected redirect or full)"));
-                HttpMode::Redirect
+                errs.push(format!("HTTP_MODE: invalid value {other:?} (expected full or redirect)"));
+                HttpMode::Full
             }
         };
         let ws_allowed_origins: Vec<String> = get("WS_ALLOWED_ORIGINS")
@@ -334,6 +336,20 @@ mod tests {
     fn blank_values_count_as_unset() {
         let c = load(&[("UPSTREAMS", "127.0.0.1:1"), ("SERVER_NAME", "   "), ("GATEWAY_PORT", "")]).unwrap();
         assert_eq!((c.server_name.as_str(), c.port), ("Pindrel", 8080));
+    }
+
+    #[test]
+    fn the_plain_port_answers_everything_by_default_and_redirect_is_opt_in() {
+        let base = [("UPSTREAMS", "127.0.0.1:1")];
+        assert_eq!(load(&base).unwrap().http_mode, HttpMode::Full);
+        let with = |v: &'static str| load(&[base[0], ("HTTP_MODE", v)]);
+        assert_eq!(with("full").unwrap().http_mode, HttpMode::Full);
+        assert_eq!(with("redirect").unwrap().http_mode, HttpMode::Redirect);
+        let errs = with("both").unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.contains("HTTP_MODE") && e.contains("full or redirect")),
+            "{errs:?}"
+        );
     }
 
     #[test]

@@ -453,7 +453,7 @@ async fn the_number_of_rooms_is_configurable() {
 #[tokio::test]
 async fn the_app_side_happens_only_over_https_and_nothing_at_all_through_a_tunnel() {
     // plain port, redirect mode: the phone's calls are refused before reaching the route; the page's are allowed
-    let r = rig(|_| {}).await;
+    let r = rig(|c| c.http_mode = HttpMode::Redirect).await;
     for path in [
         "/server/pair/start",
         "/server/pair/reveal",

@@ -2,7 +2,9 @@
 # (joaovitor2753/pindrel and joaovitor2753/pindrel-gateway). The Raspberry Pi pulls them by itself (deploy/update.sh).
 #
 # - GitHub reads only .github/workflows (the Forgejo reads .forgejo/workflows); this repository is a push mirror of the
-#   Forgejo, so a push to main there ends up here and starts this workflow. The Forgejo keeps the tests.
+#   Forgejo. The Forgejo runs the tests and, only when they all pass, starts THIS workflow through the API
+#   (.forgejo/scripts/dispatch-images.sh) with the commit to build, so a push alone never publishes anything. It can also be
+#   run by hand here (Actions > release-images > Run workflow) with a full commit sha.
 # - No emulation: the Dockerfiles cross-compile (Go and Rust in the build machine's stage; the final stage has no RUN).
 # - Needs ONE repository secret (Settings > Secrets and variables > Actions): DOCKERHUB_TOKEN, a Docker Hub access token
 #   with Read & Write (Account settings > Personal access tokens). Without it the run stops at once with a clear message.
@@ -11,17 +13,14 @@
 name: release-images
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-    paths:
-      - "backend/**"
-      - "web/**"
-      - "gateway/**"
-      - "shared/protos/**"
-      - "Dockerfile"
-      - ".github/workflows/release-images.yml"
   workflow_dispatch:
+    inputs:
+      sha:
+        description: "Full sha (40 characters) of the commit to build; it must already be on this repository"
+        required: true
+        type: string
+  push:
+    tags: ["v*"]
 
 # two publications at the same time would fight over the `latest` tag
 concurrency:
@@ -41,7 +40,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - name: Conferir o sha
+        env:
+          SHA: ${{ inputs.sha }}
+        run: |
+          case "$SHA" in *[!0-9a-f]* | "") echo "sha inválido"; exit 1;; esac
+          [ "${#SHA}" -eq 40 ] || { echo "o sha precisa ter 40 caracteres"; exit 1; }
+
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -60,7 +68,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.HUB }}/pindrel:${{ github.sha }}
+            ${{ env.HUB }}/pindrel:${{ inputs.sha }}
             ${{ env.HUB }}/pindrel:latest
           labels: |
             org.opencontainers.image.source=${{ env.SOURCE }}
@@ -76,7 +84,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.HUB }}/pindrel-gateway:${{ github.sha }}
+            ${{ env.HUB }}/pindrel-gateway:${{ inputs.sha }}
             ${{ env.HUB }}/pindrel-gateway:latest
           labels: |
             org.opencontainers.image.source=${{ env.SOURCE }}

@@ -25,6 +25,11 @@ export interface DiscoveredServer {
    * longer the same server it opened before.
    */
   id: string;
+  /**
+   * Port of the server's HTTPS side (the `tls` entry of the mDNS record); 0 when it announces none. `port` stays the
+   * plain HTTP port: a client that prefers HTTPS uses this one and falls back to `port`.
+   */
+  tlsPort: number;
 }
 
 export interface DiscoveredServers {
@@ -121,7 +126,7 @@ export const ServerInfo: MessageFns<ServerInfo> = {
 };
 
 function createBaseDiscoveredServer(): DiscoveredServer {
-  return { name: "", host: "", addresses: [], port: 0, id: "" };
+  return { name: "", host: "", addresses: [], port: 0, id: "", tlsPort: 0 };
 }
 
 export const DiscoveredServer: MessageFns<DiscoveredServer> = {
@@ -140,6 +145,9 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
     }
     if (message.id !== "") {
       writer.uint32(42).string(message.id);
+    }
+    if (message.tlsPort !== 0) {
+      writer.uint32(48).int32(message.tlsPort);
     }
     return writer;
   },
@@ -197,6 +205,14 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
             message.id = reader.string();
             continue;
           }
+          case 6: {
+            if (tag !== 48) {
+              break;
+            }
+
+            message.tlsPort = reader.int32();
+            continue;
+          }
         }
         if ((tag & 7) === 4 || tag === 0) {
           break;
@@ -218,6 +234,11 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
         : [],
       port: isSet(object.port) ? globalThis.Number(object.port) : 0,
       id: isSet(object.id) ? globalThis.String(object.id) : "",
+      tlsPort: isSet(object.tlsPort)
+        ? globalThis.Number(object.tlsPort)
+        : isSet(object.tls_port)
+        ? globalThis.Number(object.tls_port)
+        : 0,
     };
   },
 
@@ -238,6 +259,9 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
     if (message.id !== "") {
       obj.id = message.id;
     }
+    if (message.tlsPort !== 0) {
+      obj.tlsPort = Math.round(message.tlsPort);
+    }
     return obj;
   },
 
@@ -251,6 +275,7 @@ export const DiscoveredServer: MessageFns<DiscoveredServer> = {
     message.addresses = object.addresses?.map((e) => e) || [];
     message.port = object.port ?? 0;
     message.id = object.id ?? "";
+    message.tlsPort = object.tlsPort ?? 0;
     return message;
   },
 };
