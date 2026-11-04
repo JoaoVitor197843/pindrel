@@ -1,13 +1,11 @@
-# Images: builds Pindrel's API (with the embedded web) and the gateway for amd64 and arm64 and publishes them to the
-# GitHub Container Registry (ghcr.io/joaovitor197843/...). The Raspberry Pi pulls them by itself (deploy/update.sh).
+# Images: builds Pindrel's API (with the embedded web) and the gateway for amd64 and arm64 and publishes them to Docker Hub
+# (joaovitor2753/pindrel and joaovitor2753/pindrel-gateway). The Raspberry Pi pulls them by itself (deploy/update.sh).
 #
 # - GitHub reads only .github/workflows (the Forgejo reads .forgejo/workflows); this repository is a push mirror of the
 #   Forgejo, so a push to main there ends up here and starts this workflow. The Forgejo keeps the tests.
 # - No emulation: the Dockerfiles cross-compile (Go and Rust in the build machine's stage; the final stage has no RUN).
-# - GHCR needs no secret: GITHUB_TOKEN is enough. Docker Hub is optional: with the repository secret DOCKERHUB_TOKEN
-#   (Read & Write) the same images (same digest) are copied there too, as joaovitor2753/...
-# - The first publication creates the packages PRIVATE: make both public once (GitHub > profile > Packages > the package >
-#   Package settings > Change visibility), otherwise the Pi would need a login to pull them.
+# - Needs ONE repository secret (Settings > Secrets and variables > Actions): DOCKERHUB_TOKEN, a Docker Hub access token
+#   with Read & Write (Account settings > Personal access tokens). Without it the run stops at once with a clear message.
 # - A `v*` tag (pushed by hand, see CLAUDE.md) does not build anything: it adds the version tags to the images of ITS commit,
 #   which must already exist (run this workflow on main first).
 name: release-images
@@ -31,13 +29,11 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GHCR_OWNER: joaovitor197843
-  DOCKERHUB_OWNER: joaovitor2753
+  HUB: joaovitor2753
   SOURCE: https://github.com/JoaoVitor197843/pindrel
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   images:
@@ -49,11 +45,12 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Login no Docker Hub
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          [ -n "$DOCKERHUB_TOKEN" ] || { echo "falta o secret DOCKERHUB_TOKEN (Settings > Secrets and variables > Actions)"; exit 1; }
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$HUB" --password-stdin
 
       - name: API + web
         uses: docker/build-push-action@v6
@@ -63,8 +60,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ env.GHCR_OWNER }}/pindrel:${{ github.sha }}
-            ghcr.io/${{ env.GHCR_OWNER }}/pindrel:latest
+            ${{ env.HUB }}/pindrel:${{ github.sha }}
+            ${{ env.HUB }}/pindrel:latest
           labels: |
             org.opencontainers.image.source=${{ env.SOURCE }}
             org.opencontainers.image.licenses=AGPL-3.0-only
@@ -79,8 +76,8 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ghcr.io/${{ env.GHCR_OWNER }}/pindrel-gateway:${{ github.sha }}
-            ghcr.io/${{ env.GHCR_OWNER }}/pindrel-gateway:latest
+            ${{ env.HUB }}/pindrel-gateway:${{ github.sha }}
+            ${{ env.HUB }}/pindrel-gateway:latest
           labels: |
             org.opencontainers.image.source=${{ env.SOURCE }}
             org.opencontainers.image.licenses=AGPL-3.0-only
@@ -90,21 +87,8 @@ jobs:
       - name: Conferir as duas arquiteturas
         run: |
           for name in pindrel pindrel-gateway; do
-            docker buildx imagetools inspect "ghcr.io/$GHCR_OWNER/$name:latest" | tee /tmp/inspect.txt
+            docker buildx imagetools inspect "$HUB/$name:latest" | tee /tmp/inspect.txt
             grep -q 'linux/amd64' /tmp/inspect.txt && grep -q 'linux/arm64' /tmp/inspect.txt
-          done
-
-      # After GHCR on purpose: the Pi must never wait for Docker Hub. Same digest, nothing is built twice.
-      - name: Copiar para o Docker Hub (se houver o secret)
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          [ -n "$DOCKERHUB_TOKEN" ] || { echo "sem DOCKERHUB_TOKEN: Docker Hub não atualizado"; exit 0; }
-          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_OWNER" --password-stdin
-          for name in pindrel pindrel-gateway; do
-            docker buildx imagetools create \
-              -t "$DOCKERHUB_OWNER/$name:$GITHUB_SHA" -t "$DOCKERHUB_OWNER/$name:latest" \
-              "ghcr.io/$GHCR_OWNER/$name:$GITHUB_SHA"
           done
 
   version-tags:
@@ -114,31 +98,20 @@ jobs:
     steps:
       - uses: docker/setup-buildx-action@v3
 
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Tags de versão nas imagens do commit
         env:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
+          [ -n "$DOCKERHUB_TOKEN" ] || { echo "falta o secret DOCKERHUB_TOKEN"; exit 1; }
+          echo "$DOCKERHUB_TOKEN" | docker login -u "$HUB" --password-stdin
           version=${GITHUB_REF_NAME#v}
           # 1.2.3 -> also 1.2; a pre-release (1.2.3-rc1) only gets its own tag
           extra=""
           case $version in *-*) ;; *) extra="${version%.*}" ;; esac
-          repos="ghcr.io/$GHCR_OWNER"
-          if [ -n "$DOCKERHUB_TOKEN" ]; then
-            echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_OWNER" --password-stdin
-            repos="$repos $DOCKERHUB_OWNER"
-          fi
           for name in pindrel pindrel-gateway; do
-            docker buildx imagetools inspect "ghcr.io/$GHCR_OWNER/$name:$GITHUB_SHA" >/dev/null 2>&1 \
+            docker buildx imagetools inspect "$HUB/$name:$GITHUB_SHA" >/dev/null 2>&1 \
               || { echo "não há imagem $name:$GITHUB_SHA: rode o release-images na main antes de marcar a versão"; exit 1; }
-            for repo in $repos; do
-              tags="-t $repo/$name:$version"
-              [ -z "$extra" ] || tags="$tags -t $repo/$name:$extra"
-              docker buildx imagetools create $tags "ghcr.io/$GHCR_OWNER/$name:$GITHUB_SHA"
-            done
+            tags="-t $HUB/$name:$version"
+            [ -z "$extra" ] || tags="$tags -t $HUB/$name:$extra"
+            docker buildx imagetools create $tags "$HUB/$name:$GITHUB_SHA"
           done
