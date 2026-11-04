@@ -86,6 +86,7 @@ impl Backend {
                     let svc = service_fn(move |req| backend_handler(id, req));
                     let _ = hyper::server::conn::http1::Builder::new()
                         .serve_connection(TokioIo::new(s), svc)
+                        .with_upgrades()
                         .await;
                 });
             }
@@ -135,15 +136,35 @@ impl Backend {
     }
 }
 
-async fn backend_handler(id: &'static str, req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
+async fn backend_handler(id: &'static str, mut req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
     let h = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let (xff, te, upgrade, conn, ctype) = (h("x-forwarded-for"), h("te"), h("upgrade"), h("connection"), h("content-type"));
+    let proto = h("x-forwarded-proto");
     let claims = ["forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"].map(h).concat();
     let (method, pq) = (
         req.method().to_string(),
         req.uri().path_and_query().map(|p| p.to_string()).unwrap_or_default(),
     );
     let path = req.uri().path().to_string();
+    // /ws accepts a WebSocket upgrade and echoes the bytes it receives (the frames themselves are not parsed)
+    if path == "/ws" && req.headers().contains_key("upgrade") {
+        let on = hyper::upgrade::on(&mut req);
+        tokio::spawn(async move {
+            if let Ok(up) = on.await {
+                let (mut r, mut w) = tokio::io::split(TokioIo::new(up));
+                let _ = tokio::io::copy(&mut r, &mut w).await;
+            }
+        });
+        return Ok(Response::builder()
+            .status(StatusCode::SWITCHING_PROTOCOLS)
+            .header("connection", "Upgrade")
+            .header("upgrade", "websocket")
+            .header("sec-websocket-accept", "test-accept")
+            .header("x-backend", id)
+            .header("x-seen-xff", xff)
+            .body(Full::new(Bytes::new()))
+            .unwrap());
+    }
     let body = req.into_body().collect().await.map(|b| b.to_bytes()).unwrap_or_default();
     if path == "/slow" {
         time::sleep(Duration::from_millis(800)).await;
@@ -161,6 +182,7 @@ async fn backend_handler(id: &'static str, req: Request<Incoming>) -> Result<Res
     Ok(res
         .header("x-backend", id)
         .header("x-seen-xff", xff)
+        .header("x-seen-proto", proto)
         .header("x-seen-claims", claims)
         .header("x-seen-method", method)
         .header("x-seen-path", pq)

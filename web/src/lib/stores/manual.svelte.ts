@@ -1,4 +1,6 @@
-import { findServer, errorText, MAX_NAME_LENGTH, reach } from '../api/serverCheck'
+import { untrack } from 'svelte'
+import { findServer, inspect, MAX_NAME_LENGTH, reach } from '../api/serverCheck'
+import { errorText } from '../api/serverCheckText'
 
 export { reach }
 import { remember, trustOf } from './trust'
@@ -12,6 +14,27 @@ export const MAX_MANUAL = 16
 const POLL_MS = 15_000
 /** Like the page's own server: one lost packet does not bring the dot down, two in a row do. */
 const FAILURES = 2
+/** At most this many checks in flight: 16 servers must not open 16 sockets at once on a weak device. */
+const CONCURRENCY = 4
+/** Every Nth round also reads who answers (the id), not only that someone does: ~1 per minute. */
+const STRONG_EVERY = 4
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  const worker = async () => {
+    for (;;) {
+      const i = next++
+      if (i >= items.length) return
+      out[i] = await fn(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
+}
+
+/** `other`: something answers there, but it is not the server that was saved. */
+type Probe = 'up' | 'down' | 'other'
 
 export interface ManualServer {
   /** Stable and unique: the origin. */
@@ -25,6 +48,8 @@ export interface ManualServer {
   url: string
   /** `host[:port]` */
   address: string
+  /** Only when the server has a secure side this browser does not trust yet: the page that explains how to connect. */
+  connectUrl?: string
 }
 
 export type ManualHealth = 'connected' | 'disconnected'
@@ -39,12 +64,22 @@ function valid(e: unknown): e is ManualServer {
       (u.protocol === 'http:' || u.protocol === 'https:') &&
       u.origin === m.url &&
       m.id === m.url &&
+      (m.connectUrl === undefined || (typeof m.connectUrl === 'string' && sameHostPage(m.connectUrl, u))) &&
       m.address === u.host &&
       (m.name as string).length > 0 &&
       (m.name as string).length <= MAX_NAME_LENGTH &&
       (m.trustName as string).length > 0 &&
       (m.trustName as string).length <= MAX_NAME_LENGTH
     )
+  } catch {
+    return false
+  }
+}
+
+function sameHostPage(connectUrl: string, server: URL): boolean {
+  try {
+    const c = new URL(connectUrl)
+    return (c.protocol === 'http:' || c.protocol === 'https:') && c.hostname === server.hostname && c.pathname === '/server/connect/'
   } catch {
     return false
   }
@@ -93,19 +128,30 @@ export class ManualServers {
       if (this.list.length >= MAX_MANUAL) return { ok: false, error: `Limite de ${MAX_MANUAL} servidores adicionados.` }
       const found = await findServer(input, signal)
       if (!found.ok) return { ok: false, error: signal?.aborted ? 'Cancelado.' : errorText(found) }
-      if (found.origin === window.location.origin) return { ok: false, error: 'Este é o servidor desta página.' }
-      if (this.list.some((s) => s.id === found.origin)) return { ok: false, error: 'Este servidor já foi adicionado.' }
+      // The server has a secure side: use it when this browser already trusts it; otherwise keep the plain address and
+      // remember the page that explains how to connect securely (the certificate is installed once per device).
+      let origin = found.origin
+      let connectUrl: string | undefined
+      if (found.tlsPort && origin.startsWith('http:')) {
+        const u = new URL(origin)
+        const secure = await inspect(`https://${u.hostname.includes(':') ? `[${u.hostname.replace(/^\[|\]$/g, '')}]` : u.hostname}:${found.tlsPort}`, signal)
+        if (secure.ok && secure.serverId === found.serverId) origin = secure.origin
+        else connectUrl = `${origin}/server/connect/`
+      }
+      if (origin === window.location.origin || found.origin === window.location.origin) return { ok: false, error: 'Este é o servidor desta página.' }
+      if (this.list.some((s) => s.id === origin || s.id === found.origin)) return { ok: false, error: 'Este servidor já foi adicionado.' }
       if (this.list.some((s) => s.serverId === found.serverId)) {
         return { ok: false, error: 'Este servidor já foi adicionado com outro endereço.' }
       }
       if (this.list.length >= MAX_MANUAL) return { ok: false, error: `Limite de ${MAX_MANUAL} servidores adicionados.` }
       const server: ManualServer = {
-        id: found.origin,
+        id: origin,
         name: cleanName(name) || found.name,
         trustName: found.name,
         serverId: found.serverId,
-        url: found.origin,
-        address: new URL(found.origin).host,
+        url: origin,
+        address: new URL(origin).host,
+        ...(connectUrl ? { connectUrl } : {}),
       }
       // an id that differs from the one this name had must not be learned silently: opening it will ask
       if (trustOf(server.trustName, server.serverId) !== 'changed') remember(server.trustName, server.serverId)
@@ -135,15 +181,35 @@ export class ManualServers {
     write(this.list)
   }
 
-  async check(): Promise<void> {
+  async #probe(s: ManualServer, strong: boolean): Promise<Probe> {
+    if (strong) {
+      const r = await inspect(s.url)
+      if (r.ok) return r.serverId === s.serverId ? 'up' : 'other'
+      if (r.reason === 'invalid') return 'other'
+      if (r.reason !== 'blocked') return 'down'
+      // an older gateway the browser may not read: fall back to "someone answers"
+    }
+    return (await reach(s.url)) ? 'up' : 'down'
+  }
+
+  /**
+   * [strong] also compares the id the server gives now with the saved one, so another machine that took over the
+   * address does not keep a green dot. It is shown as disconnected; opening it asks, like any other change.
+   */
+  async check(strong = false): Promise<void> {
     const servers = this.list
-    const results = await Promise.all(servers.map(async (s) => [s.id, await reach(s.url)] as const))
+    const results = await mapLimit(servers, CONCURRENCY, async (s) => [s.id, await this.#probe(s, strong)] as const)
     const next: Record<string, ManualHealth> = { ...this.health }
-    for (const [id, up] of results) {
+    for (const [id, probe] of results) {
       if (!this.list.some((s) => s.id === id)) continue // removed while it was being checked
-      const failures = up ? 0 : (this.#failures.get(id) ?? 0) + 1
+      const failures = probe === 'up' ? 0 : probe === 'other' ? FAILURES : (this.#failures.get(id) ?? 0) + 1
       this.#failures.set(id, failures)
-      next[id] = up ? 'connected' : failures >= FAILURES || this.health[id] === 'disconnected' ? 'disconnected' : (this.health[id] ?? 'connected')
+      next[id] =
+        probe === 'up'
+          ? 'connected'
+          : failures >= FAILURES || this.health[id] === 'disconnected'
+            ? 'disconnected'
+            : (this.health[id] ?? 'connected')
     }
     this.health = next
   }
@@ -153,12 +219,13 @@ export class ManualServers {
     let timer: ReturnType<typeof setTimeout> | undefined
     let stopped = false
     let running = false
+    let round = 0
     const tick = async () => {
       if (running) return
       running = true
       clearTimeout(timer)
       try {
-        if (!document.hidden && this.list.length) await this.check()
+        if (!document.hidden && this.list.length) await this.check(round++ % STRONG_EVERY === 0)
       } finally {
         running = false
       }
@@ -167,7 +234,8 @@ export class ManualServers {
     const wake = () => void tick()
     window.addEventListener('online', wake)
     document.addEventListener('visibilitychange', wake)
-    void tick()
+    // called from an `$effect`: reading the list here must not make the effect rerun (and re-check) on every add/remove
+    untrack(() => void tick())
     return () => {
       stopped = true
       clearTimeout(timer)

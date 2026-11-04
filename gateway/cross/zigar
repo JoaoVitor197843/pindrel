@@ -1,0 +1,3 @@
+#!/bin/sh
+# The archiver that goes with zigcc-aarch64 (AR_aarch64_unknown_linux_musl).
+exec zig ar "$@"

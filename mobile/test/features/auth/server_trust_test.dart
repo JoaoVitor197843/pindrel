@@ -110,4 +110,31 @@ void main() {
       expect(t.trustOf('Outro', 'x'), Trust.unknown);
     },
   );
+
+  group('forget', () {
+    test('esquece o nome, e isso fica guardado', () async {
+      final store = MemoryKeyValueStore();
+      final trust = ServerTrust(store);
+      await trust.remember('Casa', 'aaa');
+      await trust.remember('Nuvem', 'nnn');
+      await trust.forget('Casa');
+      expect(trust.trustOf('Casa', 'aaa'), Trust.unknown);
+      expect(trust.trustOf('Nuvem', 'nnn'), Trust.same);
+      final again = ServerTrust(store);
+      await again.load();
+      expect(again.trustOf('Casa', 'aaa'), Trust.unknown);
+      expect(again.trustOf('Nuvem', 'nnn'), Trust.same);
+    });
+
+    test('esquecer o que não se conhece, ou duas vezes, não faz nada nem escreve', () async {
+      final store = MemoryKeyValueStore();
+      final trust = ServerTrust(store);
+      await trust.forget('Fantasma');
+      expect(store.data, isEmpty);
+      await trust.remember('Casa', 'aaa');
+      await trust.forget('Casa');
+      await trust.forget('Casa');
+      expect(trust.trustOf('Casa', 'aaa'), Trust.unknown);
+    });
+  });
 }
