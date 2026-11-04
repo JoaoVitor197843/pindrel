@@ -27,7 +27,7 @@ pub fn error_http(code: &str, message: &str) -> Vec<u8> {
 }
 
 /// DiscoveredServers { repeated DiscoveredServer servers = 1 }
-/// DiscoveredServer { name = 1; host = 2; repeated addresses = 3; int32 port = 4; id = 5 }
+/// DiscoveredServer { name = 1; host = 2; repeated addresses = 3; int32 port = 4; id = 5; int32 tls_port = 6 }
 pub fn discovered_servers(list: &[Server]) -> Vec<u8> {
     let mut out = Vec::new();
     for s in list {
@@ -41,6 +41,10 @@ pub fn discovered_servers(list: &[Server]) -> Vec<u8> {
         varint(s.port as usize, &mut e);
         if !s.id.is_empty() {
             field(0x2a, s.id.as_bytes(), &mut e);
+        }
+        if s.tls_port != 0 {
+            e.push(0x30);
+            varint(s.tls_port as usize, &mut e);
         }
         field(0x0a, &e, &mut out);
     }
@@ -101,7 +105,8 @@ fn text(b: &[u8]) -> Option<String> {
 
 fn server(b: &[u8]) -> Option<Server> {
     let mut r = Reader(b);
-    let (mut name, mut host, mut id, mut ips, mut port) = (String::new(), String::new(), String::new(), Vec::new(), 0u16);
+    let (mut name, mut host, mut id, mut ips, mut port, mut tls_port) =
+        (String::new(), String::new(), String::new(), Vec::new(), 0u16, 0u16);
     while !r.0.is_empty() {
         let tag = r.varint()?;
         match (tag >> 3, tag & 7) {
@@ -115,6 +120,8 @@ fn server(b: &[u8]) -> Option<Server> {
             }
             (4, 0) => port = u16::try_from(r.varint()?).ok()?,
             (5, 2) => id = text(r.bytes()?)?,
+            // a bad HTTPS port only means "no HTTPS announced"; it must not throw the whole server away
+            (6, 0) => tls_port = u16::try_from(r.varint()?).ok().filter(|p| *p >= 1024).unwrap_or(0),
             (_, wire) => r.skip(wire)?,
         }
     }
@@ -124,6 +131,7 @@ fn server(b: &[u8]) -> Option<Server> {
         id: if valid_id(&id) { id } else { String::new() },
         ips,
         port,
+        tls_port,
     })
 }
 
@@ -186,6 +194,7 @@ mod tests {
             id: String::new(),
             ips: vec!["192.168.1.10".into(), "10.0.0.5".into()],
             port,
+            tls_port: 0,
         }
     }
 
@@ -229,6 +238,7 @@ mod tests {
                 id: "0123456789abcdef0123456789abcdef".into(),
                 ips: vec!["192.168.1.10".into(), "10.0.0.5".into()],
                 port: 8080,
+                tls_port: 0,
             },
             Server {
                 name: "Servidor".into(),
@@ -236,9 +246,29 @@ mod tests {
                 id: String::new(),
                 ips: vec!["192.168.1.20".into()],
                 port: 39215,
+                tls_port: 8443,
             },
         ];
         assert_eq!(discovered_servers(&list), want);
+    }
+
+    #[test]
+    fn an_https_port_travels_and_a_bad_one_only_means_no_https() {
+        let mut with = server("Casa", 8080);
+        with.tls_port = 8443;
+        let list = vec![with.clone(), server("Sem", 8080)];
+        assert_eq!(parse_discovered_servers(&discovered_servers(&list)), Some(list));
+        // field 6 as 80 (a privileged port), 70000 (does not fit) and 0: the server stays, without HTTPS
+        for bad in [80usize, 70000, 0] {
+            let mut e = Vec::new();
+            field(0x0a, b"N", &mut e);
+            e.extend_from_slice(&[0x20, 0x50, 0x30]);
+            varint(bad, &mut e);
+            let mut b = Vec::new();
+            field(0x0a, &e, &mut b);
+            let got = parse_discovered_servers(&b).unwrap_or_else(|| panic!("tls_port {bad} dropped the server"));
+            assert_eq!((got[0].port, got[0].tls_port), (80, 0), "tls_port {bad}");
+        }
     }
 
     #[test]

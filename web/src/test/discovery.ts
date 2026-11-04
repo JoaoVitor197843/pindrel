@@ -7,6 +7,7 @@ export const found = (name: string, ip = '192.168.0.20', port = 8095, id = ''): 
   host: `${name.toLowerCase()}-host`,
   addresses: [ip],
   port,
+  tlsPort: 0,
 })
 
 /** Makes `GET /server/discover/` answer [servers] in protobuf; the rest (probe) answers 200. */

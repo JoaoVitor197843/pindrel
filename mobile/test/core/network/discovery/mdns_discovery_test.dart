@@ -47,12 +47,14 @@ MdnsFound found(
   String ip = '192.168.1.10',
   int port = 8080,
   String id = '',
+  int tlsPort = 0,
 }) => MdnsFound(
   name: name,
   host: '$name-host',
   port: port,
   addresses: [ip],
   id: id,
+  tlsPort: tlsPort,
 );
 
 const _interval = Duration(milliseconds: 20);
@@ -115,6 +117,23 @@ void main() {
     expect(
       {for (final s in emitted.last) s.name: s.id},
       {'Casa': 'abc123', 'Falso': '', 'Velho': ''},
+    );
+  });
+
+  test('a porta HTTPS do TXT chega ao servidor e uma porta inútil vira 0', () async {
+    final api = FakeMdnsApi([
+      [
+        found('Seguro', ip: '10.0.0.1', tlsPort: 8443),
+        found('Baixa', ip: '10.0.0.2', tlsPort: 80),
+        found('Grande', ip: '10.0.0.3', tlsPort: 70000),
+        found('Comum', ip: '10.0.0.4'),
+      ],
+    ]);
+    await listen(make(api));
+    await wait(60);
+    expect(
+      {for (final s in emitted.last) s.name: s.tlsPort},
+      {'Seguro': 8443, 'Baixa': 0, 'Grande': 0, 'Comum': 0},
     );
   });
 
