@@ -4,8 +4,8 @@
 # `!reset null` drops the build sections, so this host never compiles anything.
 services:
   pindrel:
-    image: ${REGISTRY:-git.example.com}/${REGISTRY_OWNER:-owner}/pindrel:${PINDREL_TAG:-latest}
+    image: ${REGISTRY:-ghcr.io}/${REGISTRY_OWNER:-joaovitor197843}/pindrel:${PINDREL_TAG:-latest}
     build: !reset null
   gateway:
-    image: ${REGISTRY:-git.example.com}/${REGISTRY_OWNER:-owner}/pindrel-gateway:${PINDREL_TAG:-latest}
+    image: ${REGISTRY:-ghcr.io}/${REGISTRY_OWNER:-joaovitor197843}/pindrel-gateway:${PINDREL_TAG:-latest}
     build: !reset null

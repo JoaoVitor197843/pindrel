@@ -18,7 +18,7 @@
 
 main() {
   cd "$(dirname "$0")/.."
-  : "${REGISTRY:=git.example.com}" "${REGISTRY_OWNER:=owner}" "${PINDREL_TAG:=latest}"
+  : "${REGISTRY:=ghcr.io}" "${REGISTRY_OWNER:=joaovitor197843}" "${PINDREL_TAG:=latest}"
   : "${PINDREL_REPLICAS:=}" "${WAIT_TIMEOUT:=120}" "${PINDREL_STATE_DIR:=./.deploy-state}" "${UPDATE_GIT:=1}"
   export REGISTRY REGISTRY_OWNER PINDREL_TAG
 
