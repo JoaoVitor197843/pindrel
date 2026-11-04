@@ -1,6 +1,6 @@
 # Resultados (segunda rodada: carga mista, perda de pacotes, Flutter, WebSocket, RAM)
 
-> Nota: o HTTP/3 medido aqui foi removido do gateway depois (decisão do dono: sem ganho que compense numa LAN). O código está no histórico do git (`gateway/src/h3.rs`, até o commit aae0cbd).
+> Nota: o HTTP/3 medido aqui foi removido do gateway depois (decisão do dono: sem ganho que compense numa LAN). O código está no histórico do git (`gateway/src/h3.rs`, até o commit aae0cbd). Os scripts estão em `tools/https-bench/` (ver o README ao lado); os de `Alt-Svc` e de pareamento/pin desta fase foram apagados, porque o pareamento de verdade está em `gateway/src/pairing.rs` e no app.
 
 Máquina de desenvolvimento, Chrome 156 headless, gateway Rust do branch, réplicas Go reais. Latência e perda vêm de
 `latproxy.mjs` (TCP: perda vira atraso por timeout com a ordem mantida, ou seja, bloqueio de cabeça de fila, sem

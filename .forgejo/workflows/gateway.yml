@@ -27,7 +27,7 @@ jobs:
     runs-on: build
     container:
       image: ci-pc:1
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: gateway
@@ -45,8 +45,11 @@ jobs:
       - name: Análise — rustfmt
         run: cargo fmt --check
 
+      # the plain gateway, and with every optional feature (HTTPS, its own CA, the pairing): both ship
       - name: Análise — clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: |
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo clippy --locked --all-targets --all-features -- -D warnings
 
       # cargo audit clones the whole history of the advisory database and that clone does not finish from the PC's
       # network (measured: a full clone did not end in 120 s, a shallow one takes seconds), which failed the job twice.
@@ -67,10 +70,17 @@ jobs:
           done
 
       - name: Testes (unitários, integração, binário e mDNS)
-        run: cargo test --locked
+        run: |
+          cargo test --locked
+          cargo test --locked --all-features
 
+      - name: Testes dos scripts de compilação cruzada (arm64)
+        working-directory: gateway
+        run: sh cross/test_zigcc.sh
+
+      # what the image ships (the Dockerfile builds it with the `selfcert` feature)
       - name: Compila em release (perfil de produção)
-        run: cargo build --release --locked
+        run: cargo build --release --locked --features selfcert
 
       - name: Tamanho e pico de memória do job
         if: always()
