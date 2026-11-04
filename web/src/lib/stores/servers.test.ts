@@ -81,15 +81,15 @@ describe('anúncios', () => {
       url: 'http://10.0.0.5:8095',
       serverId: '',
     })
-    expect(toOption({ name: 'X', host: 'pi', id: '', addresses: ['127.0.0.1'], port: 80 })?.address).toBe('pi.local:80')
+    expect(toOption({ name: 'X', host: 'pi', id: '', addresses: ['127.0.0.1'], port: 80, tlsPort: 0 })?.address).toBe('pi.local:80')
   })
 
   it.each([
-    ['sem nome', { name: '', host: 'h', id: '', addresses: ['10.0.0.1'], port: 80 }],
-    ['nome enorme', { name: 'N'.repeat(65), host: 'h', id: '', addresses: ['10.0.0.1'], port: 80 }],
-    ['porta zero', { name: 'A', host: 'h', id: '', addresses: ['10.0.0.1'], port: 0 }],
-    ['porta enorme', { name: 'A', host: 'h', id: '', addresses: ['10.0.0.1'], port: 70000 }],
-    ['sem endereço nem host', { name: 'A', host: '', id: '', addresses: ['127.0.0.1'], port: 80 }],
+    ['sem nome', { name: '', host: 'h', id: '', addresses: ['10.0.0.1'], port: 80, tlsPort: 0 }],
+    ['nome enorme', { name: 'N'.repeat(65), host: 'h', id: '', addresses: ['10.0.0.1'], port: 80, tlsPort: 0 }],
+    ['porta zero', { name: 'A', host: 'h', id: '', addresses: ['10.0.0.1'], port: 0, tlsPort: 0 }],
+    ['porta enorme', { name: 'A', host: 'h', id: '', addresses: ['10.0.0.1'], port: 70000, tlsPort: 0 }],
+    ['sem endereço nem host', { name: 'A', host: '', id: '', addresses: ['127.0.0.1'], port: 80, tlsPort: 0 }],
   ])('anúncio inútil (%s) é ignorado', (_, server) => expect(toOption(server)).toBeNull())
 })
 

@@ -17,7 +17,7 @@ services:
       # names or addresses to add to the certificate (a domain of your own, a second address); comma-separated
       - TLS_SANS=${TLS_SANS:-}
       # redirect: the plain port only serves the connection page; full: as without TLS
-      - HTTP_MODE=${HTTP_MODE:-redirect}
+      - HTTP_MODE=${HTTP_MODE:-full}
       - PAIRING_MAX_ROOMS=${PAIRING_MAX_ROOMS:-6}
       # origins, besides the server's own, whose pages may open a WebSocket (comma-separated)
       - WS_ALLOWED_ORIGINS=${WS_ALLOWED_ORIGINS:-}

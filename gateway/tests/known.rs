@@ -50,6 +50,7 @@ fn other(port: u16) -> Server {
         id: String::new(),
         ips: vec!["127.0.0.1".into()],
         port,
+        tls_port: 0,
     }
 }
 
@@ -179,6 +180,7 @@ async fn addresses_outside_the_local_subnet_are_never_tried() {
             id: String::new(),
             ips: vec!["8.8.8.8".into()],
             port: 8080,
+            tls_port: 0,
         },
         Server {
             name: "OtherNet".into(),
@@ -186,6 +188,7 @@ async fn addresses_outside_the_local_subnet_are_never_tried() {
             id: String::new(),
             ips: vec!["10.9.9.9".into()],
             port: 8080,
+            tls_port: 0,
         },
     ];
     std::fs::write(&file, proto::discovered_servers(&entries)).unwrap();

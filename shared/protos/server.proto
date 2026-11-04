@@ -18,6 +18,9 @@ message DiscoveredServer {
   // Random id the server generated once and keeps (empty: an older server). Lets a client notice that "Casa" is no
   // longer the same server it opened before.
   string id = 5;
+  // Port of the server's HTTPS side (the `tls` entry of the mDNS record); 0 when it announces none. `port` stays the
+  // plain HTTP port: a client that prefers HTTPS uses this one and falls back to `port`.
+  int32 tls_port = 6;
 }
 
 message DiscoveredServers {

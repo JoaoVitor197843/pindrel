@@ -38,6 +38,9 @@ pub struct Server {
     pub id: String,
     pub ips: Vec<String>,
     pub port: u16,
+    /// Port of the HTTPS side when the server announces one (`tls` in the TXT record), 0 when it has none. `port` stays the
+    /// plain HTTP port, so a client that does not know `tls` keeps working and one that does prefers HTTPS.
+    pub tls_port: u16,
 }
 
 /// The local network of this machine (its LAN address and netmask).
@@ -314,17 +317,27 @@ pub fn lan_ip() -> Option<IpAddr> {
     Lan::detect().map(|l| IpAddr::V4(l.ip))
 }
 
-/// Starts announcing `name` on `port` and browsing for the others. Keep the daemon alive; call
+/// What this gateway announces about itself.
+#[derive(Clone, Copy)]
+pub struct Announce<'a> {
+    pub name: &'a str,
+    pub id: &'a str,
+    /// The plain HTTP port (the base of the record).
+    pub port: u16,
+    /// The HTTPS port, 0 when there is none (then no `tls` entry is announced).
+    pub tls_port: u16,
+}
+
+/// Starts announcing `me` and browsing for the others. Keep the daemon alive; call
 /// `shutdown` to say goodbye on the network.
 pub fn start(
-    name: &str,
-    id: &str,
-    port: u16,
+    me: &Announce<'_>,
     lan: Option<IpAddr>,
     ifaces: &[String],
     refresh: Duration,
     registry: Arc<Registry>,
 ) -> Result<ServiceDaemon, String> {
+    let Announce { name, id, port, tls_port } = *me;
     let e = |e: mdns_sd::Error| e.to_string();
     let d = ServiceDaemon::new().map_err(e)?;
     d.disable_interface(IfKind::IPv6).map_err(e)?;
@@ -339,7 +352,11 @@ pub fn start(
         }
     }
     let host = format!("{}.local.", gethostname::gethostname().to_string_lossy());
-    let props = [("name", name), ("id", id)];
+    let tls_text = tls_port.to_string();
+    let mut props = vec![("name", name), ("id", id)];
+    if tls_port != 0 {
+        props.push(("tls", tls_text.as_str()));
+    }
     let info = match lan {
         Some(ip) => ServiceInfo::new(SERVICE_TYPE, name, &host, ip, port, &props[..]),
         None => ServiceInfo::new(SERVICE_TYPE, name, &host, "", port, &props[..]).map(|i| i.enable_addr_auto()),
@@ -370,6 +387,11 @@ fn apply(registry: &Registry, ev: ServiceEvent) {
             let mut ips: Vec<String> = i.get_addresses_v4().iter().map(|a| a.to_string()).collect();
             ips.sort();
             let id = i.get_property_val_str("id").filter(|v| valid_id(v)).unwrap_or_default().to_string();
+            let tls_port = i
+                .get_property_val_str("tls")
+                .and_then(|v| v.parse::<u16>().ok())
+                .filter(|p| *p >= 1024)
+                .unwrap_or(0);
             let host = i.get_hostname().trim_end_matches('.').trim_end_matches(".local").to_string();
             registry.upsert(
                 full,
@@ -379,6 +401,7 @@ fn apply(registry: &Registry, ev: ServiceEvent) {
                     id,
                     ips,
                     port: i.get_port(),
+                    tls_port,
                 },
             );
         }
@@ -430,6 +453,7 @@ mod tests {
             id: String::new(),
             ips: vec![ip.into()],
             port,
+            tls_port: 0,
         }
     }
 

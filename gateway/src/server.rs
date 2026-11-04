@@ -60,15 +60,13 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
 
     let mut mdns = None;
     if cfg.mdns {
-        match discovery::start(
-            &cfg.server_name,
-            &id,
-            addr.port(),
-            lan,
-            &cfg.mdns_interfaces,
-            cfg.mdns_refresh,
-            registry.clone(),
-        ) {
+        let me = discovery::Announce {
+            name: &cfg.server_name,
+            id: &id,
+            port: addr.port(),
+            tls_port: cfg.tls.as_ref().map_or(0, |t| t.port),
+        };
+        match discovery::start(&me, lan, &cfg.mdns_interfaces, cfg.mdns_refresh, registry.clone()) {
             Ok(d) => {
                 eprintln!(
                     "mDNS: announcing {:?} as {} on port {}",
