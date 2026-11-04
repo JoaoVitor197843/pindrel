@@ -1,19 +1,9 @@
-# Release: on push to main, builds Pindrel's images (API + embedded web) and the gateway for amd64 and arm64
-# and publishes them to the Forgejo registry. The Raspberry Pi pulls them by itself (deploy/update.sh, systemd timer).
+# Release gate: on push to main, runs ALL the tests (backend with a database, web, gateway, mobile) on the PC's runner.
 #
-# - Runs on the PC's runner (label `build`): it has the host's Docker, RAM and CPU. The Pi compiles nothing.
-# - There is no emulation: the Dockerfiles cross-compile to arm64 (Go and Rust in the build machine's
-#   stage; the final stage has no RUN).
-# - Needs three repository secrets (Settings > Actions > Secrets):
-#     REGISTRY_USER    Forgejo user that owns the packages
-#     REGISTRY_TOKEN   access token with write:package scope
-#     DOCKERHUB_TOKEN  Docker Hub access token (Account settings > Personal access tokens, Read & Write)
-# - The release only happens if ALL tests pass: it calls the same CI workflows (backend, web, gateway
-#   and mobile, with `uses:`; the backend includes the tests with a database) and the `images` job depends on all of them. If one
-#   fails nothing is published, the `latest` tag does not change and the Pi stays on the version it already runs.
-# - A version tag (release-tag.yml) needs the images of ITS commit. When only files outside the paths below changed since the
-#   last run (for example just `mobile/**`), nothing runs here: start this workflow by hand on main (workflow_dispatch), or push a
-#   change to one of the watched files, before tagging.
+# The images are NOT built here any more: the build runs on GitHub (.github/workflows/release-images.yml, ghcr.io), which
+# is faster than this PC's connection and reaches the Raspberry Pi without Tailscale. This repository is mirrored to
+# GitHub, so a push to main starts that build there on its own. It does not wait for these tests: run them
+# (they are what this workflow does, or locally) before pushing to main.
 name: release
 
 on:
@@ -26,10 +16,8 @@ on:
       - "shared/protos/**"
       - "Dockerfile"
       - ".forgejo/workflows/*.yml"
-      - ".forgejo/workflows/release.yml"
   workflow_dispatch:
 
-# two releases at the same time would fight over the `latest` tag
 concurrency:
   group: release
   cancel-in-progress: false
@@ -43,94 +31,3 @@ jobs:
     uses: ./.forgejo/workflows/gateway.yml
   test-mobile:
     uses: ./.forgejo/workflows/mobile.yml
-
-  # Builds the images (without publishing) WHILE the tests run: the buildkit cache gets warm and the `images` job,
-  # which only starts after the tests, just pushes ready layers. If a test fails, the work is discarded.
-  prebuild:
-    runs-on: build
-    timeout-minutes: 60
-    container:
-      image: ci-docker:1
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
-    steps:
-      - uses: actions/checkout@v4
-      - name: Builder multi-arch
-        run: |
-          docker buildx inspect release >/dev/null 2>&1 \
-            || docker buildx create --name release --driver docker-container --driver-opt network=host
-          docker buildx use release
-          docker buildx inspect --bootstrap
-      - name: Compilar (sem publicar)
-        run: |
-          docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile . & api=$!
-          docker buildx build --platform linux/amd64,linux/arm64 -f gateway/Dockerfile gateway & gw=$!
-          wait "$api" && wait "$gw"
-
-  images:
-    needs: [test-backend, test-web, test-gateway, test-mobile]
-    runs-on: build
-    timeout-minutes: 60
-    container:
-      image: ci-docker:1
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
-    env:
-      REGISTRY: raspberry-joao.tail7a986c.ts.net
-      OWNER: joao_vitor
-      DOCKERHUB_OWNER: joaovitor2753
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Login no registry
-        env:
-          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-        run: |
-          [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_TOKEN" ] || { echo "faltam os secrets REGISTRY_USER e REGISTRY_TOKEN"; exit 1; }
-          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
-
-      # buildkit container on the host network: resolves the registry like the rest of the PC; the state (cargo, go
-      # and yarn cache) stays in the builder and serves the next releases
-      - name: Builder multi-arch
-        run: |
-          docker buildx inspect release >/dev/null 2>&1 \
-            || docker buildx create --name release --driver docker-container --driver-opt network=host
-          docker buildx use release
-          docker buildx inspect --bootstrap
-
-      - name: Imagens (amd64 + arm64)
-        run: |
-          sha=$(git rev-parse --short=12 HEAD)
-          build() { # build <name> <context> <dockerfile>
-            docker buildx build --platform linux/amd64,linux/arm64 --push \
-              -t "$REGISTRY/$OWNER/$1:$sha" -t "$REGISTRY/$OWNER/$1:latest" \
-              -f "$3" "$2"
-          }
-          build pindrel . Dockerfile
-          build pindrel-gateway gateway gateway/Dockerfile
-          echo "publicado: $sha"
-
-      - name: Conferir as duas arquiteturas no registry
-        run: |
-          for name in pindrel pindrel-gateway; do
-            docker buildx imagetools inspect "$REGISTRY/$OWNER/$name:latest" | tee /tmp/inspect.txt
-            grep -q 'linux/amd64' /tmp/inspect.txt && grep -q 'linux/arm64' /tmp/inspect.txt
-          done
-
-      # After the Forgejo registry on purpose: the Raspberry Pi must never wait for Docker Hub. The image is copied as it is
-      # (same digest, both architectures), so nothing is built twice.
-      - name: Publicar no Docker Hub
-        env:
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          [ -n "$DOCKERHUB_TOKEN" ] || { echo "falta o secret DOCKERHUB_TOKEN"; exit 1; }
-          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_OWNER" --password-stdin
-          sha=$(git rev-parse --short=12 HEAD)
-          for name in pindrel pindrel-gateway; do
-            docker buildx imagetools create \
-              -t "$DOCKERHUB_OWNER/$name:$sha" -t "$DOCKERHUB_OWNER/$name:latest" \
-              "$REGISTRY/$OWNER/$name:$sha"
-            docker buildx imagetools inspect "$DOCKERHUB_OWNER/$name:latest" | tee /tmp/inspect-hub.txt
-            grep -q 'linux/amd64' /tmp/inspect-hub.txt && grep -q 'linux/arm64' /tmp/inspect-hub.txt
-          done

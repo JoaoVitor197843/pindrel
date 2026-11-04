@@ -5,10 +5,11 @@
 # - The release is created as a DRAFT and only published when every build has uploaded its files, so a failed build
 #   leaves nothing half-published (the draft can be deleted or the workflow re-run: uploads replace by name).
 # - Each file is attached with its .sha256 (.forgejo/scripts/release.sh, tested by test_release.sh).
-# - Docker images are not rebuilt here: release.yml already published the commit's images (tag `<sha>`); this
-#   workflow only adds the version tags (`1.2.0`, `1.2`) to the Forgejo registry and Docker Hub. If the tagged commit has
-#   no image yet (a change outside the paths release.yml watches), run release.yml by hand on main first.
-# - Same secrets as release.yml, plus RELEASE_TOKEN (optional): an access token with write:repository, used when the
+# - Docker images are not handled here: the images are built on GitHub (.github/workflows/release-images.yml), and the same
+#   `v*` tag, which the push mirror carries there, makes that workflow add the version tags (`1.2.0`, `1.2`) to the images
+#   of the tagged commit. If that commit has no image yet (a change outside the paths it watches), run release-images by
+#   hand on main in GitHub first.
+# - Needs RELEASE_TOKEN (optional): an access token with write:repository, used when the
 #   token Forgejo gives the job cannot create releases.
 # - Android: the APK is signed with the key kept in two more secrets, ANDROID_KEYSTORE_BASE64 (the .jks, base64) and
 #   ANDROID_KEYSTORE_PASSWORD (store and key password; the alias is `pindrel`). The same key must sign every release or
@@ -186,51 +187,8 @@ jobs:
       - name: Anexar à release
         run: sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.apk
 
-  docker-tags:
-    needs: release
-    runs-on: build
-    container:
-      image: ci-docker:1
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
-    timeout-minutes: 15
-    env:
-      REGISTRY: raspberry-joao.tail7a986c.ts.net
-      OWNER: joao_vitor
-      DOCKERHUB_OWNER: joaovitor2753
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Logins
-        env:
-          REGISTRY_USER: ${{ secrets.REGISTRY_USER }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          [ -n "$REGISTRY_USER" ] && [ -n "$REGISTRY_TOKEN" ] && [ -n "$DOCKERHUB_TOKEN" ] \
-            || { echo "faltam os secrets REGISTRY_USER, REGISTRY_TOKEN e DOCKERHUB_TOKEN"; exit 1; }
-          echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
-          echo "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_OWNER" --password-stdin
-
-      - name: Tags de versão nas imagens do commit
-        run: |
-          version=${GITHUB_REF_NAME#v}
-          sha=$(git rev-parse --short=12 HEAD)
-          # 1.2.3 -> also 1.2; a pre-release (1.2.3-rc1) only gets its own tag
-          extra=""
-          case $version in *-*) ;; *) extra="${version%.*}" ;; esac
-          for name in pindrel pindrel-gateway; do
-            docker buildx imagetools inspect "$REGISTRY/$OWNER/$name:$sha" >/dev/null 2>&1 \
-              || { echo "não há imagem $name:$sha: rode o release.yml na main antes de marcar a versão"; exit 1; }
-            for repo in "$REGISTRY/$OWNER/$name" "$DOCKERHUB_OWNER/$name"; do
-              tags="-t $repo:$version"
-              [ -z "$extra" ] || tags="$tags -t $repo:$extra"
-              docker buildx imagetools create $tags "$REGISTRY/$OWNER/$name:$sha"
-            done
-          done
-
   publish:
-    needs: [gateway, linux, android, docker-tags]
+    needs: [gateway, linux, android]
     runs-on: build
     container:
       image: ci-pc:1
