@@ -48,9 +48,18 @@ fn serves_reports_healthy_and_stops_cleanly_on_sigterm() {
         .spawn()
         .unwrap();
     let mut log = BufReader::new(child.stderr.take().unwrap());
-    let mut line = String::new();
-    log.read_line(&mut line).unwrap();
-    assert!(line.contains("listening"), "first log line: {line}");
+    // Warnings come first when the environment asks for them (a container with the default limit of 1024 open files gets
+    // one): wait for the line that says it listens instead of expecting it to be the first.
+    let mut seen = Vec::new();
+    loop {
+        let mut line = String::new();
+        let n = log.read_line(&mut line).unwrap();
+        assert!(n > 0 && seen.len() < 20, "the gateway never said it listens; log so far: {seen:?}");
+        if line.contains("listening") {
+            break;
+        }
+        seen.push(line);
+    }
 
     assert!(TcpStream::connect(("127.0.0.1", port)).is_ok());
     let status = gateway().arg("healthcheck").env("GATEWAY_PORT", port.to_string()).status().unwrap();
