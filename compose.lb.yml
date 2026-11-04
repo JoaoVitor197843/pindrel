@@ -1,7 +1,7 @@
 # Overlay: several stateless API replicas behind the Pindrel gateway (load balancer, per-IP rate
 # limit, mDNS announcement and discovery of other servers on the LAN).
 #   docker compose -f compose.yml -f compose.lb.yml up -d --build --scale pindrel=2
-# Extra RAM on top of the API replicas: the gateway, a few MB (16m cap).
+# Extra RAM on top of the API replicas: the gateway, a few MB (48m cap: 1500 idle sockets from 1500 addresses peaked at 31 MiB; the gateway itself idles at 2-5 MB).
 services:
   pindrel:
     # loopback only, one port of the range per replica (up to 100 with --scale; widen both ranges for more)
@@ -18,8 +18,8 @@ services:
     build: ./gateway
     network_mode: host
     restart: unless-stopped
-    mem_limit: 16m
-    memswap_limit: 16m
+    mem_limit: 48m
+    memswap_limit: 48m
     # the process only reads the network and (optionally) one file: no writable root, no capabilities, no new privileges
     read_only: true
     cap_drop: [ALL]

@@ -19,7 +19,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
-	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLimiter *AuthMiddleware.IPRateLimiter, registerLimiter *AuthMiddleware.IPRateLimiter) *chi.Mux {
@@ -61,7 +60,7 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	r.Post("/auth/refresh/", h.Refresh)
 	r.Get("/auth/me/", h.Me)
 	if cfg.DebugMode {
-		r.Get("/swagger/*", httpSwagger.WrapHandler)
+		mountSwagger(r)
 	}
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo, cfg.DebugMode))
