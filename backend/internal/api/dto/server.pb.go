@@ -82,7 +82,10 @@ type DiscoveredServer struct {
 	Port      int32                  `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`
 	// Random id the server generated once and keeps (empty: an older server). Lets a client notice that "Casa" is no
 	// longer the same server it opened before.
-	Id            string `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	Id string `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	// Port of the server's HTTPS side (the `tls` entry of the mDNS record); 0 when it announces none. `port` stays the
+	// plain HTTP port: a client that prefers HTTPS uses this one and falls back to `port`.
+	TlsPort       int32 `protobuf:"varint,6,opt,name=tls_port,json=tlsPort,proto3" json:"tls_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -152,6 +155,13 @@ func (x *DiscoveredServer) GetId() string {
 	return ""
 }
 
+func (x *DiscoveredServer) GetTlsPort() int32 {
+	if x != nil {
+		return x.TlsPort
+	}
+	return 0
+}
+
 type DiscoveredServers struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Servers       []*DiscoveredServer    `protobuf:"bytes,1,rep,name=servers,proto3" json:"servers,omitempty"`
@@ -204,13 +214,14 @@ const file_shared_protos_server_proto_rawDesc = "" +
 	"\n" +
 	"ServerInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x121\n" +
-	"\x14registration_enabled\x18\x02 \x01(\bR\x13registrationEnabled\"|\n" +
+	"\x14registration_enabled\x18\x02 \x01(\bR\x13registrationEnabled\"\x97\x01\n" +
 	"\x10DiscoveredServer\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x1c\n" +
 	"\taddresses\x18\x03 \x03(\tR\taddresses\x12\x12\n" +
 	"\x04port\x18\x04 \x01(\x05R\x04port\x12\x0e\n" +
-	"\x02id\x18\x05 \x01(\tR\x02id\"E\n" +
+	"\x02id\x18\x05 \x01(\tR\x02id\x12\x19\n" +
+	"\btls_port\x18\x06 \x01(\x05R\atlsPort\"E\n" +
 	"\x11DiscoveredServers\x120\n" +
 	"\aservers\x18\x01 \x03(\v2\x16.sync.DiscoveredServerR\aserversB\x1aZ\x18backend/internal/api/dtob\x06proto3"
 

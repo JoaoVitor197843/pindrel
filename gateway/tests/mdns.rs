@@ -172,3 +172,51 @@ async fn a_refresh_of_zero_never_restarts_the_search() {
     assert_eq!(g.app.registry.searches(), 1, "only the initial search");
     g.shutdown().await;
 }
+
+/// A gateway with HTTPS announces its TLS port next to the HTTP one (TXT `tls`); one without HTTPS announces none.
+#[cfg(feature = "tls")]
+#[tokio::test]
+async fn the_https_port_is_announced_only_when_there_is_one() {
+    use pindrel_gateway::config::TlsConfig;
+    let be = Backend::start("a").await;
+    let tls_port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/tls");
+    let secure = gateway_with(&[&be], move |c| {
+        c.mdns = true;
+        c.server_name = "pindrel-test-tls-secure".into();
+        c.tls = Some(TlsConfig {
+            port: tls_port,
+            cert: dir.join("cert.pem"),
+            key: dir.join("key.pem"),
+            auto_dir: None,
+            extra_sans: Vec::new(),
+            refresh: Duration::ZERO,
+        });
+    })
+    .await;
+    let plain = with_mdns("pindrel-test-tls-plain", &be).await;
+    let watcher = with_mdns("pindrel-test-tls-watcher", &be).await;
+    let both = || {
+        let n = names(&watcher);
+        n.contains(&"pindrel-test-tls-secure".to_string()) && n.contains(&"pindrel-test-tls-plain".to_string())
+    };
+    if !eventually("the watcher sees both", both).await {
+        eprintln!("(no multicast here: skipping)");
+        return;
+    }
+    let list = watcher.app.registry.list();
+    let find = |n: &str| list.iter().find(|s| s.name == n).unwrap().clone();
+    let (s, p) = (find("pindrel-test-tls-secure"), find("pindrel-test-tls-plain"));
+    assert_eq!(s.tls_port, tls_port, "the HTTPS port is announced");
+    assert_eq!(s.port, secure.addr.port(), "the base port is still the HTTP one");
+    assert_eq!(p.tls_port, 0, "no HTTPS, nothing announced");
+    // and the list handed to the web carries it too
+    let over_http = DiscoveredServers::decode_body(&get(watcher.addr, "/server/discover/").await.body);
+    assert!(over_http
+        .iter()
+        .any(|d| d.name == "pindrel-test-tls-secure" && d.tls_port == tls_port as i32));
+    assert!(over_http.iter().any(|d| d.name == "pindrel-test-tls-plain" && d.tls_port == 0));
+    for g in [secure, plain, watcher] {
+        g.shutdown().await;
+    }
+}

@@ -16,6 +16,7 @@ class MdnsFound {
     required this.port,
     required this.addresses,
     this.id = '',
+    this.tlsPort = 0,
   });
 
   final String name;
@@ -25,6 +26,9 @@ class MdnsFound {
 
   /// The `id` of the TXT record, when valid.
   final String id;
+
+  /// The `tls` port of the TXT record, 0 when absent or unusable.
+  final int tlsPort;
 }
 
 /// How many times each question of a sweep is asked before giving up on it.
@@ -242,6 +246,7 @@ class PluginMdnsApi implements MdnsApi {
       port: srv.port,
       addresses: addresses,
       id: txt == null ? '' : serverIdFromTxtText(txt.text),
+      tlsPort: txt == null ? 0 : tlsPortFromTxtText(txt.text),
     );
   }
 
@@ -363,6 +368,7 @@ class MdnsDiscovery implements ServerDiscovery {
               addresses: usableIpv4(f.addresses),
               port: f.port,
               id: isValidServerId(f.id) ? f.id : '',
+              tlsPort: validTlsPort(f.tlsPort),
             ),
           );
         }

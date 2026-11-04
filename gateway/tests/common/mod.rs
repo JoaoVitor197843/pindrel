@@ -43,6 +43,8 @@ pub struct DiscoveredServer {
     pub port: i32,
     #[prost(string, tag = "5")]
     pub id: String,
+    #[prost(int32, tag = "6")]
+    pub tls_port: i32,
 }
 #[derive(Clone, PartialEq, Message)]
 pub struct DiscoveredServers {

@@ -378,6 +378,7 @@ async fn discover_lists_the_other_servers_as_protobuf() {
             id: String::new(),
             ips: vec!["192.168.1.9".into()],
             port: 8080,
+            tls_port: 0,
         },
     );
     gw.app.registry.upsert(
@@ -388,6 +389,7 @@ async fn discover_lists_the_other_servers_as_protobuf() {
             id: String::new(),
             ips: vec!["192.168.1.8".into(), "10.0.0.8".into()],
             port: 39215,
+            tls_port: 0,
         },
     );
     let list = DiscoveredServers::decode(get(gw.addr, "/server/discover/").await.body)
@@ -560,6 +562,7 @@ async fn the_map_of_the_lan_is_not_served_through_a_tunnel() {
         id: String::new(),
         ips: vec!["192.168.1.9".into()],
         port: 8080,
+        tls_port: 0,
     };
     let direct = gateway(&[&a]).await;
     direct.app.registry.upsert("c".into(), server.clone());

@@ -12,6 +12,7 @@ class DiscoveredServer {
     required this.addresses,
     required this.port,
     this.id = '',
+    this.tlsPort = 0,
   });
 
   /// Service name: the `SERVER_NAME` configured on the server.
@@ -29,6 +30,10 @@ class DiscoveredServer {
   /// or announces something that is not an id.
   final String id;
 
+  /// The port of the server's HTTPS side (`tls` in the TXT record), 0 when it announces none. [port] stays the plain HTTP
+  /// one: HTTPS is preferred and the plain port is the fallback.
+  final int tlsPort;
+
   /// Where to connect: the first usable IPv4; with no IP, the machine's mDNS name.
   String get address {
     if (addresses.isNotEmpty) return addresses.first;
@@ -37,6 +42,10 @@ class DiscoveredServer {
 
   Uri get baseUri => Uri(scheme: 'http', host: address, port: port);
 
+  /// The HTTPS address, or `null` when the server announces none.
+  Uri? get secureUri =>
+      tlsPort == 0 ? null : Uri(scheme: 'https', host: address, port: tlsPort);
+
   @override
   bool operator ==(Object other) =>
       other is DiscoveredServer &&
@@ -44,11 +53,12 @@ class DiscoveredServer {
       other.host == host &&
       other.port == port &&
       other.id == id &&
+      other.tlsPort == tlsPort &&
       _sameList(other.addresses, addresses);
 
   @override
   int get hashCode =>
-      Object.hash(name, host, port, id, Object.hashAll(addresses));
+      Object.hash(name, host, port, id, tlsPort, Object.hashAll(addresses));
 
   @override
   String toString() => 'DiscoveredServer($name, $address:$port)';
@@ -113,4 +123,30 @@ String serverIdFromTxtText(String text) {
     }
   }
   return '';
+}
+
+/// An announced HTTPS port: from 1024 up (what the gateway itself accepts) or nothing.
+int validTlsPort(int? port) =>
+    port == null || port < 1024 || port > 65535 ? 0 : port;
+
+/// The `tls` port of a TXT record as the `nsd` plugin delivers it (raw bytes); 0 when absent or unusable.
+int tlsPortFromTxt(Map<String, Uint8List?>? txt) {
+  final raw = txt?['tls'];
+  if (raw == null || raw.length > 5) return 0;
+  try {
+    return validTlsPort(int.tryParse(utf8.decode(raw)));
+  } catch (_) {
+    return 0;
+  }
+}
+
+/// The `tls` port of a TXT record as `multicast_dns` delivers it (`key=value` entries, one per line).
+int tlsPortFromTxtText(String text) {
+  for (final entry in text.split('\n')) {
+    if (entry.startsWith('tls=')) {
+      final value = entry.substring(4);
+      return value.length > 5 ? 0 : validTlsPort(int.tryParse(value));
+    }
+  }
+  return 0;
 }
