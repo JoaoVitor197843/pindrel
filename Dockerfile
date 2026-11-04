@@ -15,12 +15,14 @@ RUN yarn build
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS backend-builder
 ARG TARGETOS
 ARG TARGETARCH
+# GO_TAGS=swagger adds the Swagger UI (DEBUG_MODE=true). Off in release images: its package costs ~9 MiB of live heap.
+ARG GO_TAGS=""
 WORKDIR /app/backend
 COPY backend/go.mod backend/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY backend/ .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o server ./cmd/api
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags "$GO_TAGS" -trimpath -ldflags="-s -w" -o server ./cmd/api
 
 FROM alpine:3.24
 WORKDIR /app
@@ -29,7 +31,7 @@ COPY --from=frontend-builder /app/frontend/dist ./public
 # numeric non-root user: no adduser, which would be a RUN as the target architecture
 USER 10001:10001
 # Go soft memory limit, below the 128m container limit set in compose.yml
-ENV GOMEMLIMIT=100MiB
+ENV GOMEMLIMIT=64MiB
 EXPOSE 8080
 # start-interval: while starting (start-period) it probes every 1 s instead of the default 5 s, so a new replica is
 # seen healthy as soon as it answers (it speeds up rolling updates). The start-period is generous because, once it ends,

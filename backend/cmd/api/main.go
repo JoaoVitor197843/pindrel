@@ -15,8 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	_ "pindrel/docs"
-
 	"github.com/joho/godotenv"
 	"golang.org/x/time/rate"
 )
