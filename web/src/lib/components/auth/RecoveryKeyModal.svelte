@@ -1,11 +1,15 @@
 <script lang="ts">
   import { fade, fly } from 'svelte/transition'
   import { ms } from '../../motion'
+  import { modal } from '../../a11y/dialog'
   interface Props {
     onclose: () => void
   }
 
   let { onclose }: Props = $props()
+
+  // who had the focus when this opened: the dialog gives it back there when it closes
+  const opener = document.activeElement
 
   // Virtual keyboard: what it covers of the window becomes space at the bottom, so the field and the button rise together
   // (the app's `viewInsets.bottom`). Without `visualViewport` (or without a keyboard) the gap is zero.
@@ -35,11 +39,12 @@
   data-testid="recovery-overlay"
   transition:fade|global={{ duration: ms(200) }}
 >
-  <button type="button" aria-label="Fechar" class="absolute inset-0 cursor-default" onclick={onclose}></button>
+  <button type="button" tabindex="-1" aria-hidden="true" data-testid="backdrop" class="absolute inset-0 cursor-default" onclick={onclose}></button>
   <div
     role="dialog"
     aria-modal="true"
     aria-labelledby="recovery-title"
+    use:modal={opener}
     transition:fly|global={{ y: 80, duration: ms(250) }}
     class="relative max-h-full w-full max-w-md overflow-y-auto rounded-t-3xl border border-line bg-surface p-6 sm:rounded-3xl"
   >
@@ -51,7 +56,7 @@
       type="text"
       autocomplete="off"
       placeholder="XXXX-XXXX-XXXX"
-      class="mt-4 w-full rounded-field border border-line bg-surface px-4 py-4 font-mono tracking-[2px] uppercase placeholder:text-muted transition-colors duration-200 focus:border-accent-line focus:outline-none"
+      class="mt-4 w-full rounded-field border border-field-line bg-surface px-4 py-4 font-mono tracking-[2px] uppercase placeholder:text-muted transition-colors duration-200 focus:border-accent-line focus:outline-none"
     />
     <button
       type="button"

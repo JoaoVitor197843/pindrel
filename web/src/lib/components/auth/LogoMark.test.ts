@@ -28,17 +28,24 @@ const stages = () => [...document.body.children].filter((e) => (e as HTMLElement
 
 async function taps(button: HTMLElement, n: number) {
   for (let i = 0; i < n; i++) await fireEvent.click(button)
+  // the scenes are a lazy chunk: let its import settle before looking at the stage
+  await vi.dynamicImportSettled()
+  await Promise.resolve()
 }
 
 describe('LogoMark', () => {
-  it('é um botão com o P', () => {
-    const { getByRole } = render(LogoMark)
-    expect(getByRole('button', { name: 'Logo do Pindrel' }).textContent?.trim()).toBe('P')
+  it('mostra o P, mas fica fora do Tab e da leitura: é só para toque e clique', () => {
+    const { getByTestId, queryByRole } = render(LogoMark)
+    const logo = getByTestId('logo-mark')
+    expect(logo.textContent?.trim()).toBe('P')
+    expect(logo.tabIndex).toBe(-1)
+    expect(logo.getAttribute('aria-hidden')).toBe('true')
+    expect(queryByRole('button')).toBeNull()
   })
 
   it('cinco toques rápidos mostram a cena e depois tudo some', async () => {
-    const { getByRole } = render(LogoMark)
-    const logo = getByRole('button')
+    const { getByTestId } = render(LogoMark)
+    const logo = getByTestId('logo-mark')
     await taps(logo, 4)
     expect(stages()).toHaveLength(0)
     await taps(logo, 1)
@@ -51,8 +58,8 @@ describe('LogoMark', () => {
   })
 
   it('quatro toques e uma pausa não disparam', async () => {
-    const { getByRole } = render(LogoMark)
-    const logo = getByRole('button')
+    const { getByTestId } = render(LogoMark)
+    const logo = getByTestId('logo-mark')
     await taps(logo, 4)
     await vi.advanceTimersByTimeAsync(1900)
     await taps(logo, 1)
@@ -60,8 +67,8 @@ describe('LogoMark', () => {
   })
 
   it('toques durante a cena são ignorados (uma enxurrada não empilha cenas)', async () => {
-    const { getByRole } = render(LogoMark)
-    const logo = getByRole('button')
+    const { getByTestId } = render(LogoMark)
+    const logo = getByTestId('logo-mark')
     await taps(logo, 60)
     expect(stages()).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(5000)
@@ -72,8 +79,8 @@ describe('LogoMark', () => {
 
   it('todos os temas rodam sem erro e limpam o palco', async () => {
     for (const theme of LOGO_THEMES) {
-      const { getByRole, unmount } = render(LogoMark, { theme })
-      await taps(getByRole('button'), 5)
+      const { getByTestId, unmount } = render(LogoMark, { theme })
+      await taps(getByTestId('logo-mark'), 5)
       expect(stages(), theme).toHaveLength(1)
       await vi.advanceTimersByTimeAsync(6000)
       expect(stages(), theme).toHaveLength(0)
@@ -83,8 +90,8 @@ describe('LogoMark', () => {
 
   it('com redução de movimento só pisca o logo, sem palco', async () => {
     vi.spyOn(window, 'matchMedia').mockImplementation((q) => ({ matches: /reduce/.test(q) }) as MediaQueryList)
-    const { getByRole } = render(LogoMark)
-    const logo = getByRole('button')
+    const { getByTestId } = render(LogoMark)
+    const logo = getByTestId('logo-mark')
     animate.mockClear()
     await taps(logo, 5)
     expect(stages()).toHaveLength(0)
@@ -93,8 +100,8 @@ describe('LogoMark', () => {
   })
 
   it('sair da tela no meio da cena remove o palco', async () => {
-    const { getByRole, unmount } = render(LogoMark)
-    await taps(getByRole('button'), 5)
+    const { getByTestId, unmount } = render(LogoMark)
+    await taps(getByTestId('logo-mark'), 5)
     expect(stages()).toHaveLength(1)
     unmount()
     expect(stages()).toHaveLength(0)
@@ -102,8 +109,8 @@ describe('LogoMark', () => {
   })
 
   it('ir para segundo plano cancela a cena', async () => {
-    const { getByRole } = render(LogoMark)
-    await taps(getByRole('button'), 5)
+    const { getByTestId } = render(LogoMark)
+    await taps(getByTestId('logo-mark'), 5)
     vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
     document.dispatchEvent(new Event('visibilitychange'))
     expect(stages()).toHaveLength(0)
@@ -112,8 +119,8 @@ describe('LogoMark', () => {
   it('sem Web Animations não quebra nem cria palco', async () => {
     // @ts-expect-error simulating a browser without the API
     delete Element.prototype.animate
-    const { getByRole } = render(LogoMark)
-    await taps(getByRole('button'), 5)
+    const { getByTestId } = render(LogoMark)
+    await taps(getByTestId('logo-mark'), 5)
     expect(stages()).toHaveLength(0)
   })
 })

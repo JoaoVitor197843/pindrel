@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +10,7 @@ import '../providers/servers_provider.dart';
 import '../widgets/auth_desktop_panel.dart';
 import '../widgets/auth_form.dart';
 import '../widgets/auth_header.dart';
+import '../widgets/pairing_dialogs.dart';
 import '../widgets/pulsing_dot.dart';
 import '../widgets/server_dropdown_selector.dart';
 
@@ -22,10 +25,8 @@ class AuthPage extends StatelessWidget {
   /// Called when tapping "Continuar offline neste dispositivo".
   final VoidCallback? onContinueOffline;
 
-  static void _showAddServerSoon(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Adicionar servidor chega em breve.')),
-    );
+  static void _showAddServer(BuildContext context) {
+    unawaited(AddServerDialog.show(context));
   }
 
   @override
@@ -33,7 +34,7 @@ class AuthPage extends StatelessWidget {
     return Scaffold(
       body: LayoutBuilder(
         builder: (context, constraints) {
-          void addServer() => _showAddServerSoon(context);
+          void addServer() => _showAddServer(context);
           if (constraints.maxWidth >= desktopBreakpoint) {
             return _DesktopLayout(
               onContinueOffline: onContinueOffline,

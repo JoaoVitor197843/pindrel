@@ -20,7 +20,7 @@ describe('RecoveryKeyModal', () => {
     expect(onclose).not.toHaveBeenCalled()
 
     await fireEvent.keyDown(window, { key: 'Escape' })
-    await fireEvent.click(screen.getByRole('button', { name: 'Fechar' }))
+    await fireEvent.click(screen.getByTestId('backdrop'))
     await fireEvent.click(screen.getByRole('button', { name: 'Recuperar acesso' }))
     expect(onclose).toHaveBeenCalledTimes(3)
   })

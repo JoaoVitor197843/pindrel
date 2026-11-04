@@ -6,7 +6,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/app.dart';
 import 'package:mobile/core/network/discovery/discovered_server.dart';
 import 'package:mobile/core/network/discovery/server_discovery.dart';
+import 'package:mobile/features/auth/presentation/widgets/pairing_dialogs.dart';
+import 'package:mobile/core/network/pairing.dart';
 import 'package:mobile/core/network/server_probe.dart';
+import 'package:mobile/core/network/server_security.dart';
 import 'package:mobile/core/theme/app_colors.dart';
 import 'package:mobile/features/auth/presentation/widgets/pulsing_dot.dart';
 import 'package:mobile/features/auth/presentation/widgets/server_dropdown_selector.dart';
@@ -14,10 +17,12 @@ import 'package:mobile/features/auth/presentation/pages/auth_page.dart';
 import 'package:mobile/features/auth/data/server_trust.dart';
 import 'package:mobile/features/auth/presentation/providers/servers_provider.dart';
 
+import '../../support/choose_first.dart';
 import '../../support/discovery_fakes.dart';
+import '../../support/pairing_fakes.dart';
 
-/// Opens the app with a fake discovery (by default, the [sampleServers]) and a
-/// fixed draw, which picks the first server in the list.
+/// Opens the app with a fake discovery (by default, the [sampleServers]) and taps the first server of the list
+/// (the app chooses nothing on its own; pass `choose: false` to leave it unchosen).
 ///
 /// By default it turns on "reduce motion", which keeps the dot still: with it
 /// pulsing forever, `pumpAndSettle` would never settle. The animation tests
@@ -31,8 +36,19 @@ Future<FakeDiscovery> pumpApp(
   ServerProbe? probe,
   ServerDiscovery? silent,
   ServerTrust? trust,
+  bool choose = true,
+  bool trustAll = true,
+  FakePairer? pairer,
+  bool tls = true,
 }) async {
   final fake = discovery ?? FakeDiscovery(sampleServers);
+  final remembered = trust ?? ServerTrust(MemoryKeyValueStore());
+  if (trust == null && trustAll) {
+    // servers opened before are trusted: a tap on them chooses, it does not open the pairing screen
+    for (final s in fake.current) {
+      await remembered.remember(s.name, s.id);
+    }
+  }
   tester.view.physicalSize = Size(width * 2, 1800);
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.reset);
@@ -42,17 +58,20 @@ Future<FakeDiscovery> pumpApp(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        serverTrustProvider.overrideWithValue(
-          trust ?? ServerTrust(MemoryKeyValueStore()),
-        ),
+        serverTrustProvider.overrideWithValue(remembered),
+        pairedStoreProvider.overrideWithValue(MemoryPairedStore()),
         serverDiscoveryProvider.overrideWithValue(silent ?? fake),
-        randomProvider.overrideWithValue(FixedRandom(0)),
         serverProbeProvider.overrideWithValue(probe ?? (_) async => true),
+        digitsPairerProvider.overrideWithValue((pairer ?? FakePairer(['123456'])).call),
+        tlsOfferProvider.overrideWithValue(
+          (_) async => tls ? const TlsOffer(port: 8443, serverId: 'srv') : null,
+        ),
       ],
       child: home == null ? const PindrelApp() : MaterialApp(home: home),
     ),
   );
   await tester.pump(); // delivers the discovery's first list
+  if (choose) await chooseFirst(tester);
   return fake;
 }
 
@@ -223,7 +242,7 @@ void main() {
     expect(find.byIcon(Icons.check), findsOneWidget);
   });
 
-  testWidgets('"+ Adicionar servidor..." fecha o menu e avisa o usuário', (
+  testWidgets('"+ Adicionar servidor..." fecha o menu e abre a tela com o código obrigatório', (
     tester,
   ) async {
     await pumpApp(tester);
@@ -234,7 +253,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('+ Adicionar servidor...'), findsNothing);
-    expect(find.text('Adicionar servidor chega em breve.'), findsOneWidget);
+    expect(find.text('Adicionar servidor'), findsOneWidget);
+    expect(find.text(AddServerDialog.addressLabel), findsOneWidget);
+    expect(find.text(AddServerDialog.roomLabel), findsOneWidget);
+    expect(find.text(AddServerDialog.codeLabel), findsOneWidget);
+    expect(find.textContaining('obrigatório'), findsWidgets);
+    final code = tester.widget<TextField>(find.byKey(const ValueKey('pairing-code-field')));
+    expect(code.enabled, isFalse, reason: 'the numbers exist only after the server was reached');
   });
 
   testWidgets('MOSTRAR / OCULTAR alterna a visibilidade da senha', (
@@ -415,7 +440,7 @@ void main() {
     ) async {
       await pumpApp(tester, discovery: FakeDiscovery());
 
-      expect(find.text('BUSCANDO'), findsOneWidget);
+      expect(find.text('NENHUM SERVIDOR'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Selecionar servidor'));
       await tester.pumpAndSettle();
@@ -434,7 +459,7 @@ void main() {
       expect(find.textContaining('Rodando em'), findsNothing);
     });
 
-    testWidgets('um servidor que aparece depois entra na lista e é escolhido', (
+    testWidgets('um servidor que aparece depois entra na lista, e nada é escolhido sozinho', (
       tester,
     ) async {
       final discovery = await pumpApp(
@@ -442,15 +467,16 @@ void main() {
         width: 1300,
         discovery: FakeDiscovery(),
       );
-      expect(find.text('BUSCANDO'), findsOneWidget);
+      expect(find.text('NENHUM SERVIDOR'), findsOneWidget);
 
       discovery.emit([
         server('Raspberry', addresses: ['192.168.1.116'], port: 8095),
       ]);
       await tester.pumpAndSettle(); // stream -> providers -> widgets
 
-      expect(find.text('RASPBERRY'), findsOneWidget);
-      expect(find.text('→ Rodando em: 192.168.1.116:8095'), findsOneWidget);
+      expect(find.text('1 DISPONÍVEL'), findsOneWidget);
+      expect(find.text('RASPBERRY'), findsNothing);
+      expect(find.textContaining('Rodando em'), findsNothing);
 
       await tester.tap(find.byTooltip('Selecionar servidor'));
       await tester.pumpAndSettle();
@@ -485,6 +511,7 @@ void main() {
     Future<FakeDiscovery> pumpWithChangedOffice(
       WidgetTester tester, {
       ServerProbe? probe,
+      FakePairer? pairer,
     }) async {
       final trust = ServerTrust(MemoryKeyValueStore());
       await trust.load();
@@ -493,6 +520,7 @@ void main() {
         tester,
         trust: trust,
         probe: probe,
+        pairer: pairer,
         discovery: FakeDiscovery([
           server('Casa', addresses: ['10.0.0.1']),
           server('Escritório', addresses: ['10.0.0.2'], id: 'bbb'),
@@ -540,17 +568,29 @@ void main() {
       await tester.tap(find.text('Continuar mesmo assim'));
       await tester.pumpAndSettle();
       expect(find.text('Este servidor mudou'), findsNothing);
-      expect(find.text('ESCRITÓRIO'), findsOneWidget);
+      // going on leads to pairing (the numbers), not straight into a server that is not the one the person knew
+      expect(find.text('Parear com Escritório'), findsOneWidget);
+      expect(find.text('CASA'), findsOneWidget);
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      expect(find.text('CASA'), findsOneWidget);
     });
 
     testWidgets(
       'continuar com um servidor que não responde avisa e mantém a escolha',
       (tester) async {
-        await pumpWithChangedOffice(tester, probe: answersOnlyOnce());
+        await pumpWithChangedOffice(
+          tester,
+          pairer: FakePairer(['123456'], result: const PairingFailed(PairingFailure.unreachable)),
+        );
         await chooseOffice(tester);
         await tester.tap(find.text('Continuar mesmo assim'));
         await tester.pumpAndSettle();
-        expect(find.text('Escritório não respondeu.'), findsOneWidget);
+        await tester.enterText(find.byKey(const ValueKey('room-field')), '4821');
+        await tester.pump();
+        await tester.tap(find.text('Continuar'));
+        await tester.pumpAndSettle();
+        expect(find.textContaining('Não consegui falar com o servidor'), findsOneWidget);
         expect(find.text('CASA'), findsOneWidget);
       },
     );
@@ -666,7 +706,7 @@ void main() {
         await tester.pumpAndSettle();
         await openMenu(tester);
 
-        expect(find.text('DISPONÍVEIS'), findsOneWidget);
+        expect(find.text('DISPONÍVEIS (2)'), findsOneWidget);
         expect(find.text('DESCONECTADOS'), findsOneWidget);
         final casa = find.byKey(const ValueKey('server-item-casa'));
         final escritorio = find.byKey(const ValueKey('server-item-escritorio'));
@@ -825,7 +865,7 @@ void main() {
       'enquanto testa, o botão diz "Abrindo" e o menu não aceita toques',
       (tester) async {
         final gate = Completer<bool>();
-        await pumpApp(tester, probe: (_) => gate.future);
+        await pumpApp(tester, probe: (_) => gate.future, choose: false);
         await openMenu(tester);
 
         await tester.tap(find.byKey(const ValueKey('server-item-escritorio')));

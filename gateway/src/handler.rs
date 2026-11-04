@@ -3,7 +3,7 @@ use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc, sync::Rw
 
 use bytes::Bytes;
 use http_body_util::{combinators::BoxBody, BodyExt, Full, LengthLimitError, Limited};
-use hyper::{body::Incoming, header, Method, Request, Response, StatusCode};
+use hyper::{body::Body as HttpBody, header, Method, Request, Response, StatusCode};
 use hyper_util::{
     client::legacy::{connect::HttpConnector, Client},
     rt::TokioExecutor,
@@ -21,11 +21,23 @@ pub struct App {
     pub registry: Arc<Registry>,
     /// This machine's address on the LAN (`192.168.1.163:8086`), once known; see `ADDRESS_HEADER`.
     pub address: RwLock<Option<String>>,
-    client: Client<HttpConnector, Full<Bytes>>,
+    pub(crate) client: Client<HttpConnector, Full<Bytes>>,
+    /// WebSocket tunnels: a global budget, one per client, and a signal that closes them on shutdown.
+    pub(crate) ws_slots: Arc<tokio::sync::Semaphore>,
+    pub(crate) ws_per_ip: Arc<crate::limiter::ConnLimit>,
+    pub ws_stop: tokio::sync::watch::Sender<bool>,
+    /// Public CA certificate (PEM) and its SHA-256 fingerprint, when the gateway keeps its own CA (`TLS_AUTO`).
+    pub ca: RwLock<Option<(String, String)>>,
+    /// The session of the pairing by six digits (see `pairing`).
+    #[cfg(feature = "selfcert")]
+    pub pairing: crate::pairing::Pairing,
 }
 
 impl App {
     pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
+        let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
+        #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
+        let max_pairings = cfg.max_pairings;
         let pool = Pool::new(cfg.upstreams.clone());
         let client = Client::builder(TokioExecutor::new())
             .pool_max_idle_per_host(4)
@@ -38,13 +50,26 @@ impl App {
             registry,
             address: RwLock::new(address),
             client,
+            ws_slots: Arc::new(tokio::sync::Semaphore::new(cfg_ws)),
+            ws_per_ip: crate::limiter::ConnLimit::new(cfg_ws_ip),
+            ws_stop: tokio::sync::watch::channel(false).0,
+            ca: RwLock::new(None),
+            #[cfg(feature = "selfcert")]
+            pairing: crate::pairing::Pairing::new(max_pairings),
         }
     }
 }
 
 /// Headers that claim to say who the client is. The gateway is the edge: it sets `x-forwarded-for` itself, and the
 /// others do not reach the API (nothing there should trust them).
-const CLIENT_ADDRESS: [&str; 5] = ["x-forwarded-for", "forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"];
+pub(crate) const CLIENT_ADDRESS: [&str; 6] = [
+    "x-forwarded-for",
+    "forwarded",
+    "x-real-ip",
+    "cf-connecting-ip",
+    "true-client-ip",
+    "x-forwarded-proto",
+];
 
 /// The page of a server may be opened by `localhost` or a VPN address; this header on `GET /server/info/` tells
 /// the web the address the other devices of the LAN use. It is not sent when the request came through a declared
@@ -55,7 +80,14 @@ pub const ADDRESS_HEADER: &str = "x-pindrel-address";
 /// read from the page it is on. Unlike the address it is harmless for anyone to see, so a tunnel gets it too.
 pub const ID_HEADER: &str = "x-pindrel-id";
 
-const HOP_BY_HOP: [&str; 8] = [
+/// SHA-256 of the CA certificate of this server, on `GET /server/info/` (see `selfcert`). Seeing it over plain HTTP proves
+/// nothing: a client trusts it only when it matches the fingerprint it was given out of band (a pairing code).
+pub const CA_HEADER: &str = "x-pindrel-ca";
+
+/// The port of the TLS listener, on `GET /server/info/`, so a client that reached the plain port can offer the secure one.
+pub const TLS_HEADER: &str = "x-pindrel-tls";
+
+pub(crate) const HOP_BY_HOP: [&str; 8] = [
     "connection",
     "keep-alive",
     "proxy-authenticate",
@@ -66,7 +98,7 @@ const HOP_BY_HOP: [&str; 8] = [
     "upgrade",
 ];
 
-fn reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Response<Body> {
+pub(crate) fn reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Response<Body> {
     let mut r = Response::new(Full::new(Bytes::from(body)).map_err(|e| match e {}).boxed());
     *r.status_mut() = status;
     r.headers_mut()
@@ -77,7 +109,7 @@ fn reply(status: StatusCode, content_type: &'static str, body: Vec<u8>) -> Respo
 }
 
 /// Errors use the same protobuf `ErrorHttp` body as the API.
-fn error(status: StatusCode, code: &str, message: &str) -> Response<Body> {
+pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response<Body> {
     reply(status, "application/x-protobuf", proto::error_http(code, message))
 }
 
@@ -89,7 +121,13 @@ fn rate_limited(retry_after: Duration) -> Response<Body> {
     r
 }
 
-pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> Result<Response<Body>, Infallible> {
+/// Works for any request body: hyper's own `Incoming` (HTTP/1.1, HTTP/2). `secure`:
+/// the request arrived over TLS (any version of HTTP).
+pub async fn handle<B>(app: Arc<App>, peer: SocketAddr, secure: bool, mut req: Request<B>) -> Result<Response<Body>, Infallible>
+where
+    B: HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     // the connection's peer, or the client a trusted proxy in front of us vouches for (never a header from anyone else)
     let ip = app.cfg.client_ip.resolve(peer.ip(), req.headers());
     if app.cfg.rate_limit {
@@ -97,8 +135,42 @@ pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> 
             return Ok(rate_limited(wait));
         }
     }
-    let path = req.uri().path();
     let via_proxy = app.cfg.client_ip.is_proxy(peer.ip());
+    // a tunnel or proxy that ended the TLS itself (declared in TRUSTED_PROXIES) is as good as TLS here
+    if !secure && !via_proxy {
+        if let Some(resp) = plain_policy(&app, peer.ip(), &req) {
+            return Ok(resp);
+        }
+    }
+    if crate::websocket::is_upgrade(&req) {
+        return Ok(crate::websocket::tunnel(&app, ip, secure || via_proxy, &mut req).await);
+    }
+    let path = req.uri().path();
+    // the CA and the page that explains it are for the people on the network of this server, never for a tunnel or the internet
+    if (matches!(path, "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") || path.starts_with("/server/pair/"))
+        && (via_proxy || !lan_peer(peer.ip()))
+    {
+        return Ok(error(StatusCode::NOT_FOUND, "not_found", "not found"));
+    }
+    #[cfg(feature = "selfcert")]
+    if path.starts_with("/server/pair/") {
+        return Ok(pairing_routes(&app, peer.ip(), secure, req).await);
+    }
+    if matches!(path, "/server/connect/" | "/server/ca.crt") && matches!(*req.method(), Method::GET | Method::HEAD) {
+        return Ok(public_ca_routes(&app, &req));
+    }
+    if req.method() == Method::GET && path == "/server/ca.pem" {
+        // public by nature (it is a certificate); the fingerprint a client was given out of band is what makes it trusted
+        return Ok(match app.ca.read().ok().and_then(|c| c.clone()) {
+            Some((pem, _)) => {
+                let mut r = reply(StatusCode::OK, "application/x-x509-ca-cert", pem.into_bytes());
+                r.headers_mut()
+                    .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-cache"));
+                r
+            }
+            None => error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own"),
+        });
+    }
     if req.method() == Method::GET && path == "/server/discover/" {
         // the list is the map of the LAN (names, private addresses): only for clients that are on it, never for
         // whoever reaches a tunnel
@@ -124,10 +196,14 @@ pub async fn handle(app: Arc<App>, peer: SocketAddr, req: Request<Incoming>) -> 
             return Ok(rate_limited(wait));
         }
     }
-    Ok(proxy(&app, ip, via_proxy, req).await)
+    Ok(proxy(&app, ip, via_proxy, secure, req).await)
 }
 
-async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incoming>) -> Response<Body> {
+async fn proxy<B>(app: &App, client_ip: IpAddr, via_proxy: bool, secure: bool, req: Request<B>) -> Response<Body>
+where
+    B: HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
     let (parts, body) = req.into_parts();
     // The body is buffered once so that a request can be replayed on another replica when the
     // first one refuses the connection (safe even for POST: nothing was sent yet).
@@ -140,6 +216,15 @@ async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incom
         Ok(Ok(b)) => b.to_bytes(),
     };
     let path_and_query = parts.uri.path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    // What the API needs to know to mark its cookies `Secure`: the scheme the client used. Never taken from the client,
+    // except from a declared proxy, which is the one that ended the TLS.
+    let proto = parts
+        .headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .filter(|v| via_proxy && matches!(*v, "http" | "https"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| if secure { "https".into() } else { "http".into() });
     // A replica that is being stopped (rolling update) can close a connection right after a request was written to it.
     // The request may have been processed, so only the ones that change nothing are replayed, and only once: a request
     // that kills replicas must not be able to walk through all of them.
@@ -154,7 +239,11 @@ async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incom
                 b = b.header(k, v);
             }
         }
-        let out = match b.header("x-forwarded-for", client_ip.to_string()).body(Full::new(body.clone())) {
+        let out = match b
+            .header("x-forwarded-for", client_ip.to_string())
+            .header("x-forwarded-proto", proto.as_str())
+            .body(Full::new(body.clone()))
+        {
             Ok(r) => r,
             Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "invalid request"),
         };
@@ -173,18 +262,37 @@ async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incom
                 }
                 p.headers.remove(ADDRESS_HEADER);
                 p.headers.remove(ID_HEADER);
+                p.headers.remove(CA_HEADER);
+                p.headers.remove(TLS_HEADER);
                 p.headers.remove(header::ACCESS_CONTROL_ALLOW_ORIGIN);
                 p.headers.remove(header::ACCESS_CONTROL_EXPOSE_HEADERS);
                 if parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     if let Ok(v) = header::HeaderValue::from_str(app.registry.id()) {
                         p.headers.insert(ID_HEADER, v);
                     }
+                    if let Some(v) = app
+                        .ca
+                        .read()
+                        .ok()
+                        .and_then(|c| c.as_ref().and_then(|(_, fp)| header::HeaderValue::from_str(fp).ok()))
+                    {
+                        p.headers.insert(CA_HEADER, v);
+                    }
+                    if let Some(t) = &app.cfg.tls {
+                        // where the secure side of this server is: what a client that reached the plain port needs to offer it
+                        p.headers.insert(TLS_HEADER, header::HeaderValue::from(t.port));
+                    }
                     // Public and read-only, no credentials: a web page opened from another server may read it to check
                     // that an address typed by the user is a Pindrel gateway. Only the id is exposed, never the address.
                     p.headers
                         .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, header::HeaderValue::from_static("*"));
+                    let exposed = if app.cfg.tls.is_some() {
+                        "x-pindrel-id, x-pindrel-ca, x-pindrel-tls"
+                    } else {
+                        ID_HEADER
+                    };
                     p.headers
-                        .insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, header::HeaderValue::from_static(ID_HEADER));
+                        .insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, header::HeaderValue::from_static(exposed));
                 }
                 if !via_proxy && parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     let address = app.address.read().ok().and_then(|a| a.clone());
@@ -200,4 +308,404 @@ async fn proxy(app: &App, client_ip: IpAddr, via_proxy: bool, req: Request<Incom
         }
     }
     error(StatusCode::BAD_GATEWAY, "bad_gateway", "no replica available")
+}
+
+/// The host of the request without its port, only when it is something a host can be (letters, digits, dots, dashes, or an
+/// IPv6 address in brackets). It ends up in a redirect and in a page, so anything else is refused.
+pub(crate) fn clean_host<B>(req: &Request<B>) -> Option<String> {
+    let raw = req.headers().get(header::HOST)?.to_str().ok()?.trim();
+    let host = if let Some(rest) = raw.strip_prefix('[') {
+        let end = rest.find(']')?;
+        let v6 = &rest[..end];
+        if v6.is_empty() || !v6.chars().all(|c| c.is_ascii_hexdigit() || c == ':' || c == '.') {
+            return None;
+        }
+        format!("[{v6}]")
+    } else {
+        let h = raw
+            .rsplit_once(':')
+            .map_or(raw, |(h, port)| if port.chars().all(|c| c.is_ascii_digit()) { h } else { raw });
+        if h.is_empty() || h.len() > 253 || !h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+            return None;
+        }
+        h.to_ascii_lowercase()
+    };
+    Some(host)
+}
+
+fn wants_html<B>(req: &Request<B>) -> bool {
+    req.headers()
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.contains("text/html"))
+}
+
+/// What the plain-HTTP port does while TLS is on (see `HttpMode`). `None`: carry on as usual.
+fn plain_policy<B>(app: &App, peer: IpAddr, req: &Request<B>) -> Option<Response<Body>> {
+    let tls = app.cfg.tls.as_ref()?;
+    if app.cfg.http_mode != crate::config::HttpMode::Redirect {
+        return None;
+    }
+    let (method, path) = (req.method(), req.uri().path());
+    // a page on the plain port asks for a room and watches it: that carries no secret of the app
+    if matches!(path, "/server/pair/room" | "/server/pair/room/close") {
+        return None;
+    }
+    let safe = matches!(*method, Method::GET | Method::HEAD);
+    // public, read-only, and what is needed to get started from a device that does not trust the server yet
+    if safe && matches!(path, "/server/info/" | "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") {
+        return None;
+    }
+    if crate::websocket::is_upgrade(req) || !safe {
+        // a password or a note must not be sent in clear just because a client ignored the redirect
+        return Some(error(
+            StatusCode::UPGRADE_REQUIRED,
+            "https_required",
+            "this server accepts this only over HTTPS",
+        ));
+    }
+    if path == "/" && wants_html(req) && app.ca.read().ok().is_some_and(|c| c.is_some()) && lan_peer(peer) {
+        return Some(public_ca_routes(app, req)); // the landing page: how to connect securely
+    }
+    let Some(host) = clean_host(req) else {
+        return Some(error(StatusCode::BAD_REQUEST, "bad_request", "invalid Host header"));
+    };
+    let pq = req.uri().path_and_query().map(|p| p.as_str()).unwrap_or("/");
+    let mut r = Response::new(Full::new(Bytes::new()).map_err(|e| match e {}).boxed());
+    *r.status_mut() = StatusCode::PERMANENT_REDIRECT;
+    if let Ok(v) = header::HeaderValue::from_str(&format!("https://{host}:{}{pq}", tls.port)) {
+        r.headers_mut().insert(header::LOCATION, v);
+    }
+    Some(r)
+}
+
+/// The value of `key` in a body of `key=value` lines; `None` when it is missing or given twice.
+#[cfg(feature = "selfcert")]
+fn field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+    let mut found = None;
+    for line in body.lines() {
+        if let Some((k, v)) = line.trim().split_once('=') {
+            if k == key {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(v.trim());
+            }
+        }
+    }
+    found
+}
+
+/// The header that carries the secret of a room (never in a URL, which ends up in logs and histories).
+#[cfg(feature = "selfcert")]
+pub const ROOM_HEADER: &str = "x-pindrel-room";
+
+/// Prints a master code the log has not shown yet. It is the only place the code is ever written.
+#[cfg(feature = "selfcert")]
+pub fn announce_master(app: &App) {
+    if let Some(code) = app.pairing.take_notice() {
+        print_master(&code);
+    }
+}
+
+#[cfg(feature = "selfcert")]
+pub fn print_master(code: &str) {
+    eprintln!("PAIR: código mestre {code} (vale uma vez, por até 24 h; quando for usado ou vencer, um novo aparece aqui)");
+}
+
+/// `/server/pair/*` (see `pairing`). Only reached by peers on the local network. A page asks for a room and watches it
+/// (`room`, any scheme: it only hands out a 4-digit code); the app pairs in a room or with the master code (TLS only).
+#[cfg(feature = "selfcert")]
+async fn pairing_routes<B>(app: &App, peer: IpAddr, secure: bool, req: Request<B>) -> Response<Body>
+where
+    B: HttpBody<Data = Bytes> + Send + 'static,
+    B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+{
+    use crate::pairing::{hex, unhex, PairError};
+    use std::time::Instant;
+    let fail = |e: PairError| match e {
+        PairError::Busy => error(StatusCode::TOO_MANY_REQUESTS, "pairing_busy", "no room is free right now"),
+        PairError::Locked => error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "pairing_locked",
+            "too many failed attempts, try later",
+        ),
+        PairError::Invalid => error(StatusCode::BAD_REQUEST, "pairing_invalid", "invalid pairing request"),
+        PairError::UnknownRoom => error(StatusCode::NOT_FOUND, "pairing_room", "that room does not exist (any more)"),
+        PairError::Denied => error(StatusCode::FORBIDDEN, "pairing_denied", "the proof does not match"),
+    };
+    let no_store = |mut r: Response<Body>| {
+        r.headers_mut()
+            .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+        r
+    };
+    let (method, path) = (req.method().clone(), req.uri().path().to_string());
+    let token = req.headers().get(ROOM_HEADER).and_then(|v| v.to_str().ok()).and_then(unhex::<16>);
+    let now = Instant::now();
+
+    // ---- the page side: no secrets of the app, so any scheme ------------------------------------------------------
+    match (method.clone(), path.as_str()) {
+        (Method::POST, "/server/pair/room") => {
+            return no_store(match app.pairing.open_room(peer, now) {
+                Ok((code, token)) => reply(
+                    StatusCode::OK,
+                    "text/plain; charset=utf-8",
+                    format!(
+                        "code={code:04}\ntoken={}\nttl={}\n",
+                        hex(&token),
+                        crate::pairing::ROOM_TTL.as_secs()
+                    )
+                    .into_bytes(),
+                ),
+                Err(e) => fail(e),
+            });
+        }
+        (Method::GET, "/server/pair/room") => {
+            let Some(token) = token else {
+                return fail(PairError::UnknownRoom);
+            };
+            return no_store(match app.pairing.room_view(&token, now) {
+                Some(v) => {
+                    let mut body = format!("left={}\n", v.room_left);
+                    if let Some(phone) = v.phone {
+                        body.push_str(&format!("phone={phone}\n"));
+                    }
+                    if let Some((d, left)) = v.digits {
+                        body.push_str(&format!("d={d},{left}\n"));
+                    }
+                    reply(StatusCode::OK, "text/plain; charset=utf-8", body.into_bytes())
+                }
+                None => fail(PairError::UnknownRoom),
+            });
+        }
+        (Method::POST, "/server/pair/room/close") => {
+            if let Some(token) = token {
+                app.pairing.close_room(&token);
+            }
+            return reply(StatusCode::NO_CONTENT, "text/plain", Vec::new());
+        }
+        _ => {}
+    }
+
+    // ---- the app side: TLS only -----------------------------------------------------------------------------------
+    let known = [
+        "/server/pair/start",
+        "/server/pair/reveal",
+        "/server/pair/done",
+        "/server/pair/master/start",
+        "/server/pair/master/finish",
+    ];
+    if method != Method::POST || !known.contains(&path.as_str()) {
+        return error(StatusCode::NOT_FOUND, "not_found", "not found");
+    }
+    if !secure {
+        return error(StatusCode::UPGRADE_REQUIRED, "https_required", "pairing happens only over HTTPS");
+    }
+    let body = match time::timeout(app.cfg.body_timeout, Limited::new(req.into_body(), 512).collect()).await {
+        Ok(Ok(b)) => b.to_bytes(),
+        _ => return error(StatusCode::BAD_REQUEST, "bad_request", "could not read the request body"),
+    };
+    let Ok(text) = std::str::from_utf8(&body) else {
+        return fail(PairError::Invalid);
+    };
+    let started = |ok: Result<([u8; 16], [u8; 16]), PairError>| match ok {
+        Ok((id, nonce)) => reply(
+            StatusCode::OK,
+            "text/plain; charset=utf-8",
+            format!("id={}\nn={}\nname={}\n", hex(&id), hex(&nonce), app.cfg.server_name).into_bytes(),
+        ),
+        Err(e) => fail(e),
+    };
+    // this server's own CA, for the proofs and the digits
+    let own_ca = || app.ca.read().ok().and_then(|c| c.clone()).and_then(|(_, fp)| unhex::<32>(&fp));
+    match path.as_str() {
+        "/server/pair/start" => {
+            let (Some(commit), Some(room)) = (
+                field(text, "c").and_then(unhex::<32>),
+                field(text, "room")
+                    .filter(|r| r.len() == 4 && r.bytes().all(|b| b.is_ascii_digit()))
+                    .and_then(|r| r.parse::<u16>().ok()),
+            ) else {
+                return fail(PairError::Invalid);
+            };
+            started(app.pairing.start(peer, room, commit, now))
+        }
+        "/server/pair/master/start" => {
+            let Some(commit) = field(text, "c").and_then(unhex::<32>) else {
+                return fail(PairError::Invalid);
+            };
+            let r = started(app.pairing.master_start(peer, commit, now));
+            announce_master(app); // an expired code may have been replaced
+            r
+        }
+        "/server/pair/done" => {
+            let Some(id) = field(text, "id").and_then(unhex::<16>) else {
+                return fail(PairError::Invalid);
+            };
+            // 204: that session was the live one, so what the person compared is what the page showed. 409: it was replaced
+            // or expired, and the app must not pair on it.
+            if app.pairing.finish(peer, id, now) {
+                reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
+            } else {
+                error(StatusCode::CONFLICT, "pairing_expired", "that pairing is no longer the current one")
+            }
+        }
+        "/server/pair/reveal" => {
+            let (Some(id), Some(a)) = (field(text, "id").and_then(unhex::<16>), field(text, "a").and_then(unhex::<16>)) else {
+                return fail(PairError::Invalid);
+            };
+            let Some(ca) = own_ca() else {
+                return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
+            };
+            match app.pairing.reveal(peer, id, a, &ca, now) {
+                Ok((digits, room)) => {
+                    eprintln!(
+                        "PAIR: sala {room:04}, código de conferência {digits} (aparelho {peer}); vale {} s",
+                        crate::pairing::TTL.as_secs()
+                    );
+                    reply(StatusCode::NO_CONTENT, "text/plain", Vec::new())
+                }
+                Err(e) => fail(e),
+            }
+        }
+        _ => {
+            // "/server/pair/master/finish": the proof of the app, and the server's own in return
+            let (Some(id), Some(a), Some(proof)) = (
+                field(text, "id").and_then(unhex::<16>),
+                field(text, "a").and_then(unhex::<16>),
+                field(text, "p").and_then(unhex::<32>),
+            ) else {
+                return fail(PairError::Invalid);
+            };
+            let Some(ca) = own_ca() else {
+                return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
+            };
+            let r = match app.pairing.master_finish(peer, id, a, &proof, &ca, now) {
+                Ok(answer) => {
+                    eprintln!("PAIR: aparelho {peer} pareado com o código mestre");
+                    reply(
+                        StatusCode::OK,
+                        "text/plain; charset=utf-8",
+                        format!("p={}\n", hex(&answer)).into_bytes(),
+                    )
+                }
+                Err(e) => {
+                    if e == PairError::Denied {
+                        eprintln!("PAIR: código mestre errado, vindo de {peer}");
+                    }
+                    fail(e)
+                }
+            };
+            announce_master(app); // used, or too many wrong tries: the new code is shown
+            r
+        }
+    }
+}
+
+/// `/server/connect/` (the page) and `/server/ca.crt` (the CA as a download); `/server/ca.pem` is handled with the others.
+#[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
+fn public_ca_routes<B>(app: &App, req: &Request<B>) -> Response<Body> {
+    #[cfg(feature = "selfcert")]
+    {
+        let ca = app.ca.read().ok().and_then(|c| c.clone());
+        let (Some((pem, fingerprint)), Some(tls)) = (ca, app.cfg.tls.as_ref()) else {
+            return error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own");
+        };
+        if req.uri().path() == "/server/ca.crt" {
+            let mut r = reply(StatusCode::OK, "application/x-x509-ca-cert", pem.into_bytes());
+            r.headers_mut().insert(
+                header::CONTENT_DISPOSITION,
+                header::HeaderValue::from_static("attachment; filename=\"pindrel-ca.crt\""),
+            );
+            r.headers_mut()
+                .insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-cache"));
+            return r;
+        }
+        let host = clean_host(req).unwrap_or_else(|| "localhost".into());
+        let mut raw = [0u8; 16];
+        let _ = getrandom::fill(&mut raw);
+        let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let machine = gethostname::gethostname().to_string_lossy().to_string();
+        let page = crate::connect::Page {
+            server_name: &app.cfg.server_name,
+            machine: &machine,
+            fingerprint: &fingerprint,
+            host: &host,
+            tls_port: tls.port,
+            // known since the start (the address the gateway announces): looking at the network again on every request cost ~10 ms
+            lan_ip: app
+                .address
+                .read()
+                .ok()
+                .and_then(|a| a.clone())
+                .and_then(|a| a.rsplit_once(':').and_then(|(ip, _)| ip.parse().ok())),
+            nonce: &nonce,
+        };
+        let mut r = reply(StatusCode::OK, "text/html; charset=utf-8", page.render().into_bytes());
+        let h = r.headers_mut();
+        h.insert(header::CACHE_CONTROL, header::HeaderValue::from_static("no-store"));
+        h.insert(header::REFERRER_POLICY, header::HeaderValue::from_static("no-referrer"));
+        h.insert(header::X_FRAME_OPTIONS, header::HeaderValue::from_static("DENY"));
+        if let Ok(v) = header::HeaderValue::from_str(&page.csp()) {
+            h.insert(header::CONTENT_SECURITY_POLICY, v);
+        }
+        r
+    }
+    #[cfg(not(feature = "selfcert"))]
+    error(StatusCode::NOT_FOUND, "not_found", "this server has no CA of its own")
+}
+
+/// Is the peer on the local network of this machine (loopback, private, link-local, unique-local)? `100.64.0.0/10` (carrier
+/// grade NAT, where VPNs such as Tailscale live) is not.
+pub(crate) fn lan_peer(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
+        IpAddr::V6(v) => {
+            let seg = v.segments();
+            v.is_loopback()
+                || (seg[0] & 0xffc0) == 0xfe80
+                || (seg[0] & 0xfe00) == 0xfc00
+                || v.to_ipv4_mapped()
+                    .is_some_and(|m| m.is_loopback() || m.is_private() || m.is_link_local())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lan_peer;
+
+    #[test]
+    fn only_addresses_of_the_local_network_count() {
+        for ok in [
+            "127.0.0.1",
+            "10.1.2.3",
+            "172.16.0.9",
+            "172.31.255.255",
+            "192.168.1.163",
+            "169.254.1.1",
+            "::1",
+            "fe80::1",
+            "fd12:3456::1",
+            "::ffff:192.168.0.5",
+        ] {
+            assert!(lan_peer(ok.parse().unwrap()), "{ok}");
+        }
+        for bad in [
+            "8.8.8.8",
+            "1.1.1.1",
+            "172.32.0.1",
+            "172.15.0.1",
+            "100.64.0.1",
+            "100.100.100.100",
+            "192.169.0.1",
+            "11.0.0.1",
+            "2001:4860:4860::8888",
+            "::ffff:8.8.8.8",
+            "fec0::1",
+            "0.0.0.0",
+        ] {
+            assert!(!lan_peer(bad.parse().unwrap()), "{bad}");
+        }
+    }
 }

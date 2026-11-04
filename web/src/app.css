@@ -9,8 +9,14 @@
   --color-muted: #9a968e;
   --color-accent: #4a5d44;
   --color-accent-line: #6b8e61;
+  /* accent-line is 3.2:1 on the selected menu entry (accent fill); this one is 4.9:1 there. Text only. */
+  --color-accent-text: #8fb085;
+  /* the edge of a field or an outline button must stand out (WCAG 1.4.11, 3:1); `line` stays for dividers and cards */
+  --color-field-line: #75716a;
   /* earth red: what went offline (disconnected server) */
   --color-offline: #c4574a;
+  /* offline as TEXT (4.5:1 on bg and surface); the dot and borders keep the fuller red above */
+  --color-offline-text: #cd7065;
   --color-cream: #f5f2eb;
   --color-on-cream: #141412;
 
@@ -48,4 +54,22 @@ body {
 
 @utility animate-pulse-ring {
   animation: pulse-ring 1.5s linear infinite;
+}
+
+/* A visible ring for whoever uses the keyboard (never for a mouse click). Unlayered on purpose: it must win over the
+   `focus:outline-none` some fields carry, whose border change alone is too faint to find. */
+:focus-visible {
+  outline: 2px solid var(--color-accent-line);
+  outline-offset: 2px;
+}
+
+/* "Reduce motion" is honoured by the components (`ms()`); this covers whatever animates through plain CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

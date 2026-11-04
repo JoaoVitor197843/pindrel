@@ -2,10 +2,7 @@
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 
 use hyper::service::service_fn;
-use hyper_util::{
-    rt::{TokioIo, TokioTimer},
-    server::graceful::GracefulShutdown,
-};
+use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::{
     net::TcpListener,
     sync::{oneshot, watch, Semaphore},
@@ -37,6 +34,7 @@ impl Running {
     /// announced by connecting to it, and must not find it still open.
     pub async fn shutdown(self) {
         let _ = self.shutdown.send(true);
+        let _ = self.app.ws_stop.send(true); // open tunnels are closed too
         let _ = time::timeout(Duration::from_secs(2), self.closed).await;
         if let Some(d) = &self.mdns {
             let _ = d.shutdown();
@@ -52,6 +50,7 @@ pub async fn start(cfg: Config) -> io::Result<Running> {
 
 /// Like `start`, with the local network given (tests use one that contains loopback).
 pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Running> {
+    warn_if_few_descriptors(&cfg);
     let listener = TcpListener::bind(("0.0.0.0", cfg.port)).await?;
     let addr = listener.local_addr()?;
     let lan = discovery::lan_ip();
@@ -118,6 +117,15 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
     });
     app.pool.probe().await; // so the first request already knows who is up
 
+    #[cfg(feature = "tls")]
+    if let Some(t) = app.cfg.tls.clone() {
+        start_tls(&app, &t, rx.clone()).await?;
+    }
+    #[cfg(not(feature = "tls"))]
+    if app.cfg.tls.is_some() {
+        eprintln!("TLS_PORT is set but this build has no TLS (build with --features tls)");
+    }
+
     let (closed_tx, closed) = oneshot::channel();
     let task = tokio::spawn(accept_loop(app.clone(), listener, rx, closed_tx));
     Ok(Running {
@@ -132,7 +140,7 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
 
 async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Receiver<bool>, closed: oneshot::Sender<()>) {
     let permits = Arc::new(Semaphore::new(app.cfg.max_connections));
-    let graceful = GracefulShutdown::new();
+    let mut conns = tokio::task::JoinSet::new();
     let per_ip = ConnLimit::new(app.cfg.max_connections_per_ip);
     loop {
         // a permit per open connection bounds the memory a flood of connections can take
@@ -155,20 +163,132 @@ async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Rece
         };
         let _ = stream.set_nodelay(true);
         let app2 = app.clone();
+        let mut stop2 = stop.clone();
         let conn = hyper::server::conn::http1::Builder::new()
             .timer(TokioTimer::new())
             .header_read_timeout(app.cfg.header_timeout)
-            .serve_connection(TokioIo::new(stream), service_fn(move |req| handle(app2.clone(), peer, req)));
-        let conn = graceful.watch(conn);
-        tokio::spawn(async move {
-            let _ = conn.await;
+            .serve_connection(TokioIo::new(stream), service_fn(move |req| handle(app2.clone(), peer, false, req)))
+            .with_upgrades();
+        conns.spawn(async move {
+            tokio::pin!(conn);
+            tokio::select! {
+                _ = conn.as_mut() => {}
+                _ = stop2.changed() => {
+                    // finish the request in flight, then close
+                    conn.as_mut().graceful_shutdown();
+                    let _ = conn.as_mut().await;
+                }
+            }
             drop((permit, slot));
         });
+        while conns.try_join_next().is_some() {} // forget the ones that ended
     }
     drop(listener); // nobody can connect any more, even while the open requests finish
     let _ = closed.send(());
-    tokio::select! {
-        _ = graceful.shutdown() => {}
-        _ = time::sleep(Duration::from_secs(5)) => eprintln!("shutdown: some connections were still open after 5 s"),
+    let drained = async { while conns.join_next().await.is_some() {} };
+    if time::timeout(Duration::from_secs(5), drained).await.is_err() {
+        eprintln!("shutdown: some connections were still open after 5 s");
+    }
+}
+
+#[cfg(feature = "tls")]
+async fn start_tls(app: &Arc<App>, t: &crate::config::TlsConfig, stop: watch::Receiver<bool>) -> io::Result<()> {
+    use crate::certs::{self, Reloadable, Source};
+    let source = match &t.auto_dir {
+        #[cfg(feature = "selfcert")]
+        Some(dir) => Source::Auto(crate::selfcert::AutoSettings {
+            dir: dir.clone(),
+            extra_sans: t.extra_sans.clone(),
+        }),
+        #[cfg(not(feature = "selfcert"))]
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "TLS_AUTO needs a build with --features selfcert",
+            ))
+        }
+        None => Source::Files {
+            cert: t.cert.clone(),
+            key: t.key.clone(),
+        },
+    };
+    let resolver = Reloadable::new(source)?;
+    if let Some((_, fp)) = resolver.ca() {
+        *app.ca.write().unwrap() = Some(resolver.ca().unwrap());
+        eprintln!("TLS: own CA, fingerprint {fp}");
+        #[cfg(feature = "selfcert")]
+        eprintln!(
+            "TLS: confirmation code {} (the connection page and the app show the same one)",
+            crate::connect::confirmation(&fp)
+        );
+        // the address the other devices of the LAN use (the one of the default route), not the container bridges
+        if let Some(ip) = discovery::lan_ip() {
+            eprintln!("TLS: pairing code  pindrel://pair?host={ip}:{}&ca={fp}", t.port);
+        }
+        // The master code is shown here and nowhere else; a clock replaces it when it is too old and shows the new one.
+        #[cfg(feature = "selfcert")]
+        {
+            crate::handler::announce_master(app);
+            let (app, mut stop) = (app.clone(), stop.clone());
+            tokio::spawn(async move {
+                let mut tick = time::interval(std::time::Duration::from_secs(60));
+                loop {
+                    tokio::select! {
+                        _ = tick.tick() => {
+                            if let Some(code) = app.pairing.tick(std::time::Instant::now()) {
+                                crate::handler::print_master(&code);
+                            }
+                        }
+                        _ = stop.changed() => return,
+                    }
+                }
+            });
+        }
+    }
+    let tcp = TcpListener::bind(("0.0.0.0", t.port)).await?;
+    let tcp_cfg = certs::server_config(resolver.clone(), &[b"h2", b"http/1.1"])?;
+    tokio::spawn(crate::tls::accept_loop(app.clone(), tcp, tcp_cfg, stop.clone()));
+    eprintln!("TLS: HTTP/1.1 + HTTP/2 on port {}", t.port);
+    if !t.refresh.is_zero() {
+        let (every, mut stop, app) = (t.refresh, stop, app.clone());
+        tokio::spawn(async move {
+            let mut tick = time::interval_at(time::Instant::now() + every, every);
+            loop {
+                tokio::select! {
+                    _ = tick.tick() => match resolver.refresh() {
+                        Ok(true) => {
+                            eprintln!("TLS: the certificate changed and is in use");
+                            *app.ca.write().unwrap() = resolver.ca();
+                        }
+                        Ok(false) => {}
+                        // a broken renewal keeps the old certificate in use
+                        Err(e) => eprintln!("TLS: could not reload the certificate ({e}); keeping the one in use"),
+                    },
+                    _ = stop.changed() => return,
+                }
+            }
+        });
+    }
+    Ok(())
+}
+
+/// Each connection takes a file descriptor here and one more towards the replica, and a WebSocket tunnel keeps two for as
+/// long as it lives. Docker starts containers with a soft limit of 1024: with the defaults the gateway would run out
+/// (accept fails, new clients are refused) long before its own limits are reached, so say so at the start.
+fn warn_if_few_descriptors(cfg: &Config) {
+    let Ok(limits) = std::fs::read_to_string("/proc/self/limits") else {
+        return;
+    };
+    let soft: Option<u64> = limits
+        .lines()
+        .find(|l| l.starts_with("Max open files"))
+        .and_then(|l| l.split_whitespace().nth(3))
+        .and_then(|v| v.parse().ok());
+    let wanted = 2 * (cfg.max_connections + cfg.max_websockets) as u64 + 64;
+    if let Some(soft) = soft.filter(|s| *s < wanted) {
+        eprintln!(
+            "warning: the limit of open files is {soft} but MAX_CONNECTIONS and MAX_WEBSOCKETS can use up to {wanted}; \
+             raise it (docker: ulimits nofile) or lower those settings"
+        );
     }
 }

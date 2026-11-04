@@ -3,8 +3,8 @@
 # - Uses the `flutter` label (PC runner, ci-flutter:1 image there; the Pi, with 1 slot, took ~6 min). The Pi's
 #   `ci-flutter` label (see .forgejo/images/ci-flutter.Dockerfile) still exists as an alternative.
 # - Analysis: `flutter analyze` (Dart, flutter_lints).
-# - Tests: does not run the integration test that calls the Go server ("Testa a chamada de api para o go");
-#   empty test files (placeholders) are ignored until they get content, otherwise
+# - Tests: the integration test that calls the Go server ("Testa a chamada de api para o go") skips itself when no server
+#   answers; empty test files (placeholders) are ignored until they get content, otherwise
 #   flutter test fails to load them.
 name: mobile
 
@@ -50,11 +50,13 @@ jobs:
       - name: Análise — flutter analyze
         run: flutter analyze
 
-      - name: Testes (sem os que dependem do servidor)
+      # the one test that talks to a running server (test/core/api) finds out by itself whether there is one, and in which
+      # mode (plain, or HTTPS only), and skips itself when there is none: no filter by name is needed
+      - name: Testes
         run: |
           files=$(find test -name '*_test.dart' -size +0)
           if [ -z "$files" ]; then echo "nenhum teste com conteúdo"; exit 0; fi
-          flutter test $files --name '^(?!Testa a chamada de api para o go)'
+          flutter test $files
 
       - name: Pico de memória do job
         if: always()

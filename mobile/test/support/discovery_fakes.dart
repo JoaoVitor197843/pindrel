@@ -10,6 +10,9 @@ class FakeDiscovery implements ServerDiscovery {
     : _current = initial;
 
   List<DiscoveredServer> _current;
+
+  /// The list as it stands now.
+  List<DiscoveredServer> get current => _current;
   final _updates = StreamController<List<DiscoveredServer>>.broadcast();
   int listeners = 0;
 

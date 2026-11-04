@@ -6,9 +6,35 @@ use crate::{
     pool::parse_targets,
 };
 
+/// TLS listener (HTTP/1.1 + HTTP/2 over TCP). HTTP/3 was measured and left out: no gain worth its code on a LAN.
+#[derive(Debug, Clone)]
+pub struct TlsConfig {
+    pub port: u16,
+    pub cert: std::path::PathBuf,
+    pub key: std::path::PathBuf,
+    /// `TLS_AUTO=true`: the gateway keeps its own CA and server certificate in this directory instead of reading
+    /// `cert` and `key` (build feature `selfcert`).
+    pub auto_dir: Option<std::path::PathBuf>,
+    /// Extra names or addresses for the automatic certificate (`TLS_SANS`).
+    pub extra_sans: Vec<String>,
+    /// How often the certificate is looked at again (renewed files, a changed address); zero turns it off.
+    pub refresh: Duration,
+}
+
+/// What the plain-HTTP port does when TLS is on. `Redirect`: only the public bootstrap routes answer (`/server/info/`,
+/// `/server/ca.pem`, `/server/connect/`, and a landing page at `/`); other GETs are sent to HTTPS and anything that could
+/// carry a password or a note (POST, WebSocket) is refused, so nothing private travels in clear. `Full`: as before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpMode {
+    Full,
+    Redirect,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub port: u16,
+    /// Off unless `TLS_PORT` is set (needs the `tls` build feature).
+    pub tls: Option<TlsConfig>,
     pub upstreams: Vec<SocketAddr>,
     pub server_name: String,
     pub mdns: bool,
@@ -27,7 +53,20 @@ pub struct Config {
     pub max_connections: usize,
     /// Open connections one client may hold (not counted for the declared proxies, which carry many clients).
     pub max_connections_per_ip: usize,
+    /// Open WebSocket tunnels in total, and per client (a tunnel outlives the HTTP connection that opened it, so the
+    /// connection limits above do not count it).
+    pub max_websockets: usize,
+    pub max_websockets_per_ip: usize,
+    /// Pairing rooms open at the same time (`PAIRING_MAX_ROOMS`): that many people can pair at once, each seeing only theirs.
+    pub max_pairings: usize,
+    /// A tunnel with no byte in either direction for this long is closed (clients ping, so a live one never idles).
+    pub ws_idle: Duration,
     pub rate_limit: bool,
+    /// Only used when `tls` is set.
+    pub http_mode: HttpMode,
+    /// Origins (besides the server's own) allowed to open a WebSocket from a browser (`WS_ALLOWED_ORIGINS`). Clients
+    /// that are not browsers send no `Origin` and are not affected.
+    pub ws_allowed_origins: Vec<String>,
     /// Who counts as the client behind a trusted proxy (`TRUSTED_PROXIES`, `CLIENT_IP_HEADER`); by default the peer.
     pub client_ip: ClientIp,
     pub max_body: usize,
@@ -41,6 +80,7 @@ impl Config {
     pub fn new(upstreams: Vec<SocketAddr>) -> Self {
         Self {
             port: 8080,
+            tls: None,
             upstreams,
             server_name: "Pindrel".into(),
             mdns: true,
@@ -52,7 +92,13 @@ impl Config {
             server_id_file: None,
             max_connections: 1024,
             max_connections_per_ip: 64,
+            max_websockets: 1024,
+            max_websockets_per_ip: 32,
+            max_pairings: 6,
+            ws_idle: Duration::from_secs(600),
             rate_limit: true,
+            http_mode: HttpMode::Redirect,
+            ws_allowed_origins: Vec::new(),
             client_ip: ClientIp::direct(),
             max_body: 1 << 20,
             header_timeout: Duration::from_secs(10),
@@ -85,6 +131,11 @@ impl Config {
         let max_connections = parse("MAX_CONNECTIONS", "1024", 1, 100_000) as usize;
         let max_connections_per_ip = parse("MAX_CONNECTIONS_PER_IP", "64", 1, 100_000) as usize;
         let max_body = parse("MAX_BODY_BYTES", "1048576", 1, 64 << 20) as usize;
+        let max_websockets = parse("MAX_WEBSOCKETS", "1024", 0, 100_000) as usize;
+        let max_websockets_per_ip = parse("MAX_WEBSOCKETS_PER_IP", "32", 1, 100_000) as usize;
+        let max_pairings = parse("PAIRING_MAX_ROOMS", "6", 1, 64) as usize;
+        let ws_idle = parse("WS_IDLE_SECS", "600", 0, 86_400);
+        let tls_refresh = parse("TLS_REFRESH_SECS", "3600", 0, 86_400 * 7);
         let mut flag = |key: &str, default: bool| -> bool {
             match get(key) {
                 None => default,
@@ -96,6 +147,55 @@ impl Config {
         };
         let mdns = flag("MDNS_ENABLED", true);
         let rate_limit = flag("RATE_LIMIT_ENABLED", true);
+        let tls_auto = flag("TLS_AUTO", false);
+        let tls_port = get("TLS_PORT").map(|v| match v.parse::<u16>() {
+            Ok(p) if p > 0 => p,
+            _ => {
+                errs.push(format!("TLS_PORT: invalid value {v:?} (expected 1-65535)"));
+                0
+            }
+        });
+        let tls_cert = get("TLS_CERT_FILE");
+        let tls_key = get("TLS_KEY_FILE");
+        let tls_dir = get("TLS_DIR");
+        let tls = tls_port.map(|port| {
+            if tls_auto {
+                if tls_dir.is_none() {
+                    errs.push("TLS_DIR: required when TLS_AUTO is true".into());
+                }
+                if tls_cert.is_some() || tls_key.is_some() {
+                    errs.push("TLS_AUTO and TLS_CERT_FILE/TLS_KEY_FILE: choose one".into());
+                }
+            } else if tls_cert.is_none() || tls_key.is_none() {
+                errs.push("TLS_CERT_FILE and TLS_KEY_FILE: required when TLS_PORT is set (or use TLS_AUTO=true)".into());
+            }
+            TlsConfig {
+                port,
+                cert: tls_cert.clone().unwrap_or_default().into(),
+                key: tls_key.clone().unwrap_or_default().into(),
+                auto_dir: tls_auto.then(|| tls_dir.clone().unwrap_or_default().into()),
+                extra_sans: get("TLS_SANS")
+                    .map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                    .unwrap_or_default(),
+                refresh: Duration::from_secs(tls_refresh),
+            }
+        });
+        let http_mode = match get("HTTP_MODE").as_deref() {
+            None | Some("redirect") => HttpMode::Redirect,
+            Some("full") => HttpMode::Full,
+            Some(other) => {
+                errs.push(format!("HTTP_MODE: invalid value {other:?} (expected redirect or full)"));
+                HttpMode::Redirect
+            }
+        };
+        let ws_allowed_origins: Vec<String> = get("WS_ALLOWED_ORIGINS")
+            .map(|v| {
+                v.split(',')
+                    .map(|s| s.trim().trim_end_matches('/').to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
         let upstreams = match get("UPSTREAMS") {
             None => {
                 errs.push("UPSTREAMS: required (e.g. 127.0.0.1:9000-9099)".into());
@@ -121,6 +221,7 @@ impl Config {
         }
         Ok(Self {
             port,
+            tls,
             upstreams,
             server_name: get("SERVER_NAME").unwrap_or_else(|| "Pindrel".into()),
             mdns,
@@ -134,7 +235,13 @@ impl Config {
             server_id_file: get("SERVER_ID_FILE").map(std::path::PathBuf::from),
             max_connections,
             max_connections_per_ip,
+            max_websockets,
+            max_websockets_per_ip,
+            max_pairings,
+            ws_idle: Duration::from_secs(ws_idle),
             rate_limit,
+            http_mode,
+            ws_allowed_origins,
             client_ip,
             max_body,
             ..Self::new(Vec::new())
@@ -227,5 +334,46 @@ mod tests {
     fn blank_values_count_as_unset() {
         let c = load(&[("UPSTREAMS", "127.0.0.1:1"), ("SERVER_NAME", "   "), ("GATEWAY_PORT", "")]).unwrap();
         assert_eq!((c.server_name.as_str(), c.port), ("Pindrel", 8080));
+    }
+
+    #[test]
+    fn tls_is_off_by_default_and_needs_both_files_when_on() {
+        assert!(load(&[("UPSTREAMS", "127.0.0.1:1")]).unwrap().tls.is_none());
+        let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TLS_PORT", "8443")]).unwrap_err();
+        assert!(errs.iter().any(|e| e.starts_with("TLS_CERT_FILE and TLS_KEY_FILE")), "{errs:?}");
+        let t = load(&[
+            ("UPSTREAMS", "127.0.0.1:1"),
+            ("TLS_PORT", "8443"),
+            ("TLS_CERT_FILE", "/c.pem"),
+            ("TLS_KEY_FILE", "/k.pem"),
+        ])
+        .unwrap()
+        .tls
+        .unwrap();
+        assert_eq!(t.port, 8443);
+    }
+
+    #[test]
+    fn the_pairing_limits_have_defaults_and_bounds() {
+        let c = load(&[("UPSTREAMS", "127.0.0.1:1")]).unwrap();
+        assert_eq!(c.max_pairings, 6, "six people at once unless told otherwise");
+        let c = load(&[("UPSTREAMS", "127.0.0.1:1"), ("PAIRING_MAX_ROOMS", "12")]).unwrap();
+        assert_eq!(c.max_pairings, 12);
+        for (key, bad) in [
+            ("PAIRING_MAX_ROOMS", "0"),
+            ("PAIRING_MAX_ROOMS", "65"),
+            ("PAIRING_MAX_ROOMS", "many"),
+        ] {
+            let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), (key, bad)]).unwrap_err();
+            assert!(errs.iter().any(|e| e.starts_with(key)), "{key}={bad}: {errs:?}");
+        }
+    }
+
+    #[test]
+    fn bad_tls_settings_are_reported_with_the_rest() {
+        for port in ["0", "70000", "x"] {
+            let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TLS_PORT", port)]).unwrap_err();
+            assert!(errs.iter().any(|e| e.starts_with("TLS_PORT")), "{port}: {errs:?}");
+        }
     }
 }

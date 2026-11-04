@@ -6,7 +6,16 @@
 
 FROM --platform=$BUILDPLATFORM rust:1-alpine AS builder
 ARG TARGETARCH
-RUN apk add --no-cache musl-dev
+# What the gateway can do besides the plain proxy: `selfcert` is HTTPS with its own certificate authority (+ the pairing
+# page), off until TLS_AUTO is set. `--build-arg FEATURES=` builds the plain gateway (no TLS code at all).
+ARG FEATURES=selfcert
+# `ring` (TLS) has C and assembly parts, so the TARGET needs a C compiler. zig carries the musl headers and libraries of
+# every target, which lets the arm64 build (a Raspberry Pi) run on the amd64 builder with no emulation and no cross gcc.
+RUN apk add --no-cache musl-dev zig
+ENV ZIG_GLOBAL_CACHE_DIR=/tmp/zig-global ZIG_LOCAL_CACHE_DIR=/tmp/zig-local
+# The compiler and archiver the arm64 build uses (see cross/zigcc-aarch64).
+COPY cross/zigcc-aarch64 cross/zigar /usr/local/bin/
+ENV CC_aarch64_unknown_linux_musl=/usr/local/bin/zigcc-aarch64 AR_aarch64_unknown_linux_musl=/usr/local/bin/zigar
 WORKDIR /app
 # .cargo/config.toml carries the flags of the aarch64 target (static + pic + rust-lld). The x86_64 target gets
 # the same static flag through the environment; RUSTFLAGS is NOT set globally because it would override the
@@ -23,10 +32,10 @@ ENV CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-sta
 COPY Cargo.toml Cargo.lock ./
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     mkdir src && echo '' > src/lib.rs && echo 'fn main() {}' > src/main.rs \
-    && cargo build --release --locked --target "$(cat /rust-target)" && rm -rf src
+    && cargo build --release --locked --target "$(cat /rust-target)" ${FEATURES:+--features "$FEATURES"} && rm -rf src
 COPY src ./src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    touch src/lib.rs src/main.rs && cargo build --release --locked --target "$(cat /rust-target)" \
+    touch src/lib.rs src/main.rs && cargo build --release --locked --target "$(cat /rust-target)" ${FEATURES:+--features "$FEATURES"} \
     && cp "target/$(cat /rust-target)/release/gateway" /gateway
 
 # /data holds the id of this server (and the servers it remembers) between restarts; the volume mounted there starts
