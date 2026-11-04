@@ -1,9 +1,11 @@
-# Release gate: on push to main, runs ALL the tests (backend with a database, web, gateway, mobile) on the PC's runner.
+# Release gate: on push to main, runs ALL the tests (backend with a database, web, gateway, mobile) on the PC's runner and,
+# only if every one passes, asks GitHub to build and publish the images for that commit.
 #
-# The images are NOT built here any more: the build runs on GitHub (.github/workflows/release-images.yml, Docker Hub), which
-# is faster than this PC's connection and reaches the Raspberry Pi without Tailscale. This repository is mirrored to
-# GitHub, so a push to main starts that build there on its own. It does not wait for these tests: run them
-# (they are what this workflow does, or locally) before pushing to main.
+# The images are built on GitHub (.github/workflows/release-images.yml, Docker Hub): faster than this PC's connection and
+# reachable by the Raspberry Pi without Tailscale. GitHub cannot reach this Forgejo, so the `images` job below calls GitHub
+# (.forgejo/scripts/dispatch-images.sh): it waits for the push mirror to bring the commit over and starts the workflow on it.
+# GitHub no longer reacts to a push by itself, so a red test means no image and the Pi stays on the version it runs.
+# Needs the secret GH_RELEASE_TOKEN with "Actions: read and write" (besides the "Contents" permission it already has).
 name: release
 
 on:
@@ -31,3 +33,17 @@ jobs:
     uses: ./.forgejo/workflows/gateway.yml
   test-mobile:
     uses: ./.forgejo/workflows/mobile.yml
+
+  # Starts the image build on GitHub for THIS commit, only after all the tests above passed (`needs`).
+  images:
+    needs: [test-backend, test-web, test-gateway, test-mobile]
+    runs-on: build
+    container:
+      image: ci-pc:1
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pedir o build das imagens ao GitHub
+        env:
+          GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}
+        run: sh .forgejo/scripts/dispatch-images.sh "$GITHUB_SHA"
