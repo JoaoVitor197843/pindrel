@@ -17,7 +17,7 @@ O HTTP/3 foi medido e **removido** do gateway de propósito (ver o fim de `RESUL
 | `wstest.mjs`, `wsecho.mjs`, `wsload.mjs` | WebSocket: tempo de abertura, ida e volta, rajada, e muitos túneis abertos (RAM do gateway). |
 | `h2ws.mjs` | Confere que o WebSocket sobre HTTP/2 é recusado (nenhum navegador o oferece). |
 | `secure.mjs` | O Chrome falando com o gateway: avisos de certificado, CSP e o que muda quando a CA é confiável. |
-| `bench.dart`, `ws.dart` | O mesmo, do Dart (`dart:io`, o que o app Flutter usa). Rodam dentro de um projeto Dart (`dart run bin/bench.dart`). |
+| `bench.dart`, `ws.dart` | O mesmo, do Dart (`dart:io`, o que o app Flutter usa). Têm `pubspec.yaml` próprio: `dart pub get` e depois `dart run bench.dart`. |
 | `mkcert.sh` | Uma CA local pequena e um certificado para esta máquina, para testar HTTPS como um cliente de verdade valida. |
 | `nginx.conf`, `Caddyfile` | Terminadores TLS de referência, para comparar custo de RAM e tempo com o gateway. |
 
