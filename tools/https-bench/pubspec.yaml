@@ -1,0 +1,9 @@
+name: https_bench
+description: Medições de HTTPS/HTTP2/WebSocket do gateway (não faz parte do produto).
+publish_to: none
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  http2: ^2.3.0
