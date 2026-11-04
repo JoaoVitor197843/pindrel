@@ -83,7 +83,7 @@ Por segurança, a senha do banco (`DB_PASSWORD`) e o segredo dos tokens (`JWT_SE
 
 As imagens prontas (amd64 e arm64, também para Raspberry Pi) estão no Docker Hub: `joaovitor2753/pindrel` e `joaovitor2753/pindrel-gateway`.
 
-O `compose.yml` aplica o orçamento de RAM do projeto: 128 MB para a API e 128 MB para o Postgres (256 MB no total, o recomendado), com `GOMEMLIMIT=100MiB` na API. O Postgres só é publicado em `127.0.0.1`.
+O `compose.yml` aplica o orçamento de RAM do projeto: 128 MB para a API e 128 MB para o Postgres (256 MB no total, o recomendado), com `GOMEMLIMIT=64MiB` na API. O Postgres só é publicado em `127.0.0.1`.
 
 Para rodar o backend fora do Docker, copie também o exemplo dele: `cp backend/.env.example backend/.env`.
 
