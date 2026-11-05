@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, vi } from 'vitest'
 
+// jsdom has no ResizeObserver (Svelte's bind:clientHeight needs one): nothing resizes there, so a stub that never fires is exact.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver
+
 // jsdom does not implement matchMedia; this stub evaluates `min-width` against `viewport.width`.
 export const viewport = {
   width: 450,
@@ -12,7 +19,9 @@ export const viewport = {
 
 function matches(query: string) {
   const min = /min-width:\s*(\d+)px/.exec(query)
-  return min ? viewport.width >= Number(min[1]) : false
+  if (min) return viewport.width >= Number(min[1])
+  const max = /max-width:\s*(\d+)px/.exec(query)
+  return max ? viewport.width <= Number(max[1]) : false
 }
 
 window.matchMedia = (query: string) => {

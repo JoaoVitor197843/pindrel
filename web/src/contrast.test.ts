@@ -36,6 +36,12 @@ describe('contraste das cores (WCAG AA)', () => {
     ['erro (texto) na superfície', rgb('offline-text'), surface],
     ['erro (texto) no fundo', rgb('offline-text'), bg],
     ['servidor offline (nome) no destaque vermelho', rgb('muted'), blend(rgb('offline'), surface, 0.15)],
+    ['tag rust no chip', rgb('tag-rust'), blend(rgb('tag-rust'), surface, 0.15)],
+    ['tag azul no chip', rgb('tag-blue'), blend(rgb('tag-blue'), surface, 0.15)],
+    ['tag teal no chip', rgb('tag-teal'), blend(rgb('tag-teal'), surface, 0.15)],
+    ['tag dourada no chip', rgb('tag-gold'), blend(rgb('tag-gold'), surface, 0.15)],
+    ['tag ameixa no chip', rgb('tag-plum'), blend(rgb('tag-plum'), surface, 0.15)],
+    ['tag verde no chip', rgb('accent-text'), blend(rgb('accent-line'), surface, 0.15)],
     ['botão principal', rgb('on-cream'), rgb('cream')],
     ['letra do logo', rgb('fg'), rgb('accent')],
   ])('texto: %s tem pelo menos 4,5:1', (_, fg, back) => {
