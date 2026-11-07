@@ -80,9 +80,11 @@ func noMiddleware(next http.Handler) http.Handler { return next }
 
 // webCSP is the Content-Security-Policy of the web page: scripts only from this server (plus WebAssembly, for libsodium),
 // styles may be inline (the build puts the stylesheet inside index.html), nothing can be framed or embedded, and the page
-// may talk to other Pindrel servers the person added (any http or https address, and WebSockets).
+// may talk to other Pindrel servers the person added (any http or https address, and WebSockets). Audio and video blocks
+// play a file that stays on its own server, so media may come from any http or https address; it is only asked for when
+// the person presses play (the blocks use preload="none"), and images, fonts, frames and scripts stay as closed as before.
 const webCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; " +
+	"img-src 'self' data: blob:; media-src 'self' http: https: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; " +
 	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 // publicDir is where the Docker image places the web build.

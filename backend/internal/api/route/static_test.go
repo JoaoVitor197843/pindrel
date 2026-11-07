@@ -399,6 +399,10 @@ func TestSPAHandler_PageCarriesTheContentSecurityPolicyAndAssetsDoNot(t *testing
 				t.Errorf("%s: CSP lacks %q: %s", target, want, csp)
 			}
 		}
+		// media may come from other servers (audio and video blocks); nothing else gets that opening
+		if !strings.Contains(csp, "media-src 'self' http: https: blob:") || strings.Contains(csp, "img-src 'self' data: blob: http") || strings.Contains(csp, "frame-src") || strings.Contains(csp, "script-src 'self' http") {
+			t.Errorf("%s: media-src missing, or something else opened: %s", target, csp)
+		}
 		if strings.Contains(csp, "script-src 'self' 'unsafe-inline'") || strings.Contains(csp, "unsafe-eval'") && !strings.Contains(csp, "wasm-unsafe-eval") {
 			t.Errorf("%s: scripts may run inline: %s", target, csp)
 		}
