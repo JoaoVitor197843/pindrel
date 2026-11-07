@@ -35,11 +35,18 @@ services:
       - DEBUG_MODE=${DEBUG_MODE:-false}
       - DB_MAX_CONNS=${DB_MAX_CONNS:-4}
       - IN_APP_RATE_LIMIT=${IN_APP_RATE_LIMIT:-true}
+      # uploaded files live on a volume shared by every replica; FILES_DIR= (empty) turns the feature off. Sizes: see backend/.env.example
+      - FILES_DIR=${FILES_DIR-/data/files}
+      - FILE_MAX_BYTES=${FILE_MAX_BYTES:-1073741824}
+      - FILE_QUOTA_BYTES=${FILE_QUOTA_BYTES:-21474836480}
+      - FILES_MIN_FREE_BYTES=${FILES_MIN_FREE_BYTES:-21474836480}
       # in-app limits count the connection's address; behind a proxy on this host list it here (see internal/clientip)
       - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       - CLIENT_IP_HEADER=${CLIENT_IP_HEADER:-X-Forwarded-For}
       # Go soft memory limit, kept below mem_limit so the GC works before the container is killed
       - GOMEMLIMIT=${GOMEMLIMIT:-64MiB}
+    volumes:
+      - files_data:/data/files
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,3 +93,4 @@ services:
         max-file: "3"
 volumes:
   pg_data:
+  files_data:

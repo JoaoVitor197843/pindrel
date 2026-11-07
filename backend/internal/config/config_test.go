@@ -101,3 +101,64 @@ func TestLoad_BadProxySettingsAreReportedTogether(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_FilesAreOffByDefaultAndTheLimitsHaveSaneDefaults(t *testing.T) {
+	setRequired(t)
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := cfg.Files
+	if f.Dir != "" || f.MaxFileBytes != 1<<30 || f.QuotaBytes != 20<<30 || f.MinFreeBytes != 20<<30 || f.MaxOpenUploads != 4 || f.ChunksPerMinute != 600 {
+		t.Errorf("defaults: %+v", f)
+	}
+}
+
+func TestLoad_FilesSettings(t *testing.T) {
+	setRequired(t)
+	t.Setenv("FILES_DIR", "/data/files")
+	t.Setenv("FILE_MAX_BYTES", "5242880")
+	t.Setenv("FILE_QUOTA_BYTES", "104857600")
+	t.Setenv("FILES_MIN_FREE_BYTES", "0")
+	t.Setenv("FILE_UPLOAD_TTL", "2h")
+	t.Setenv("FILE_ORPHAN_GRACE", "24h")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := cfg.Files
+	if f.Dir != "/data/files" || f.MaxFileBytes != 5<<20 || f.QuotaBytes != 100<<20 || f.MinFreeBytes != 0 || f.UploadTTL.Hours() != 2 || f.OrphanGrace.Hours() != 24 {
+		t.Errorf("settings: %+v", f)
+	}
+}
+
+func TestLoad_FilesSettingsOutOfRangeOrBrokenAreRefusedTogether(t *testing.T) {
+	for name, env := range map[string][2]string{
+		"zero max":        {"FILE_MAX_BYTES", "0"},
+		"negative quota":  {"FILE_QUOTA_BYTES", "-1"},
+		"not a number":    {"FILE_MAX_BYTES", "muito"},
+		"free below zero": {"FILES_MIN_FREE_BYTES", "-5"},
+		"open uploads 0":  {"FILE_UPLOADS_MAX_OPEN", "0"},
+		"bad duration":    {"FILE_LINK_TTL", "dez minutos"},
+		"chunks 0":        {"FILE_CHUNKS_PER_MIN", "0"},
+	} {
+		setRequired(t)
+		t.Setenv(env[0], env[1])
+		if _, err := config.Load(); err == nil {
+			t.Errorf("%s: accepted %s=%s", name, env[0], env[1])
+		}
+	}
+}
+
+func TestLoad_FilesNeedTwoDatabaseConnections(t *testing.T) {
+	setRequired(t)
+	t.Setenv("FILES_DIR", "/data/files")
+	t.Setenv("DB_MAX_CONNS", "1")
+	if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "DB_MAX_CONNS") {
+		t.Errorf("one connection with files on: %v", err)
+	}
+	t.Setenv("FILES_DIR", "")
+	if _, err := config.Load(); err != nil {
+		t.Errorf("one connection with files off: %v", err)
+	}
+}
