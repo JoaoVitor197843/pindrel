@@ -28,7 +28,8 @@
   import { autosize, place } from '../lib/components/editor/autosize'
   import { ms } from '../lib/motion'
   import { ago, isTextType, type Block, type BlockType } from '../lib/stores/blocks'
-  import { toggleMark } from '../lib/stores/inline'
+  import { toggleMark, type Mark } from '../lib/stores/inline'
+  import { barLock, instances, type RichInstance } from '../lib/components/editor/rich/engine'
   import { Dock, dockScale } from '../lib/stores/dock.svelte'
   import { PageEditor } from '../lib/stores/editor.svelte'
   import { toast } from '../lib/stores/toast.svelte'
@@ -135,21 +136,35 @@
 
   // the selection toolbar follows a text field that has something selected
   let fmtField = $state<HTMLTextAreaElement | null>(null)
+  let fmtRich = $state<{ inst: RichInstance; el: HTMLElement } | null>(null)
   function syncSelection() {
+    // the link address field of the bar has the focus: the bar and the selection it works on stay as they are
+    if (barLock.linking) return
     const el = document.activeElement
+    const host = el?.closest?.('[data-rich]') as HTMLElement | null | undefined
+    const inst = host ? instances.get(host) : undefined
+    if (host && inst && root?.contains(host) && ed.can('text')) {
+      const { from, to } = inst.selection()
+      fmtField = null
+      fmtRich = from !== to ? { inst, el: host } : null
+      return
+    }
+    fmtRich = null
     if (el instanceof HTMLTextAreaElement && el.matches('[data-fmt]') && root?.contains(el) && ed.can('text') && el.selectionStart !== el.selectionEnd) {
       fmtField = el
     } else if (!el?.closest?.('[aria-label="Formatar texto"]')) fmtField = null
   }
 
   function fmtKey(e: KeyboardEvent) {
-    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return
     const key = e.key.toLowerCase()
-    if (key !== 'b' && key !== 'i' && key !== 'u') return
+    // Ctrl+B / I / U like everywhere; strike is Ctrl+Shift+S (Notion) or Ctrl+Shift+X (Gmail)
+    const mark: Mark | null = e.shiftKey ? (key === 's' || key === 'x' ? 'strike' : key === 'h' ? 'highlight' : null) : key === 'b' ? 'bold' : key === 'i' ? 'italic' : key === 'u' ? 'underline' : null
+    if (!mark) return
     const el = e.target as HTMLTextAreaElement
     if (!el.matches?.('[data-fmt]') || !ed.can('text')) return
     e.preventDefault()
-    applyEdit(el, toggleMark(el.value, el.selectionStart, el.selectionEnd, key === 'b' ? 'bold' : key === 'u' ? 'underline' : 'italic'))
+    applyEdit(el, toggleMark(el.value, el.selectionStart, el.selectionEnd, mark))
   }
 
   function duplicateBlock(blockId: string) {
@@ -645,8 +660,8 @@
     {/if}
   {/if}
 
-  {#if fmtField}
-    <SelectionToolbar field={fmtField} onerror={(m) => toast.show(m)} />
+  {#if fmtField || fmtRich}
+    <SelectionToolbar field={fmtField ?? undefined} rich={fmtRich ?? undefined} onerror={(m) => toast.show(m)} />
   {/if}
 
   {#if zen}

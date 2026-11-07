@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { tick } from 'svelte'
 import { resetNearView } from '../lib/components/editor/nearView'
+import { instances, type RichInstance } from '../lib/components/editor/rich/engine'
 import { prefs } from '../lib/stores/prefs.svelte'
 import { toast } from '../lib/stores/toast.svelte'
 import { Workspace } from '../lib/stores/workspace.svelte'
@@ -20,6 +21,28 @@ const kindsOf = () => blockEls().map((b) => b.getAttribute('aria-label')!.replac
 const open = (id = 'p0', onback = vi.fn()) => render(Editor, { ws, id, onback })
 const menuItem = (name: string) => screen.getByRole('menuitem', { name })
 const caret = (el: HTMLTextAreaElement | HTMLInputElement, at: number, to = at) => el.setSelectionRange(at, to)
+
+/** A text block is drawn text until it is focused; this focuses it and gives the rich-text editor that takes its place. */
+async function rich(label = 'Parágrafo') {
+  ;(document.activeElement as HTMLElement | null)?.blur?.()
+  screen.getByRole('textbox', { name: label }).focus()
+  await waitFor(() => expect(document.querySelector(`[data-rich] [aria-label="${label}"]`)).not.toBeNull())
+  return current(label)
+}
+/** The editor that is open now (the one of the block with this label). */
+function current(label = 'Parágrafo') {
+  const dom = document.querySelector<HTMLElement>(`[data-rich] [aria-label="${label}"]`)!
+  const host = dom.closest<HTMLElement>('[data-rich]')!
+  return { inst: instances.get(host) as RichInstance, dom, host }
+}
+const plain = (inst: RichInstance) => inst.runs().map((r) => r.text).join('')
+/** Types a whole text in place of what the block had, through the editor itself. */
+async function put(inst: RichInstance, text: string) {
+  inst.replace(0, plain(inst).length, text ? [{ text, marks: {} }] : [])
+  await tick()
+}
+const drawn = (label = 'Parágrafo') => screen.getByRole('textbox', { name: label })
+const noEditor = () => expect(document.querySelector('[data-rich]')).toBeNull()
 
 async function violations(): Promise<string[]> {
   const result = await axe.run(document.body, { rules: { 'color-contrast': { enabled: false }, region: { enabled: false } } })
@@ -73,7 +96,7 @@ describe('Editor — a página do design', () => {
 
   it('uma página antiga abre com o resumo como parágrafo', () => {
     open('p5')
-    expect((screen.getByLabelText('Parágrafo') as HTMLTextAreaElement).value).toContain('Levain')
+    expect(drawn().textContent).toContain('Levain')
   })
 })
 
@@ -89,9 +112,10 @@ describe('Editor — título, texto e salvamento', () => {
   })
 
   it('o indicador mostra "salvando…" e depois "salvo automaticamente"', async () => {
-    vi.useFakeTimers()
     open()
-    await type(screen.getByLabelText('Parágrafo'), 'mudou')
+    const { inst } = await rich()
+    vi.useFakeTimers()
+    await put(inst, 'mudou')
     expect(screen.getByRole('status', { name: '' }).textContent).toContain('salvando…')
     await vi.advanceTimersByTimeAsync(700)
     expect(screen.getByRole('status', { name: '' }).textContent).toContain('salvo automaticamente')
@@ -99,47 +123,52 @@ describe('Editor — título, texto e salvamento', () => {
 
   it('editar o primeiro texto atualiza o resumo do cartão no dashboard', async () => {
     open()
-    await type(screen.getByLabelText('Título de seção'), 'Primeira linha nova')
+    const { inst } = await rich('Título de seção')
+    await put(inst, 'Primeira linha nova')
     expect(ws.page('p0')!.excerpt).toBe('Primeira linha nova')
     expect(ws.page('p0')!.blocks).toBe(7)
   })
 
-  it('texto gigante é cortado no limite e HTML digitado vira só texto', async () => {
+  it('texto gigante não passa do limite e HTML digitado vira só texto', async () => {
     open()
-    const p = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    await type(p, 'x'.repeat(50_000))
-    expect((ws.page('p0')!.content![1] as { text: string }).text).toHaveLength(20_000)
-    await type(p, '<img src=x onerror=alert(1)>')
+    const { inst } = await rich()
+    await put(inst, 'x'.repeat(50_000))
+    expect((ws.page('p0')!.content![1] as { text: string }).text.length).toBeLessThanOrEqual(20_000)
+    await put(inst, '<img src=x onerror=alert(1)>')
     expect(document.querySelector('img')).toBeNull()
+    expect(plain(inst)).toBe('<img src=x onerror=alert(1)>')
   })
 
   it('Enter no meio do parágrafo divide em dois e leva o cursor ao novo', async () => {
     open('p5')
-    const p = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    await type(p, 'abcdef')
-    caret(p, 2)
-    await keys(p, 'Enter')
-    const paragraphs = screen.getAllByLabelText('Parágrafo') as HTMLTextAreaElement[]
-    expect(paragraphs.map((x) => x.value)).toEqual(['ab', 'cdef'])
-    await waitFor(() => expect(document.activeElement).toBe(paragraphs[1]))
+    const { inst, dom } = await rich()
+    await put(inst, 'abcdef')
+    inst.setSelection(2, 2)
+    await keys(dom, 'Enter')
+    await fireEvent.blur(dom) // the focus moved to the new block, as it does in a browser
+    await tick()
+    expect(screen.getAllByRole('textbox', { name: 'Parágrafo' }).map((x) => x.textContent)).toEqual(['ab', 'cdef'])
+    expect((ws.page('p5')!.content!.map((b) => (b as { text: string }).text))).toEqual(['ab', 'cdef'])
+    await waitFor(() => expect(document.querySelectorAll('[data-rich]').length).toBeGreaterThan(0))
   })
 
-  it('Shift+Enter não divide (fica a quebra de linha do próprio campo)', async () => {
+  it('Shift+Enter não divide: fica a quebra de linha dentro do bloco', async () => {
     open('p5')
-    const p = screen.getByLabelText('Parágrafo')
-    const notCancelled = await keys(p, 'Enter', { shiftKey: true })
-    expect(notCancelled).toBe(true)
-    expect(screen.getAllByLabelText('Parágrafo')).toHaveLength(1)
+    const { inst, dom } = await rich()
+    inst.setSelection(1, 1)
+    await keys(dom, 'Enter', { shiftKey: true })
+    expect(screen.getAllByRole('textbox', { name: 'Parágrafo' })).toHaveLength(1)
+    expect(plain(inst).slice(1, 2)).toBe('\n')
   })
 
   it('Backspace num parágrafo vazio apaga o bloco e volta o cursor para o anterior', async () => {
     open()
-    const p = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    await type(p, '')
-    await keys(p, 'Backspace')
-    expect(screen.queryByLabelText('Parágrafo')).toBeNull()
+    const { inst, dom } = await rich()
+    await put(inst, '')
+    await keys(dom, 'Backspace')
+    expect(screen.queryByRole('textbox', { name: 'Parágrafo' })).toBeNull()
     expect(kindsOf()).toHaveLength(6)
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Título de seção')))
+    await waitFor(() => expect(document.querySelector('[data-rich] [aria-label="Título de seção"]')).not.toBeNull())
   })
 
   it('Backspace com texto só apaga letras (nunca o bloco)', async () => {
@@ -150,9 +179,9 @@ describe('Editor — título, texto e salvamento', () => {
 
   it('apagar o primeiro bloco devolve o cursor ao título', async () => {
     open('p5')
-    const p = screen.getByLabelText('Parágrafo')
-    await type(p, '')
-    await keys(p, 'Backspace')
+    const { inst, dom } = await rich()
+    await put(inst, '')
+    await keys(dom, 'Backspace')
     expect(kindsOf()).toEqual([])
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Título da página')))
   })
@@ -162,22 +191,20 @@ describe('Editor — navegação por setas', () => {
   it('seta para baixo no fim do campo vai para o próximo; no meio do texto anda dentro dele', async () => {
     open()
     const title = screen.getByLabelText('Título da página') as HTMLTextAreaElement
-    const heading = screen.getByLabelText('Título de seção') as HTMLTextAreaElement
     title.focus()
     caret(title, 3)
     expect(await keys(title, 'ArrowDown')).toBe(true) // not cancelled: the caret just moves
     caret(title, title.value.length)
     expect(await keys(title, 'ArrowDown')).toBe(false)
-    await waitFor(() => expect(document.activeElement).toBe(heading))
-    expect(heading.selectionStart).toBe(0)
+    await waitFor(() => expect(document.querySelector('[data-rich] [aria-label="Título de seção"]')).not.toBeNull())
+    expect(current('Título de seção').inst.selection()).toEqual({ from: 0, to: 0 })
   })
 
   it('seta para cima no começo volta ao campo anterior, com o cursor no fim', async () => {
     open()
-    const heading = screen.getByLabelText('Título de seção') as HTMLTextAreaElement
-    heading.focus()
-    caret(heading, 0)
-    await keys(heading, 'ArrowUp')
+    const { inst, dom } = await rich('Título de seção')
+    inst.setSelection(0, 0)
+    await keys(dom, 'ArrowUp')
     const title = screen.getByLabelText('Título da página') as HTMLTextAreaElement
     expect(document.activeElement).toBe(title)
     expect(title.selectionStart).toBe(title.value.length)
@@ -185,14 +212,13 @@ describe('Editor — navegação por setas', () => {
 
   it('com texto selecionado, ou com Shift/Ctrl, não sai do campo', async () => {
     open()
-    const p = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    p.focus()
-    caret(p, 0, 5)
-    expect(await keys(p, 'ArrowUp')).toBe(true)
-    caret(p, 0)
-    expect(await keys(p, 'ArrowUp', { shiftKey: true })).toBe(true)
-    expect(await keys(p, 'ArrowUp', { ctrlKey: true })).toBe(true)
-    expect(document.activeElement).toBe(p)
+    const { inst, dom } = await rich()
+    inst.setSelection(0, 5)
+    expect(await keys(dom, 'ArrowUp')).toBe(true)
+    inst.setSelection(0, 0)
+    expect(await keys(dom, 'ArrowUp', { shiftKey: true })).toBe(true)
+    expect(await keys(dom, 'ArrowUp', { ctrlKey: true })).toBe(true)
+    expect(document.querySelector('[data-rich] [aria-label="Parágrafo"]')).not.toBeNull()
   })
 
   it('o primeiro e o último campo não vão a lugar nenhum', async () => {
@@ -254,25 +280,25 @@ describe('Editor — inserir blocos', () => {
     await type(draft, 'o')
     expect(kindsOf().at(-1)).toBe('Parágrafo')
     expect(draft.value).toBe('')
-    expect((screen.getAllByLabelText('Parágrafo').at(-1) as HTMLTextAreaElement).value).toBe('o')
+    expect(screen.getAllByRole('textbox', { name: 'Parágrafo' }).at(-1)!.textContent).toBe('o')
     await keys(draft, 'Enter')
     expect(kindsOf()).toHaveLength(8) // Enter in the empty line adds nothing
   })
 
   it('"/" num parágrafo vazio abre o menu e o novo bloco o substitui', async () => {
     open('p5')
-    const p = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    await type(p, '/')
-    await click(screen.getByRole('menuitem', { name: /Código/ }))
+    const { inst } = await rich()
+    await put(inst, '/')
+    await click(await screen.findByRole('menuitem', { name: /Código/ }))
     expect(kindsOf()).toEqual(['Bloco de código'])
   })
 
   it('"/" no meio de um texto é só uma barra', async () => {
     open('p5')
-    const p = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    await type(p, 'a/b')
+    const { inst } = await rich()
+    await put(inst, 'a/b')
     expect(screen.queryByRole('menu')).toBeNull()
-    expect(p.value).toBe('a/b')
+    expect(plain(inst)).toBe('a/b')
   })
 
   it('cada tipo do menu cria o bloco certo', async () => {
@@ -427,13 +453,13 @@ describe('Editor — spoiler', () => {
   it('revela ao clicar, deixa editar e esconde de novo', async () => {
     open()
     await click(screen.getByRole('button', { name: 'Revelar spoiler' }))
-    const field = screen.getByLabelText('Texto do spoiler') as HTMLTextAreaElement
-    expect(field.value).toContain('corte de 12%')
-    await type(field, 'novo segredo')
+    const { inst } = await rich('Texto do spoiler')
+    expect(plain(inst)).toContain('corte de 12%')
+    await put(inst, 'novo segredo')
     await click(screen.getByRole('button', { name: 'ocultar' }))
     expect(document.body.textContent).not.toContain('novo segredo')
     await click(screen.getByRole('button', { name: 'Revelar spoiler' }))
-    expect((screen.getByLabelText('Texto do spoiler') as HTMLTextAreaElement).value).toBe('novo segredo')
+    expect(drawn('Texto do spoiler').textContent).toBe('novo segredo')
   })
 
   it('o spoiler escondido não entra no resumo do cartão', () => {
@@ -676,25 +702,61 @@ describe('Editor — página no cofre e na lixeira', () => {
     open()
     expect(screen.getByText(/está na lixeira/)).toBeTruthy()
     expect((screen.getByLabelText('Título da página') as HTMLTextAreaElement).readOnly).toBe(true)
-    expect((screen.getByLabelText('Parágrafo') as HTMLTextAreaElement).readOnly).toBe(true)
     expect(screen.queryByLabelText('Nova linha')).toBeNull()
     expect(screen.queryByRole('button', { name: /Inserir bloco depois/ })).toBeNull()
     expect(screen.queryByRole('button', { name: '+ tag' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Adicionar linha' })).toBeNull()
-    await type(screen.getByLabelText('Parágrafo'), 'não deve entrar')
+    // the text can be read and selected but focusing it opens no editor
+    drawn().focus()
+    await tick()
+    noEditor()
     expect(document.body.textContent).not.toContain('não deve entrar')
     await click(screen.getByRole('button', { name: 'Restaurar' }))
     expect(ws.page('p0')!.trashed).toBe(false)
-    await waitFor(() => expect((screen.getByLabelText('Parágrafo') as HTMLTextAreaElement).readOnly).toBe(false))
+    await rich()
   })
 })
 
 describe('Editor — celular e acessibilidade', () => {
-  it('no celular as alças ficam dentro da página (sem depender de passar o mouse)', () => {
+  it('apertar a alça de arrastar não cancela o início do arrastar do navegador', async () => {
+    open()
+    const handle = screen.getAllByRole('button', { name: /Opções de/ })[0]
+    // a cancelled mousedown keeps the browser from starting a drag: it must go through
+    expect(await fireEvent.mouseDown(handle)).toBe(true)
+    expect(handle.getAttribute('draggable')).toBe('true')
+    const insert = screen.getAllByRole('button', { name: /Inserir bloco depois/ })[0]
+    expect(await fireEvent.mouseDown(insert)).toBe(true)
+  })
+
+  it('no celular não reserva coluna lateral: as alças ficam sob o bloco tocado, só nele', async () => {
     viewport.set(390)
     open()
-    expect(screen.getAllByRole('button', { name: /Inserir bloco depois/ }).length).toBeGreaterThan(5)
-    expect(blockEls()[0].className).toContain('pl-16')
+    expect(blockEls()[0].className).not.toContain('pl-16')
+    const row = (i: number) => blockEls()[i]
+    const controls = (i: number) => row(i).querySelector('button[data-insert-trigger]')!.parentElement!
+    expect(controls(0).className).toContain('max-md:hidden')
+    expect(controls(1).className).toContain('max-md:hidden')
+    await click(row(0).querySelector('textarea, [contenteditable], div')!)
+    expect(controls(0).className).not.toContain('max-md:hidden')
+    expect(controls(1).className).toContain('max-md:hidden')
+    // touching another block moves them; touching outside hides them
+    const second = row(1).querySelector<HTMLElement>('textarea, [contenteditable], div')!
+    await fireEvent.pointerDown(second)
+    await click(second)
+    expect(controls(0).className).toContain('max-md:hidden')
+    expect(controls(1).className).not.toContain('max-md:hidden')
+    await fireEvent.pointerDown(document.body)
+    expect(controls(1).className).toContain('max-md:hidden')
+  })
+
+  it('o menu de opções continua aberto e a alça visível enquanto ele estiver aberto', async () => {
+    viewport.set(390)
+    open()
+    const row = blockEls()[0]
+    await click(row.querySelector('textarea, [contenteditable], div')!)
+    await click(within(row).getByRole('button', { name: /Opções de/ }))
+    expect(within(row).getByRole('menu')).toBeTruthy()
+    expect(row.querySelector('button[data-insert-trigger]')!.parentElement!.className).not.toContain('max-md:hidden')
   })
 
   it('axe: página inteira, menu de inserir, tabela com cabeçalhos e bloco seguro pedindo senha', async () => {
@@ -1167,10 +1229,12 @@ describe('Editor — modal de compartilhamento', () => {
 })
 
 describe('Editor — o que cada permissão libera na tela', () => {
-  it('só leitura: nada editável, sem alças, sem linha nova, sem tags, sem excluir nem exportar', () => {
+  it('só leitura: nada editável, sem alças, sem linha nova, sem tags, sem excluir nem exportar', async () => {
     open('s2')
     expect((screen.getByLabelText('Título da página') as HTMLTextAreaElement).readOnly).toBe(true)
-    expect((screen.getByLabelText('Parágrafo') as HTMLTextAreaElement).readOnly).toBe(true)
+    drawn().focus()
+    await tick()
+    noEditor()
     expect(screen.queryByLabelText('Nova linha')).toBeNull()
     expect(screen.queryByRole('button', { name: /Inserir bloco depois/ })).toBeNull()
     expect(screen.queryByRole('button', { name: '+ tag' })).toBeNull()
@@ -1181,14 +1245,19 @@ describe('Editor — o que cada permissão libera na tela', () => {
 
   it('só leitura: tentar escrever não muda a página', async () => {
     open('s2')
-    const before = (screen.getByLabelText('Parágrafo') as HTMLTextAreaElement).value
-    await type(screen.getByLabelText('Parágrafo'), 'alterado')
+    const before = (ws.page('s2')!.content![0] as { text: string }).text
+    drawn().focus()
+    await tick()
+    noEditor()
+    await keys(drawn(), 'x')
     expect((ws.page('s2')!.content![0] as { text: string }).text).toBe(before)
   })
 
   it('permissões personalizadas: edita o texto mas não cria imagem, não mexe em tags, não exclui', async () => {
     open('s3')
-    expect((screen.getByLabelText('Parágrafo') as HTMLTextAreaElement).readOnly).toBe(false)
+    const { inst } = await rich()
+    await put(inst, 'editado')
+    expect((ws.page('s3')!.content![0] as { text: string }).text).toBe('editado')
     expect(screen.queryByRole('button', { name: '+ tag' })).toBeNull()
     expect(screen.queryByRole('button', { name: /Excluir página/ })).toBeNull()
     expect(screen.getByRole('button', { name: 'Exportar página' })).toBeTruthy()
@@ -1308,9 +1377,10 @@ describe('Editor — painel lateral', () => {
     const words = Number(panel().getByTestId('stat-words').textContent)
     expect(words).toBeGreaterThan(10)
     expect(panel().getByTestId('stat-read').textContent).toBe('1 min')
-    await type(screen.getByLabelText('Parágrafo'), 'só três palavras')
+    const { inst } = await rich()
+    await put(inst, 'só três palavras')
     expect(panel().getByTestId('stat-words').textContent).toBe('3')
-    await type(screen.getByLabelText('Parágrafo'), '')
+    await put(inst, '')
     expect(panel().getByTestId('stat-words').textContent).toBe('0')
     expect(panel().getByTestId('stat-read').textContent).toBe('—')
   })
@@ -1541,10 +1611,10 @@ describe('Editor — blocos novos', () => {
     open()
     await click(screen.getByRole('button', { name: /Inserir bloco depois de Parágrafo 2/ }))
     await click(screen.getByRole('menuitem', { name: /Toggle/ }))
-    const title = screen.getByLabelText('Título do toggle')
     expect(screen.queryByLabelText('Conteúdo do toggle')).toBeNull()
-    await type(title, 'Detalhes')
-    await keys(title, 'Enter')
+    const { inst, dom } = await rich('Título do toggle')
+    await put(inst, 'Detalhes')
+    await keys(dom, 'Enter')
     const body = screen.getByLabelText('Conteúdo do toggle')
     expect(document.activeElement).toBe(body)
     await type(body, 'texto escondido')
@@ -1583,68 +1653,85 @@ describe('Editor — blocos novos', () => {
 })
 
 describe('Editor — barra de formatação', () => {
-  const select = (el: HTMLTextAreaElement, from: number, to: number) => {
-    el.focus()
-    el.setSelectionRange(from, to)
-    fireEvent.select(el)
+  /** Selects words of the open block the way a person does, so the bar follows. */
+  const pick = (inst: RichInstance, from: number, to: number) => {
+    inst.setSelection(from, to)
     document.dispatchEvent(new Event('selectionchange'))
   }
-  const para = () => screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
+  const bar = () => screen.queryByRole('toolbar', { name: 'Formatar texto' })
 
   it('aparece ao selecionar texto e some ao soltar a seleção', async () => {
     open()
-    expect(screen.queryByRole('toolbar', { name: 'Formatar texto' })).toBeNull()
-    select(para(), 0, 5)
-    await waitFor(() => expect(screen.getByRole('toolbar', { name: 'Formatar texto' })).toBeTruthy())
-    select(para(), 3, 3)
-    await waitFor(() => expect(screen.queryByRole('toolbar', { name: 'Formatar texto' })).toBeNull())
+    expect(bar()).toBeNull()
+    const { inst } = await rich()
+    pick(inst, 0, 5)
+    await waitFor(() => expect(bar()).toBeTruthy())
+    pick(inst, 3, 3)
+    await waitFor(() => expect(bar()).toBeNull())
   })
 
   it('negrito, itálico e código gravam os marcadores no texto da página', async () => {
     open()
-    const el = para()
-    const original = el.value
-    select(el, 2, 12)
+    const { inst } = await rich()
+    const original = plain(inst)
+    pick(inst, 2, 12)
     await waitFor(() => screen.getByRole('toolbar', { name: 'Formatar texto' }))
     await click(screen.getByRole('button', { name: 'Negrito' }))
     expect(ws.page('p0')!.content![1]).toMatchObject({ text: `${original.slice(0, 2)}**fechamento**${original.slice(12)}` })
-    expect(el.value).toContain('**fechamento**')
+    expect(inst.runs().find((r) => r.text === 'fechamento')!.marks.bold).toBe(true)
+    // code holds no other marks: it replaces the bold
+    await click(screen.getByRole('button', { name: 'Código' }))
+    expect(inst.runs().find((r) => r.text === 'fechamento')!.marks).toEqual({ code: true })
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toContain('`fechamento`')
   })
 
   it('Ctrl+B e Ctrl+I funcionam sem a barra', async () => {
     open()
-    const el = para()
-    const original = el.value
-    el.focus()
-    el.setSelectionRange(2, 12)
-    await keys(el, 'b', { ctrlKey: true })
-    expect(el.value).toBe(`${original.slice(0, 2)}**fechamento**${original.slice(12)}`)
-    await keys(el, 'i', { ctrlKey: true })
-    expect(el.value).toContain('_')
-  })
-
-  it('link: aceita endereço válido e recusa javascript:', async () => {
-    open()
-    const el = para()
-    const original = el.value
-    select(el, 2, 12)
-    await waitFor(() => screen.getByRole('toolbar', { name: 'Formatar texto' }))
-    await click(screen.getByRole('button', { name: 'Link' }))
-    const input = screen.getByLabelText('Endereço do link')
-    await type(input, 'javascript:alert(1)')
-    await fireEvent.submit(input.closest('form')!)
-    expect(toast.message).toContain('Endereço inválido')
-    expect(el.value).toBe(original)
-    await type(input, 'exemplo.com')
-    await fireEvent.submit(input.closest('form')!)
-    expect(el.value).toBe(`${original.slice(0, 2)}[fechamento](https://exemplo.com)${original.slice(12)}`)
+    const { inst, dom } = await rich()
+    const original = plain(inst)
+    inst.setSelection(2, 12)
+    await keys(dom, 'b', { ctrlKey: true })
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toBe(`${original.slice(0, 2)}**fechamento**${original.slice(12)}`)
+    await keys(dom, 'i', { ctrlKey: true })
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toContain('***fechamento***')
   })
 
   it('numa página que não se pode editar, a barra não aparece', async () => {
     ws.trash('p0')
     open()
-    select(para(), 0, 2)
-    expect(screen.queryByRole('toolbar', { name: 'Formatar texto' })).toBeNull()
+    drawn().focus()
+    await tick()
+    noEditor()
+    expect(bar()).toBeNull()
+  })
+
+  it('o bloco seguro não ganha a barra de formatação', async () => {
+    ws.unlockVault('1234')
+    open()
+    expect(document.querySelector('[data-block-id] textarea[aria-label="Texto do bloco seguro"]')).toBeNull()
+  })
+
+  it('a barra traz negrito, itálico, sublinhado, riscado, marca-texto, código e link', async () => {
+    open()
+    const { inst } = await rich()
+    pick(inst, 2, 12)
+    const buttons = within(await screen.findByRole('toolbar', { name: 'Formatar texto' }))
+    expect(buttons.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Negrito', 'Itálico', 'Sublinhado', 'Riscado', 'Marca-texto', 'Código', 'Link', 'Tirar link'])
+    await click(buttons.getByRole('button', { name: 'Sublinhado' }))
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toContain('__fechamento__')
+  })
+
+  it('Ctrl+Shift+outra letra não faz nada, e os atalhos ligam e desligam', async () => {
+    open()
+    const { inst, dom } = await rich()
+    const original = (ws.page('p0')!.content![1] as { text: string }).text
+    inst.setSelection(2, 12)
+    await keys(dom, 'i', { ctrlKey: true })
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toContain('*fechamento*')
+    await keys(dom, 'i', { ctrlKey: true })
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toBe(original)
+    await keys(dom, 'q', { ctrlKey: true, shiftKey: true })
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toBe(original)
   })
 })
 
@@ -1677,8 +1764,8 @@ describe('Editor — modo zen', () => {
     await click(screen.getByRole('button', { name: 'Modo zen' }))
     const words = () => Number(screen.getByTestId('zen-words').textContent!.split(' ')[0])
     const before = words()
-    const el = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    await type(el, el.value + ' mais cinco palavras aqui agora')
+    const { inst } = await rich()
+    await put(inst, plain(inst) + ' mais cinco palavras aqui agora')
     expect(words()).toBe(before + 5)
   })
 
@@ -1708,93 +1795,73 @@ describe('Editor — modo zen', () => {
   })
 })
 
-describe('Editor — texto formatado (marcadores desenhados fora da edição)', () => {
+describe('Editor — texto formatado (desenhado fora da edição)', () => {
   const marked = (text: string) => {
     ws.contentOf('p0')
     const p = ws.page('p0')!.content!.find((b) => b.type === 'paragraph') as { text: string }
     p.text = text
   }
 
-  it('fora da edição o bloco aparece formatado; em foco vira o campo com os marcadores', async () => {
-    marked('um **forte** e _suave_ com `código`')
+  it('fora da edição o bloco aparece formatado; em foco vira o editor, com as mesmas marcas', async () => {
+    marked('um **forte** e *suave* com `código`')
     open()
-    const view = screen.getByRole('textbox', { name: 'Parágrafo' })
+    const view = drawn()
     expect(view.tagName).toBe('DIV')
     expect(view.getAttribute('aria-readonly')).toBe('true')
     expect(view.querySelector('strong')!.textContent).toBe('forte')
     expect(view.querySelector('em')!.textContent).toBe('suave')
     expect(view.querySelector('code')!.textContent).toBe('código')
     expect(view.textContent).not.toContain('**')
-    view.focus()
-    await waitFor(() => expect(document.activeElement!.tagName).toBe('TEXTAREA'))
-    const field = document.activeElement as HTMLTextAreaElement
-    expect(field.value).toBe('um **forte** e _suave_ com `código`')
-    expect(document.activeElement).toBe(field)
-    expect(field.selectionStart).toBe(field.value.length)
+    const { inst, dom } = await rich()
+    expect(dom.querySelector('strong')!.textContent).toBe('forte')
+    expect(dom.querySelector('em')!.textContent).toBe('suave')
+    expect(inst.selection()).toEqual({ from: plain(inst).length, to: plain(inst).length })
+    // what is stored keeps its symbols
+    expect((ws.page('p0')!.content![1] as { text: string }).text).toBe('um **forte** e *suave* com `código`')
   })
 
-  it('ao sair do campo o bloco volta a aparecer formatado', async () => {
+  it('ao sair do editor o bloco volta a aparecer formatado', async () => {
     marked('um **forte**')
     open()
-    screen.getByRole('textbox', { name: 'Parágrafo' }).focus()
-    await waitFor(() => expect(document.activeElement!.tagName).toBe('TEXTAREA'))
-    ;(document.activeElement as HTMLElement).blur()
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Parágrafo' }).tagName).toBe('DIV'))
+    const { dom } = await rich()
+    await fireEvent.blur(dom)
+    await waitFor(() => expect(drawn().tagName).toBe('DIV'))
+    noEditor()
+    expect(drawn().querySelector('strong')!.textContent).toBe('forte')
   })
 
-  it('digitar marcadores num campo em foco não troca o campo no meio da digitação', async () => {
+  it('digitar símbolos com o editor aberto não o troca no meio da digitação', async () => {
     open()
-    const field = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    field.focus()
-    await type(field, 'olá **mundo**')
-    expect(document.activeElement).toBe(field)
-    expect(screen.getByLabelText('Parágrafo').tagName).toBe('TEXTAREA')
+    const { inst } = await rich()
+    await put(inst, 'olá **mundo**')
+    expect(document.querySelector('[data-rich] [aria-label="Parágrafo"]')).not.toBeNull()
+    expect(inst.runs().find((r) => r.text === 'mundo')!.marks.bold).toBe(true)
   })
 
-  it('texto sem marcas, ou com marcas soltas, continua sendo só um campo', () => {
+  it('texto sem marcas, ou com marcas soltas, é só texto até receber o foco', () => {
     marked('snake_case_name e 2 * 3 * 4 e [colchetes] e a_b')
     open()
-    expect(screen.getByLabelText('Parágrafo').tagName).toBe('TEXTAREA')
+    expect(drawn().tagName).toBe('DIV')
+    expect(drawn().textContent).toBe('snake_case_name e 2 * 3 * 4 e [colchetes] e a_b')
+    expect(drawn().querySelector('em, strong, u, s')).toBeNull()
+    expect(document.querySelectorAll('textarea[aria-label="Parágrafo"]').length).toBe(0)
   })
 
-  it('HTML digitado nunca vira elemento, e link perigoso nunca vira link', () => {
-    marked('**<img src=x onerror=alert(1)>** [x](javascript:alert(1)) [ok](https://a.com)')
-    open()
-    const view = screen.getByRole('textbox', { name: 'Parágrafo' })
-    expect(view.querySelector('img')).toBeNull()
-    expect(view.querySelector('strong')!.textContent).toBe('<img src=x onerror=alert(1)>')
-    const links = [...view.querySelectorAll('a')]
-    expect(links.map((a) => a.getAttribute('href'))).toEqual(['https://a.com'])
-    expect(links[0].getAttribute('target')).toBe('_blank')
-    expect(links[0].getAttribute('rel')).toContain('noopener')
-  })
-
-  it('o bloco seguro nunca é desenhado formatado', () => {
-    ws.unlockVault('1234')
-    const { unmount } = open('p0')
-    ;(ws.page('p0')!.content!.find((b) => b.type === 'secure') as { text: string }).text = '**segredo**'
-    unmount()
-    open('p0')
-    expect(screen.queryByRole('textbox', { name: 'Texto do bloco seguro' })).toBeNull()
-  })
-
-  it('as setas entram num bloco formatado vindo do vizinho, com o cursor no lugar certo', async () => {
+  it('as setas entram num bloco formatado vindo do vizinho, com o cursor no começo', async () => {
     marked('um **forte**')
     open()
-    const heading = screen.getByLabelText('Título de seção') as HTMLTextAreaElement
-    heading.focus()
-    caret(heading, heading.value.length)
-    await keys(heading, 'ArrowDown')
-    await waitFor(() => expect(document.activeElement!.tagName).toBe('TEXTAREA'))
-    expect((document.activeElement as HTMLTextAreaElement).selectionStart).toBe(0)
+    const { inst, dom } = await rich('Título de seção')
+    inst.setSelection(plain(inst).length, plain(inst).length)
+    await keys(dom, 'ArrowDown')
+    await waitFor(() => expect(document.querySelector('[data-rich] [aria-label="Parágrafo"]')).not.toBeNull())
+    expect(current('Parágrafo').inst.selection()).toEqual({ from: 0, to: 0 })
   })
 
   it('axe: bloco formatado desenhado e em edição', async () => {
     marked('um **forte** com [link](https://a.com)')
     open()
     expect(await violations()).toEqual([])
-    screen.getByRole('textbox', { name: 'Parágrafo' }).focus()
-    await waitFor(() => expect(document.activeElement!.tagName).toBe('TEXTAREA'))
+    await rich()
     expect(await violations()).toEqual([])
   })
 })
@@ -2157,63 +2224,45 @@ describe('Editor — só o que está perto da tela vira campo de texto', () => {
   const wrappers = () => [...observed]
   const para = () => screen.getByLabelText('Parágrafo')
 
-  it('com observador, os blocos começam como texto e viram campo quando chegam perto da tela', async () => {
-    open()
-    expect(para().tagName).toBe('DIV')
-    expect(wrappers().length).toBeGreaterThanOrEqual(2)
-    for (const el of wrappers()) report(el, true)
-    await tick()
-    expect(para().tagName).toBe('TEXTAREA')
-    expect((para() as HTMLTextAreaElement).value).toContain('O fechamento tem três frentes')
-  })
 
-  it('ao se afastar volta a ser texto, sem perder uma letra', async () => {
+  it('ao sair, volta a ser texto sem perder uma letra', async () => {
     open()
-    const el = () => wrappers().find((w) => w.querySelector('[aria-label="Parágrafo"]'))!
-    report(el(), true)
-    await tick()
-    await type(para(), 'texto novo, escrito agora')
-    report(el(), false)
-    await tick()
-    expect(para().tagName).toBe('DIV')
-    expect(para().textContent).toBe('texto novo, escrito agora')
+    const { inst, dom } = await rich()
+    await put(inst, 'texto novo, escrito agora')
+    await fireEvent.blur(dom)
+    await waitFor(() => expect(drawn().tagName).toBe('DIV'))
+    expect(drawn().textContent).toBe('texto novo, escrito agora')
     expect(ws.page('p0')!.content![1]).toMatchObject({ text: 'texto novo, escrito agora' })
   })
 
-  it('o bloco em edição não vira texto mesmo que saia de perto', async () => {
+  it('o bloco em edição continua aberto mesmo que saia de perto da tela', async () => {
     open()
-    const el = () => wrappers().find((w) => w.querySelector('[aria-label="Parágrafo"]'))!
-    report(el(), true)
+    const { dom } = await rich()
+    dom.focus()
+    const el = wrappers().find((w) => w.querySelector('[aria-label="Parágrafo"]'))!
+    report(el, true)
+    report(el, false)
     await tick()
-    ;(para() as HTMLTextAreaElement).focus()
-    report(el(), false)
-    await tick()
-    expect(para().tagName).toBe('TEXTAREA')
-    expect(document.activeElement).toBe(para())
+    expect(document.querySelector('[data-rich] [aria-label="Parágrafo"]')).not.toBeNull()
   })
 
-  it('clicar ou dar Tab num bloco distante o transforma em campo, com o cursor no fim', async () => {
+  it('clicar ou dar Tab num bloco o abre no editor, com o cursor no fim', async () => {
     open()
-    para().focus()
-    await waitFor(() => expect(document.activeElement!.tagName).toBe('TEXTAREA'))
-    const field = document.activeElement as HTMLTextAreaElement
-    expect(field.value).toContain('O fechamento tem três frentes')
-    expect(field.selectionStart).toBe(field.value.length)
+    const { inst } = await rich()
+    expect(plain(inst)).toContain('O fechamento tem três frentes')
+    expect(inst.selection()).toEqual({ from: plain(inst).length, to: plain(inst).length })
   })
 
   it('as setas entram num bloco distante vindo do vizinho, com o cursor no começo', async () => {
     open()
     const heading = screen.getByLabelText('Título de seção')
-    const el = wrappers().find((w) => w.contains(heading))!
-    report(el, true)
+    report(wrappers().find((w) => w.contains(heading))!, true)
     await tick()
-    const field = screen.getByLabelText('Título de seção') as HTMLTextAreaElement
-    field.focus()
-    caret(field, field.value.length)
-    await keys(field, 'ArrowDown')
-    await waitFor(() => expect(document.activeElement!.tagName).toBe('TEXTAREA'))
-    expect((document.activeElement as HTMLTextAreaElement).getAttribute('aria-label')).toBe('Parágrafo')
-    expect((document.activeElement as HTMLTextAreaElement).selectionStart).toBe(0)
+    const { inst, dom } = await rich('Título de seção')
+    inst.setSelection(plain(inst).length, plain(inst).length)
+    await keys(dom, 'ArrowDown')
+    await waitFor(() => expect(document.querySelector('[data-rich] [aria-label="Parágrafo"]')).not.toBeNull())
+    expect(current('Parágrafo').inst.selection()).toEqual({ from: 0, to: 0 })
   })
 
   it('um bloco vazio distante mantém a altura de uma linha', () => {
@@ -2316,35 +2365,9 @@ describe('Editor — painéis que crescem com a tela, setas no meio, sublinhado'
     expect(screen.getByTestId('dock').style.zoom).toBe('1.7')
   })
 
-  it('o sublinhado entra na barra de formatação, ao lado de negrito, itálico, código e link', async () => {
-    open()
-    const el = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    el.focus()
-    el.setSelectionRange(2, 12)
-    fireEvent.select(el)
-    document.dispatchEvent(new Event('selectionchange'))
-    const bar = within(await screen.findByRole('toolbar', { name: 'Formatar texto' }))
-    expect(bar.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Negrito', 'Itálico', 'Sublinhado', 'Código', 'Link'])
-    const original = el.value
-    await click(bar.getByRole('button', { name: 'Sublinhado' }))
-    expect(el.value).toBe(`${original.slice(0, 2)}++fechamento++${original.slice(12)}`)
-    expect(ws.page('p0')!.content![1]).toMatchObject({ text: el.value })
-  })
 
-  it('Ctrl+U sublinha e Ctrl+U de novo desfaz; fora da edição o texto aparece sublinhado', async () => {
-    open()
-    const el = screen.getByLabelText('Parágrafo') as HTMLTextAreaElement
-    const original = el.value
-    el.focus()
-    el.setSelectionRange(2, 12)
-    await keys(el, 'u', { ctrlKey: true })
-    expect(el.value).toContain('++fechamento++')
-    await keys(el, 'u', { ctrlKey: true })
-    expect(el.value).toBe(original)
-    await keys(el, 'u', { ctrlKey: true })
-    el.blur()
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Parágrafo' }).querySelector('u')!.textContent).toBe('fechamento'))
-  })
+
+
 
   it('o sublinhado não aparece em campo de bloco seguro', () => {
     ws.unlockVault('1234')

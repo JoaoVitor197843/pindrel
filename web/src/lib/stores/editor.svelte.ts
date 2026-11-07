@@ -171,13 +171,19 @@ export class PageEditor {
   /** Enter in the middle of a text block: what follows the caret becomes a new paragraph right after it. */
   split(id: string, caret: number): Block | null {
     const b = this.blocks.find((x) => x.id === id)
-    if (!b || !['paragraph', 'heading', 'quote', 'callout', 'toggle', 'spoiler'].includes(b.type) || !('text' in b) || !this.can('text')) return null
+    if (!b || !('text' in b)) return null
     const at = Math.min(Math.max(0, caret), b.text.length)
-    const tail = b.text.slice(at)
+    return this.splitText(id, b.text.slice(0, at), b.text.slice(at))
+  }
+
+  /** The same, with the two halves already cut (a rich-text engine knows where its marks begin and end). */
+  splitText(id: string, head: string, tail: string): Block | null {
+    const b = this.blocks.find((x) => x.id === id)
+    if (!b || !['paragraph', 'heading', 'quote', 'callout', 'toggle', 'spoiler'].includes(b.type) || !('text' in b) || !this.can('text')) return null
     const made = this.insert('paragraph', id)
     if (!made || made.type !== 'paragraph') return null
-    b.text = b.text.slice(0, at)
-    made.text = tail
+    b.text = head.slice(0, MAX_TEXT)
+    made.text = tail.slice(0, MAX_TEXT)
     this.#changed()
     return made
   }
