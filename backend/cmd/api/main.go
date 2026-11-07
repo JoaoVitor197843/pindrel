@@ -11,6 +11,7 @@ import (
 	"pindrel/internal/config"
 	"pindrel/internal/database"
 	"pindrel/internal/database/db"
+	"pindrel/internal/files"
 	"pindrel/internal/middleware"
 	"syscall"
 	"time"
@@ -59,7 +60,36 @@ func main() {
 			}
 		}()
 	}
-	r := route.SetupRouter(cfg, authRepo, authHandler, loginLimiter, registerLimiter)
+	var extras route.Extras
+	if cfg.Files.Dir != "" {
+		store, err := files.NewStore(cfg.Files.Dir)
+		if err != nil {
+			log.Fatalf("failed to prepare the files directory: %v", err)
+		}
+		filesService := files.NewService(dbPool, authRepo, store, files.Config{
+			Dir: cfg.Files.Dir, MaxFileBytes: cfg.Files.MaxFileBytes, QuotaBytes: cfg.Files.QuotaBytes, MinFreeBytes: cfg.Files.MinFreeBytes,
+			MaxOpenUploads: cfg.Files.MaxOpenUploads, UploadTTL: cfg.Files.UploadTTL, OrphanGrace: cfg.Files.OrphanGrace,
+			LinkTTL: cfg.Files.LinkTTL, Secret: []byte(cfg.JWTSecret),
+		})
+		extras.Files = files.NewHandler(filesService)
+		if cfg.InAppRateLimit {
+			extras.FileLimiters = &route.FileLimiters{
+				Chunks:  middleware.NewIPRateLimiter(rate.Every(time.Minute/time.Duration(cfg.Files.ChunksPerMinute)), 20),
+				Control: middleware.NewIPRateLimiter(rate.Every(time.Minute/120), 30),
+			}
+		}
+		if extras.FileLimiters != nil {
+			go func() {
+				for range time.Tick(10 * time.Minute) {
+					extras.FileLimiters.Chunks.Cleanup(30 * time.Minute)
+					extras.FileLimiters.Control.Cleanup(30 * time.Minute)
+				}
+			}()
+		}
+		go filesService.RunCleanup(context.Background(), 10*time.Minute)
+		log.Printf("files: stored in %s (up to %d MiB each, %d MiB per person)", cfg.Files.Dir, cfg.Files.MaxFileBytes>>20, cfg.Files.QuotaBytes>>20)
+	}
+	r := route.SetupRouter(cfg, authRepo, authHandler, loginLimiter, registerLimiter, extras)
 
 	srv := &http.Server{
 		Addr:         cfg.Port,

@@ -9,6 +9,19 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type File struct {
+	ID          uuid.UUID          `json:"id"`
+	UserID      uuid.UUID          `json:"user_id"`
+	Sha256      []byte             `json:"sha256"`
+	Size        int64              `json:"size"`
+	Mime        string             `json:"mime"`
+	Level       int16              `json:"level"`
+	Name        string             `json:"name"`
+	Encrypted   bool               `json:"encrypted"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	OrphanSince pgtype.Timestamptz `json:"orphan_since"`
+}
+
 type Note struct {
 	ID        uuid.UUID          `json:"id"`
 	UserID    uuid.UUID          `json:"user_id"`
@@ -25,6 +38,21 @@ type RevokedToken struct {
 	UserID    uuid.UUID          `json:"user_id"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+}
+
+type Upload struct {
+	ID         uuid.UUID          `json:"id"`
+	UserID     uuid.UUID          `json:"user_id"`
+	Size       int64              `json:"size"`
+	ChunkSize  int32              `json:"chunk_size"`
+	ChunkCount int32              `json:"chunk_count"`
+	Received   []byte             `json:"received"`
+	Name       string             `json:"name"`
+	Encrypted  bool               `json:"encrypted"`
+	State      string             `json:"state"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
 }
 
 type User struct {

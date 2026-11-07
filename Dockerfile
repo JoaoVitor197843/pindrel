@@ -23,11 +23,15 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY backend/ .
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags "$GO_TAGS" -trimpath -ldflags="-s -w" -o server ./cmd/api
+# the folder of the uploaded files, made here (the final stage has no RUN) so a new volume mounted on it is writable by the
+# non-root user
+RUN mkdir -p /data/files
 
 FROM alpine:3.24
 WORKDIR /app
 COPY --from=backend-builder /app/backend/server .
 COPY --from=frontend-builder /app/frontend/dist ./public
+COPY --from=backend-builder --chown=10001:10001 /data /data
 # numeric non-root user: no adduser, which would be a RUN as the target architecture
 USER 10001:10001
 # Go soft memory limit, below the 128m container limit set in compose.yml

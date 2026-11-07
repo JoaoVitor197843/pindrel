@@ -11,13 +11,39 @@ import (
 )
 
 type Querier interface {
+	// Exactly one request wins the right to join the pieces.
+	ClaimUploadForFinish(ctx context.Context, arg ClaimUploadForFinishParams) (Upload, error)
+	ClearFileOrphan(ctx context.Context, arg ClearFileOrphanParams) error
+	CountFilesWithHash(ctx context.Context, sha256 []byte) (int64, error)
+	CountOpenUploads(ctx context.Context, userID uuid.UUID) (int64, error)
+	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
+	CreateUpload(ctx context.Context, arg CreateUploadParams) (Upload, error)
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	DeleteExpiredTokens(ctx context.Context) error
+	DeleteFile(ctx context.Context, arg DeleteFileParams) ([]byte, error)
+	DeleteFileByID(ctx context.Context, id uuid.UUID) error
+	DeleteUpload(ctx context.Context, arg DeleteUploadParams) (uuid.UUID, error)
+	DeleteUploadByID(ctx context.Context, id uuid.UUID) error
 	DeleteUser(ctx context.Context, id uuid.UUID) error
+	ExpiredUploads(ctx context.Context, limit int32) ([]uuid.UUID, error)
+	GetFile(ctx context.Context, id uuid.UUID) (File, error)
+	GetUpload(ctx context.Context, arg GetUploadParams) (Upload, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (GetUserByIDRow, error)
 	IsTokenRevoked(ctx context.Context, tokenID string) (bool, error)
+	ListFiles(ctx context.Context, arg ListFilesParams) ([]File, error)
+	// Serialises quota checks of one user across replicas: two uploads started together cannot both pass the limit.
+	LockUser(ctx context.Context, id uuid.UUID) error
+	// One statement, one row lock: pieces that arrive together on different replicas never lose each other's bit.
+	// Bit n is bit (n % 8) of byte (n / 8), least significant first, and set_bit(bytea) counts the same way.
+	MarkChunkReceived(ctx context.Context, arg MarkChunkReceivedParams) ([]byte, error)
+	MarkFileOrphan(ctx context.Context, arg MarkFileOrphanParams) error
+	OrphanFilesDue(ctx context.Context, arg OrphanFilesDueParams) ([]OrphanFilesDueRow, error)
+	// Everything a user holds: finished files plus uploads still open (their size is already promised).
+	QuotaUsed(ctx context.Context, userID uuid.UUID) (int64, error)
+	ReopenUpload(ctx context.Context, arg ReopenUploadParams) error
 	RevokeToken(ctx context.Context, arg RevokeTokenParams) error
+	UploadExists(ctx context.Context, id uuid.UUID) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)
