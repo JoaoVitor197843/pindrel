@@ -205,6 +205,9 @@ pub struct Limiters {
     pub login: Limiter,
     pub register: Limiter,
     pub global: Limiter,
+    /// `/files/`: a download seeks with many Range requests and an upload sends many pieces, which the general limit would
+    /// cut short. The API still limits what each person may do.
+    pub files: Limiter,
 }
 
 impl Limiters {
@@ -213,10 +216,11 @@ impl Limiters {
             login: Limiter::new(5, 5),
             register: Limiter::new(5, 5),
             global: Limiter::new(100, 20),
+            files: Limiter::new(1200, 120),
         }
     }
     pub fn prune(&self) {
-        for l in [&self.login, &self.register, &self.global] {
+        for l in [&self.login, &self.register, &self.global, &self.files] {
             l.prune();
         }
     }
@@ -357,9 +361,9 @@ mod tests {
 
     #[test]
     fn memory_per_client_stays_small() {
-        // the table is a HashMap<IpAddr, Nanos>: this bounds the worst case of three limiters at MAX_TRACKED each
+        // the table is a HashMap<IpAddr, Nanos>: this bounds the worst case of four limiters at MAX_TRACKED each
         let entry = std::mem::size_of::<(IpAddr, Nanos)>();
         assert!(entry <= 32, "entry grew to {entry} bytes");
-        assert!(3 * MAX_TRACKED * entry * 2 < 4 * 1024 * 1024, "worst case no longer fits a few MB");
+        assert!(4 * MAX_TRACKED * entry * 2 < 5 * 1024 * 1024, "worst case no longer fits a few MB");
     }
 }
