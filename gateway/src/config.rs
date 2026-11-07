@@ -72,6 +72,16 @@ pub struct Config {
     /// Who counts as the client behind a trusted proxy (`TRUSTED_PROXIES`, `CLIENT_IP_HEADER`); by default the peer.
     pub client_ip: ClientIp,
     pub max_body: usize,
+    /// Bytes of request bodies the gateway may hold in memory at once (`BODY_BUDGET_BYTES`). A body is held whole before it
+    /// is passed on (so it can be replayed on another replica), and a file is sent in many pieces of up to `max_body`: without
+    /// a budget, enough uploads at once would grow the gateway past its memory limit.
+    pub body_budget: usize,
+    /// How long a request waits for room in the budget before it is told to try again (`503`).
+    pub body_queue: Duration,
+    /// A piece of a file may take longer to arrive than an ordinary body (a phone on a bad line): `FILE_BODY_TIMEOUT_SECS`.
+    pub file_body_timeout: Duration,
+    /// Joining the pieces of a large file takes the replica a while: `FILE_FINISH_TIMEOUT_SECS`.
+    pub file_finish_timeout: Duration,
     pub header_timeout: Duration,
     pub body_timeout: Duration,
     pub upstream_timeout: Duration,
@@ -103,6 +113,10 @@ impl Config {
             ws_allowed_origins: Vec::new(),
             client_ip: ClientIp::direct(),
             max_body: 1 << 20,
+            body_budget: 8 << 20,
+            body_queue: Duration::from_secs(5),
+            file_body_timeout: Duration::from_secs(60),
+            file_finish_timeout: Duration::from_secs(600),
             header_timeout: Duration::from_secs(10),
             body_timeout: Duration::from_secs(10),
             upstream_timeout: Duration::from_secs(30),
@@ -133,6 +147,9 @@ impl Config {
         let max_connections = parse("MAX_CONNECTIONS", "1024", 1, 100_000) as usize;
         let max_connections_per_ip = parse("MAX_CONNECTIONS_PER_IP", "64", 1, 100_000) as usize;
         let max_body = parse("MAX_BODY_BYTES", "1048576", 1, 64 << 20) as usize;
+        let body_budget = parse("BODY_BUDGET_BYTES", "8388608", 0, 1 << 30) as usize;
+        let file_body_timeout = parse("FILE_BODY_TIMEOUT_SECS", "60", 1, 3600);
+        let file_finish_timeout = parse("FILE_FINISH_TIMEOUT_SECS", "600", 1, 86_400);
         let max_websockets = parse("MAX_WEBSOCKETS", "1024", 0, 100_000) as usize;
         let max_websockets_per_ip = parse("MAX_WEBSOCKETS_PER_IP", "32", 1, 100_000) as usize;
         let max_pairings = parse("PAIRING_MAX_ROOMS", "6", 1, 64) as usize;
@@ -246,6 +263,10 @@ impl Config {
             ws_allowed_origins,
             client_ip,
             max_body,
+            // never less than one body, or no request could ever pass
+            body_budget: body_budget.max(max_body),
+            file_body_timeout: Duration::from_secs(file_body_timeout),
+            file_finish_timeout: Duration::from_secs(file_finish_timeout),
             ..Self::new(Vec::new())
         })
     }
@@ -391,5 +412,54 @@ mod tests {
             let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TLS_PORT", port)]).unwrap_err();
             assert!(errs.iter().any(|e| e.starts_with("TLS_PORT")), "{port}: {errs:?}");
         }
+    }
+
+    #[test]
+    fn file_settings_have_defaults_and_can_be_changed() {
+        let c = load(&[("UPSTREAMS", "127.0.0.1:9000")]).unwrap();
+        assert_eq!(
+            (c.body_budget, c.file_body_timeout.as_secs(), c.file_finish_timeout.as_secs()),
+            (8 << 20, 60, 600)
+        );
+        let c = load(&[
+            ("UPSTREAMS", "127.0.0.1:9000"),
+            ("BODY_BUDGET_BYTES", "33554432"),
+            ("FILE_BODY_TIMEOUT_SECS", "90"),
+            ("FILE_FINISH_TIMEOUT_SECS", "1200"),
+        ])
+        .unwrap();
+        assert_eq!(
+            (c.body_budget, c.file_body_timeout.as_secs(), c.file_finish_timeout.as_secs()),
+            (32 << 20, 90, 1200)
+        );
+    }
+
+    #[test]
+    fn the_body_budget_is_never_smaller_than_one_body() {
+        // otherwise no request could ever be held
+        let c = load(&[
+            ("UPSTREAMS", "127.0.0.1:9000"),
+            ("BODY_BUDGET_BYTES", "0"),
+            ("MAX_BODY_BYTES", "2097152"),
+        ])
+        .unwrap();
+        assert_eq!(c.body_budget, 2 << 20);
+    }
+
+    #[test]
+    fn broken_file_settings_are_refused_together() {
+        let errs = load(&[
+            ("UPSTREAMS", "127.0.0.1:9000"),
+            ("BODY_BUDGET_BYTES", "muito"),
+            ("FILE_BODY_TIMEOUT_SECS", "0"),
+            ("FILE_FINISH_TIMEOUT_SECS", "999999999"),
+        ])
+        .unwrap_err();
+        assert!(
+            errs.iter().any(|e| e.starts_with("BODY_BUDGET_BYTES"))
+                && errs.iter().any(|e| e.starts_with("FILE_BODY_TIMEOUT_SECS"))
+                && errs.iter().any(|e| e.starts_with("FILE_FINISH_TIMEOUT_SECS")),
+            "{errs:?}"
+        );
     }
 }
