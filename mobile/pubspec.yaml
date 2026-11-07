@@ -24,6 +24,7 @@ dependencies:
   sqlite3: ^3.5.2
   path_provider: ^2.1.6
   path: ^1.9.1
+  characters: ^1.4.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
