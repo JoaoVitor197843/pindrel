@@ -85,14 +85,14 @@ body {
 }
 
 /* Zen mode: the block being written stays bright, the others step back. */
-.zen-dim:has([data-block-id]:focus-within) > [data-block-id]:not(:focus-within) {
+.zen-dim:has([data-block-id]:focus-within) > [data-lazy] > [data-block-id]:not(:focus-within) {
   opacity: 0.38;
 }
-.zen-dim > [data-block-id] {
+.zen-dim > [data-lazy] > [data-block-id] {
   transition: opacity 0.25s;
 }
 @media (prefers-reduced-motion: reduce) {
-  .zen-dim > [data-block-id] {
+  .zen-dim > [data-lazy] > [data-block-id] {
     transition: none;
   }
 }
