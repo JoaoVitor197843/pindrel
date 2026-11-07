@@ -143,9 +143,9 @@ class _SidePanelState extends State<SidePanel> {
         'Ações',
         Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           if (!ed.readOnly) ...[
-            OutlineTextButton(label: p.pinned ? 'Desafixar página' : 'Fixar página', icon: Icons.push_pin_outlined, onPressed: ed.togglePin),
+            OutlineTextButton(label: p.pinned ? 'Desafixar página' : 'Fixar página', icon: Icons.push_pin_outlined, expand: true, onPressed: ed.togglePin),
             const SizedBox(height: 8),
-            OutlineTextButton(label: 'Duplicar página', icon: Icons.content_copy, onPressed: widget.onDuplicate),
+            OutlineTextButton(label: 'Duplicar página', icon: Icons.content_copy, expand: true, onPressed: widget.onDuplicate),
           ],
         ]),
       ),

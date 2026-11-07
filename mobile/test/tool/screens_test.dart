@@ -75,13 +75,17 @@ void main() {
   if (out == null) return;
   Directory(out).createSync(recursive: true);
 
-  Future<void> shot(WidgetTester tester, String name, Size size, Widget Function() home) async {
+  Future<void> shot(WidgetTester tester, String name, Size size, Widget Function() home, [Future<void> Function()? after]) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final key = GlobalKey();
     await tester.pumpWidget(RepaintBoundary(key: key, child: MaterialApp(debugShowCheckedModeBanner: false, theme: AppTheme.dark, home: home())));
     await tester.pumpAndSettle();
+    if (after != null) {
+      await after();
+      await tester.pumpAndSettle();
+    }
     await tester.runAsync(() async {
       final boundary = key.currentContext!.findRenderObject() as RenderRepaintBoundary;
       final image = await boundary.toImage();
@@ -101,6 +105,9 @@ void main() {
     await shot(tester, 'dash-m', const Size(420, 900), () => DashboardPage(ws: ws));
     await shot(tester, 'dash-d', const Size(1300, 900), () => DashboardPage(ws: ws));
     await shot(tester, 'ed-m', const Size(420, 1500), () => EditorPage(ws: ws, pageId: editing));
+    await shot(tester, 'ed-focus', const Size(1500, 900), () => EditorPage(ws: ws, pageId: editing), () async => tester.tap(find.byType(TextField).at(1)));
+    await shot(tester, 'ed-drawer', const Size(900, 800), () => EditorPage(ws: ws, pageId: editing), () async => tester.tap(find.byTooltip('Abrir painel')));
+    await shot(tester, 'ed-edge', const Size(900, 800), () => EditorPage(ws: ws, pageId: editing));
     await shot(tester, 'ed-xl', const Size(1920, 1000), () => EditorPage(ws: ws, pageId: editing));
     await shot(tester, 'dash-xl', const Size(1920, 1000), () => DashboardPage(ws: ws));
     await shot(tester, 'ed-d', const Size(1300, 1100), () => EditorPage(ws: ws, pageId: editing));

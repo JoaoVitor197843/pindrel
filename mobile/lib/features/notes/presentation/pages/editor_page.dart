@@ -57,7 +57,6 @@ class EditorPage extends StatefulWidget {
 
 class _EditorPageState extends State<EditorPage> {
   late final PageEditor _ed = PageEditor(widget.ws, widget.pageId);
-  final _scaffold = GlobalKey<ScaffoldState>();
   final _scroll = ScrollController();
   final _nodes = <String, FocusNode>{};
   final _rowKeys = <String, GlobalKey>{};
@@ -71,6 +70,8 @@ class _EditorPageState extends State<EditorPage> {
   String? _activeId;
   final _entered = <String>{};
   bool? _propsDock, _panelDock;
+  // the panels as drawers over the page (narrow windows); they always start closed
+  var _propsDrawer = false, _panelDrawer = false;
 
   @override
   void dispose() {
@@ -140,7 +141,7 @@ class _EditorPageState extends State<EditorPage> {
             });
       }
     }
-    _scaffold.currentState?.closeEndDrawer();
+    if (_panelDrawer) setState(() => _panelDrawer = false);
   }
 
   Future<void> _insertMenu({String? after, bool replaceEmpty = false}) async {
@@ -233,6 +234,149 @@ class _EditorPageState extends State<EditorPage> {
     nav.pop();
     // the page is gone: the toast goes on the navigator's own overlay
     Toast.showOn(overlay, message);
+  }
+
+  /// The panels as drawers (windows too narrow to dock them), and the tabs on the edges that open them. Laid out over the
+  /// whole screen, header included: the tabs are centred on the window, as the web's `fixed` ones are.
+  List<Widget> _drawers(double width, bool docked, bool roomForArrows) {
+    if (_zen || docked || _ed.page == null) return const [];
+    final w = width * 0.8 < 352 ? width * 0.8 : 352.0;
+    Widget drawer({
+      required bool left,
+      required String title,
+      required Widget body,
+      required VoidCallback close,
+    }) {
+      final panel = Material(
+        color: AppColors.surface,
+        child: Container(
+          width: w,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            border: Border(
+              left: left
+                  ? BorderSide.none
+                  : const BorderSide(color: AppColors.border),
+              right: left
+                  ? const BorderSide(color: AppColors.border)
+                  : BorderSide.none,
+            ),
+          ),
+          child: SafeArea(
+            child: ListView(
+              children: [
+                Text(title, style: AppText.serif(20)),
+                const SizedBox(height: 20),
+                body,
+              ],
+            ),
+          ),
+        ),
+      );
+      final arrow = SizedBox(
+        width: 56,
+        child: Center(
+          child: DockToggle(
+            left: left,
+            open: true,
+            label: left ? 'Fechar propriedades' : 'Fechar painel',
+            onTap: close,
+          ),
+        ),
+      );
+      return Positioned(
+        left: left ? 0 : null,
+        right: left ? null : 0,
+        top: 0,
+        bottom: 0,
+        child: Row(
+          children: [
+            if (!left) arrow,
+            Entrance(
+              kind: left
+                  ? EntranceKind.slideFromLeft
+                  : EntranceKind.slideFromRight,
+              child: panel,
+            ),
+            if (left) arrow,
+          ],
+        ),
+      );
+    }
+
+    Widget scrim(String label, VoidCallback close) => Positioned.fill(
+      child: Semantics(
+        button: true,
+        label: label,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: close,
+          child: ColoredBox(color: AppColors.background.withValues(alpha: 0.7)),
+        ),
+      ),
+    );
+
+    return [
+      if (roomForArrows && !_propsDrawer && !_panelDrawer) ...[
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: DockToggle(
+              left: true,
+              open: false,
+              kind: DockKind.edge,
+              label: 'Abrir propriedades',
+              onTap: () => setState(() => _propsDrawer = true),
+            ),
+          ),
+        ),
+        Positioned(
+          right: 0,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: DockToggle(
+              left: false,
+              open: false,
+              kind: DockKind.edge,
+              label: 'Abrir painel',
+              onTap: () => setState(() => _panelDrawer = true),
+            ),
+          ),
+        ),
+      ],
+      if (_propsDrawer) ...[
+        scrim(
+          'Fechar propriedades (fundo)',
+          () => setState(() => _propsDrawer = false),
+        ),
+        drawer(
+          left: true,
+          title: 'Propriedades',
+          body: PageProps(ed: _ed),
+          close: () => setState(() => _propsDrawer = false),
+        ),
+      ],
+      if (_panelDrawer) ...[
+        scrim(
+          'Fechar painel (fundo)',
+          () => setState(() => _panelDrawer = false),
+        ),
+        drawer(
+          left: false,
+          title: 'Painel',
+          body: SidePanel(
+            ed: _ed,
+            onJump: _jump,
+            onOpen: _openPage,
+            onDuplicate: _duplicate,
+          ),
+          close: () => setState(() => _panelDrawer = false),
+        ),
+      ],
+    ];
   }
 
   Widget _panelBox(String title, Widget child) => Container(
@@ -629,12 +773,11 @@ class _EditorPageState extends State<EditorPage> {
                             child: const Text('Modo zen'),
                           ),
                           PopupMenuItem(
-                            value: () => _scaffold.currentState?.openDrawer(),
+                            value: () => setState(() => _propsDrawer = true),
                             child: const Text('Propriedades'),
                           ),
                           PopupMenuItem(
-                            value: () =>
-                                _scaffold.currentState?.openEndDrawer(),
+                            value: () => setState(() => _panelDrawer = true),
                             child: const Text('Painel'),
                           ),
                           PopupMenuItem(
@@ -664,14 +807,14 @@ class _EditorPageState extends State<EditorPage> {
                           label: '',
                           tooltip: 'Propriedades da página',
                           showLabel: false,
-                          onTap: () => _scaffold.currentState?.openDrawer(),
+                          onTap: () => setState(() => _propsDrawer = true),
                         ),
                         _HeaderButton(
                           icon: Icons.view_sidebar_outlined,
                           label: '',
                           tooltip: 'Painel da página',
                           showLabel: false,
-                          onTap: () => _scaffold.currentState?.openEndDrawer(),
+                          onTap: () => setState(() => _panelDrawer = true),
                         ),
                       ],
                       Padding(
@@ -732,217 +875,153 @@ class _EditorPageState extends State<EditorPage> {
             focusNode: _pageNode,
             autofocus: true,
             child: Scaffold(
-              key: _scaffold,
               backgroundColor: AppColors.background,
-              drawer: docked
-                  ? null
-                  : Drawer(
-                      width: 280,
-                      backgroundColor: AppColors.surface,
-                      shape: const RoundedRectangleBorder(),
-                      child: SafeArea(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: ListView(
-                            children: [
-                              Text('Propriedades', style: AppText.serif(20)),
-                              const SizedBox(height: 20),
-                              PageProps(ed: _ed),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-              endDrawer: docked
-                  ? null
-                  : Drawer(
-                      width: 280,
-                      backgroundColor: AppColors.surface,
-                      shape: const RoundedRectangleBorder(),
-                      child: SafeArea(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: ListView(
-                            children: [
-                              Text('Painel', style: AppText.serif(20)),
-                              const SizedBox(height: 20),
-                              SidePanel(
-                                ed: _ed,
-                                onJump: _jump,
-                                onOpen: _openPage,
-                                onDuplicate: _duplicate,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-              body: SafeArea(
-                child: Column(
-                  children: [
-                    ?header,
-                    Expanded(
-                      child: LayoutBuilder(
-                        builder: (context, box) {
-                          final scale = dockScale(width);
-                          // a dock keeps its own size and grows as a whole (the web's `zoom`): laid out unscaled, drawn scaled
-                          Widget dock({
-                            required bool left,
-                            required Widget child,
-                          }) {
-                            final inner = dockRailWidth + dockPanelWidth;
-                            return SizedBox(
-                              width: inner * scale,
-                              height: box.maxHeight,
-                              child: OverflowBox(
-                                alignment: left
-                                    ? Alignment.topLeft
-                                    : Alignment.topRight,
-                                minWidth: inner,
-                                maxWidth: inner,
-                                minHeight: box.maxHeight / scale,
-                                maxHeight: box.maxHeight / scale,
-                                child: Transform.scale(
-                                  scale: scale,
-                                  alignment: left
-                                      ? Alignment.topLeft
-                                      : Alignment.topRight,
-                                  child: SizedBox(
-                                    width: inner,
-                                    height: box.maxHeight / scale,
-                                    child: child,
+              body: Stack(
+                children: [
+                  SafeArea(
+                    child: Column(
+                      children: [
+                        ?header,
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, box) {
+                              final scale = dockScale(width);
+                              // a dock keeps its own size and grows as a whole (the web's `zoom`): laid out unscaled, drawn scaled
+                              Widget dock({
+                                required bool left,
+                                required Widget child,
+                              }) {
+                                final inner = dockRailWidth + dockPanelWidth;
+                                return SizedBox(
+                                  width: inner * scale,
+                                  height: box.maxHeight,
+                                  child: OverflowBox(
+                                    alignment: left
+                                        ? Alignment.topLeft
+                                        : Alignment.topRight,
+                                    minWidth: inner,
+                                    maxWidth: inner,
+                                    minHeight: box.maxHeight / scale,
+                                    maxHeight: box.maxHeight / scale,
+                                    child: Transform.scale(
+                                      scale: scale,
+                                      alignment: left
+                                          ? Alignment.topLeft
+                                          : Alignment.topRight,
+                                      child: SizedBox(
+                                        width: inner,
+                                        height: box.maxHeight / scale,
+                                        child: child,
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              ),
-                            );
-                          }
+                                );
+                              }
 
-                          return Stack(
-                            children: [
-                              Positioned.fill(
-                                child: Entrance(
-                                  kind: EntranceKind.fade,
-                                  child: list,
-                                ),
-                              ),
-                              if (!_zen && docked) ...[
-                                Positioned(
-                                  left: 0,
-                                  top: 0,
-                                  bottom: 0,
-                                  child: dock(
-                                    left: true,
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        SizedBox(
-                                          width: dockRailWidth,
-                                          child: Center(
-                                            child: DockToggle(
-                                              left: true,
-                                              open: propsOpen,
-                                              label: propsOpen
-                                                  ? 'Fechar propriedades'
-                                                  : 'Abrir propriedades',
-                                              onTap: () => setState(
-                                                () => _propsDock = !propsOpen,
+                              return Stack(
+                                children: [
+                                  Positioned.fill(
+                                    child: Entrance(
+                                      kind: EntranceKind.fade,
+                                      child: list,
+                                    ),
+                                  ),
+                                  if (!_zen && docked) ...[
+                                    Positioned(
+                                      left: 0,
+                                      top: 0,
+                                      bottom: 0,
+                                      child: dock(
+                                        left: true,
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            SizedBox(
+                                              width: dockRailWidth,
+                                              child: Center(
+                                                child: DockToggle(
+                                                  left: true,
+                                                  open: propsOpen,
+                                                  label: propsOpen
+                                                      ? 'Fechar propriedades'
+                                                      : 'Abrir propriedades',
+                                                  onTap: () => setState(
+                                                    () =>
+                                                        _propsDock = !propsOpen,
+                                                  ),
+                                                ),
                                               ),
                                             ),
-                                          ),
+                                            if (propsOpen)
+                                              Entrance(
+                                                key: const ValueKey('props-in'),
+                                                kind:
+                                                    EntranceKind.slideFromLeft,
+                                                child: propsPanel,
+                                              ),
+                                          ],
                                         ),
-                                        if (propsOpen)
-                                          Entrance(
-                                            key: const ValueKey('props-in'),
-                                            kind: EntranceKind.slideFromLeft,
-                                            child: propsPanel,
-                                          ),
-                                      ],
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                Positioned(
-                                  right: 0,
-                                  top: 0,
-                                  bottom: 0,
-                                  child: dock(
-                                    left: false,
-                                    child: Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        if (panelOpen)
-                                          Entrance(
-                                            key: const ValueKey('panel-in'),
-                                            kind: EntranceKind.slideFromRight,
-                                            child: sidePanel,
-                                          ),
-                                        SizedBox(
-                                          width: dockRailWidth,
-                                          child: Center(
-                                            child: DockToggle(
-                                              left: false,
-                                              open: panelOpen,
-                                              label: panelOpen
-                                                  ? 'Fechar painel'
-                                                  : 'Abrir painel',
-                                              onTap: () => setState(
-                                                () => _panelDock = !panelOpen,
+                                    Positioned(
+                                      right: 0,
+                                      top: 0,
+                                      bottom: 0,
+                                      child: dock(
+                                        left: false,
+                                        child: Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.stretch,
+                                          children: [
+                                            if (panelOpen)
+                                              Entrance(
+                                                key: const ValueKey('panel-in'),
+                                                kind:
+                                                    EntranceKind.slideFromRight,
+                                                child: sidePanel,
+                                              ),
+                                            SizedBox(
+                                              width: dockRailWidth,
+                                              child: Center(
+                                                child: DockToggle(
+                                                  left: false,
+                                                  open: panelOpen,
+                                                  label: panelOpen
+                                                      ? 'Fechar painel'
+                                                      : 'Abrir painel',
+                                                  onTap: () => setState(
+                                                    () =>
+                                                        _panelDock = !panelOpen,
+                                                  ),
+                                                ),
                                               ),
                                             ),
-                                          ),
+                                          ],
                                         ),
-                                      ],
+                                      ),
                                     ),
-                                  ),
-                                ),
-                              ] else if (!_zen && roomForArrows) ...[
-                                Positioned(
-                                  left: 0,
-                                  top: 0,
-                                  bottom: 0,
-                                  child: Center(
-                                    child: DockToggle(
-                                      left: true,
-                                      open: false,
-                                      label: 'Abrir propriedades',
-                                      onTap: () =>
-                                          _scaffold.currentState?.openDrawer(),
+                                  ],
+                                  if (_zen)
+                                    Positioned(
+                                      top: 16,
+                                      right: 16,
+                                      child: _ZenPill(
+                                        words: _ed.stats.words,
+                                        saving: _ed.saving,
+                                        onExit: () => _setZen(false),
+                                      ),
                                     ),
-                                  ),
-                                ),
-                                Positioned(
-                                  right: 0,
-                                  top: 0,
-                                  bottom: 0,
-                                  child: Center(
-                                    child: DockToggle(
-                                      left: false,
-                                      open: false,
-                                      label: 'Abrir painel',
-                                      onTap: () => _scaffold.currentState
-                                          ?.openEndDrawer(),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                              if (_zen)
-                                Positioned(
-                                  top: 16,
-                                  right: 16,
-                                  child: _ZenPill(
-                                    words: _ed.stats.words,
-                                    saving: _ed.saving,
-                                    onExit: () => _setZen(false),
-                                  ),
-                                ),
-                            ],
-                          );
-                        },
-                      ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  ..._drawers(width, docked, roomForArrows),
+                ],
               ),
             ),
           ),

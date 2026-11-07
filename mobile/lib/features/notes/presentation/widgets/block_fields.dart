@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/blocks.dart';
 import '../../data/highlight.dart';
+import 'ui.dart';
 
 /// A text field that stays in step with a value kept elsewhere. The value
 /// changes under it on a split, a conversion or an undo; typing flows the
@@ -90,7 +91,8 @@ class _SyncedFieldState extends State<SyncedField> {
           ),
       onChanged: widget.onChanged,
     );
-    if (widget.onBackspaceEmpty == null) return field;
+    final ringed = FocusRing(always: true, child: field);
+    if (widget.onBackspaceEmpty == null) return ringed;
     // a hardware keyboard's Backspace on an empty field (a soft keyboard sends no key at all)
     return Focus(
       canRequestFocus: false,
@@ -101,7 +103,7 @@ class _SyncedFieldState extends State<SyncedField> {
         }
         return KeyEventResult.ignored;
       },
-      child: field,
+      child: ringed,
     );
   }
 }
