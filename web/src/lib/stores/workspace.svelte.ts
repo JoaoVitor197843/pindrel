@@ -1,4 +1,5 @@
-import { excerptOf, newId, type Block } from './blocks'
+import { excerptOf, fileIdsOf, newId, type Block } from './blocks'
+import { files } from './files.svelte'
 import { ALL_PERMS, normalizePerms, type PermKey } from './permissions'
 import { fold } from './text'
 import { ME, seedUsers, type User } from './users'
@@ -420,7 +421,21 @@ export class Workspace {
   }
 
   emptyTrash() {
+    const gone = this.pages.filter((p) => p.trashed)
     this.pages = this.pages.filter((p) => !p.trashed)
+    this.#dropFiles(gone)
+  }
+
+  /** Told which files only the pages deleted for good used, so the server can drop them at once. */
+  filesGone: (ids: string[]) => void = (ids) => files.remove(ids)
+
+  #dropFiles(gone: NotePage[]) {
+    // only my own pages: a page shared with me keeps its files with whoever sent it
+    const ids = fileIdsOf(gone.filter((p) => !p.sharedBy).flatMap((p) => p.content ?? []))
+    if (!ids.length) return
+    const kept = new Set(fileIdsOf(this.pages.flatMap((p) => p.content ?? [])))
+    const alone = ids.filter((id) => !kept.has(id))
+    if (alone.length) this.filesGone(alone)
   }
 
   /** Returns the new tag, or the existing one when the name is already taken; null for an empty name. */
@@ -447,7 +462,9 @@ export class Workspace {
   }
 
   deleteForever(id: string) {
+    const gone = this.pages.filter((p) => p.id === id)
     this.pages = this.pages.filter((p) => p.id !== id)
+    this.#dropFiles(gone)
   }
 
   /** A new, empty vault page. Only while the vault is unlocked. */

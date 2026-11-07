@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MAX_BLOCKS, MAX_COLS, MAX_COL_WIDTH, MAX_ITEMS, MAX_ROWS, MAX_TEXT, MIN_COL_WIDTH, type Block } from './blocks'
+import { FakeFiles, patterned } from '../../test/fakeFiles'
+import { FilesApi } from '../api/files'
 import { PageEditor } from './editor.svelte'
+import { FilesService } from './files.svelte'
+import { toast } from './toast.svelte'
 import { Workspace } from './workspace.svelte'
 
 let ws: Workspace
@@ -680,6 +684,171 @@ describe('PageEditor — endereços, mídia e link para página', () => {
     expect(only.setUrl(b.id, 'https://a.com')).toBe(false)
     expect(only.setPageLink(b.id, 'p5')).toBe(false)
     only.destroy()
+  })
+})
+
+describe('PageEditor — arquivos no servidor', () => {
+  let server: FakeFiles
+  let service: FilesService
+  beforeEach(() => {
+    vi.useRealTimers()
+    server = new FakeFiles()
+    service = new FilesService(new FilesApi({ token: () => server.token, fetch: server.fetch }))
+    ed.files = service
+    toast.message = ''
+  })
+  const until = async (cond: () => boolean) => {
+    for (let i = 0; i < 400 && !cond(); i++) await new Promise((r) => setTimeout(r, 5))
+    expect(cond()).toBe(true)
+  }
+  const put = (name: string, size = 100) => new File([patterned(size)], name)
+  const block = (id: string) => ed.blocks.find((b) => b.id === id)!
+
+  it('cada arquivo vira o bloco que combina com o que o servidor achou nele', async () => {
+    const cases: [string, string][] = [['foto.png', 'image'], ['aula.mp4', 'video'], ['som.mp3', 'audio'], ['manual.pdf', 'pdf'], ['notas.txt', 'file'], ['dados.bin', 'file']]
+    for (const [name, type] of cases) {
+      const b = ed.insert('image')!
+      expect(ed.uploadInto(b.id, put(name))).toBe(true)
+      await until(() => block(b.id).type === type && !!(block(b.id) as { fileId?: string }).fileId)
+      const made = block(b.id) as { fileId?: string }
+      expect(made.fileId, name).toBeTruthy()
+      expect(ed.uploading[b.id], 'the upload is dismissed when done').toBeUndefined()
+    }
+  })
+
+  it('o bloco de arquivo guarda nome, tamanho, tipo e nível', async () => {
+    const b = ed.insert('file')!
+    ed.uploadInto(b.id, put('relatorio.zip', 777))
+    await until(() => (block(b.id) as { fileId: string }).fileId !== '')
+    expect(block(b.id)).toMatchObject({ type: 'file', name: 'relatorio.zip', size: 777, mime: 'application/zip', level: 2 })
+  })
+
+  it('sem sessão avisa e não envia; arquivo vazio e bloco inexistente também são recusados', () => {
+    const b = ed.insert('file')!
+    const none = new FilesService(new FilesApi({ token: () => null, fetch: server.fetch }))
+    ed.files = none
+    expect(ed.uploadInto(b.id, put('a.txt'))).toBe(false)
+    expect(toast.message).toMatch(/Entre em um servidor/)
+    ed.files = service
+    expect(ed.uploadInto(b.id, new File([], 'vazio.txt'))).toBe(false)
+    expect(toast.message).toMatch(/vazio/)
+    expect(ed.uploadInto('nao-existe', put('a.txt'))).toBe(false)
+    expect(server.seen).toHaveLength(0)
+  })
+
+  it('sem permissão de blocos, e imagem sem permissão de imagens, nada é enviado', () => {
+    const only = new PageEditor(ws, 's2')
+    only.files = service
+    expect(only.uploadInto(only.blocks[0].id, put('a.txt'))).toBe(false)
+    only.destroy()
+  })
+
+  it('mostra o andamento no bloco e deixa cancelar', async () => {
+    server.delay = 20
+    const b = ed.insert('file')!
+    ed.uploadInto(b.id, put('grande.bin', 1_300_000))
+    expect(ed.uploading[b.id]).toMatchObject({ name: 'grande.bin', total: 1_300_000 })
+    await until(() => ed.uploading[b.id]?.status === 'sending')
+    ed.dismissUpload(b.id)
+    expect(ed.uploading[b.id]).toBeUndefined()
+    await new Promise((r) => setTimeout(r, 100))
+    expect(server.files.size).toBe(0)
+    expect((block(b.id) as { fileId: string }).fileId).toBe('')
+  })
+
+  it('um envio que falha fica no bloco com a frase do erro, até ser dispensado', async () => {
+    server.quota = 10
+    const b = ed.insert('file')!
+    ed.uploadInto(b.id, put('a.bin', 500))
+    await until(() => ed.uploading[b.id]?.status === 'failed')
+    expect(ed.uploading[b.id].error).toMatch(/espaço/)
+    ed.dismissUpload(b.id)
+    expect(ed.uploading[b.id]).toBeUndefined()
+  })
+
+  it('se o bloco some enquanto o arquivo viaja, o arquivo é marcado como sem uso', async () => {
+    server.delay = 15
+    const b = ed.insert('file')!
+    ed.uploadInto(b.id, put('a.bin', 2000))
+    ed.remove(b.id)
+    await new Promise((r) => setTimeout(r, 250))
+    // the upload is cancelled with the block, so nothing arrives at all
+    expect(server.files.size).toBe(0)
+  })
+
+  it('se o bloco some DEPOIS de o último pedaço sair, o arquivo que chega é marcado como sem uso', async () => {
+    const b = ed.insert('file')!
+    const pageId = ed.id
+    ed.uploadInto(b.id, put('a.bin', 2000))
+    // the block disappears behind the editor's back (another device, a sync)
+    ws.page(pageId)!.content!.splice(ws.page(pageId)!.content!.findIndex((x) => x.id === b.id), 1)
+    await until(() => server.files.size === 1)
+    const id = [...server.files.keys()][0]
+    await until(() => server.orphaned.has(id))
+  })
+
+  it('apagar um bloco com arquivo marca o arquivo como sem uso, mas só se nenhum outro bloco o usa', async () => {
+    const a = ed.insert('file')!
+    ed.uploadInto(a.id, put('a.bin'))
+    await until(() => (block(a.id) as { fileId: string }).fileId !== '')
+    const fileId = (block(a.id) as { fileId: string }).fileId
+    const copy = ed.duplicateBlock(a.id)!
+    expect((copy as { fileId: string }).fileId).toBe(fileId)
+    ed.remove(a.id)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(server.orphaned.has(fileId), 'the copy still uses it').toBe(false)
+    ed.remove(copy.id)
+    await until(() => server.orphaned.has(fileId))
+  })
+
+  it('um arquivo usado por outra página não é marcado ao apagar o bloco', async () => {
+    const a = ed.insert('file')!
+    ed.uploadInto(a.id, put('a.bin'))
+    await until(() => (block(a.id) as { fileId: string }).fileId !== '')
+    const fileId = (block(a.id) as { fileId: string }).fileId
+    const other = ws.contentOf('p5')!
+    other.push({ id: 'usa', type: 'file', fileId, name: 'a.bin', size: 100, mime: '', level: 3 })
+    ed.remove(a.id)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(server.orphaned.has(fileId)).toBe(false)
+  })
+
+  it('trocar o arquivo de um bloco solta o antigo', async () => {
+    const b = ed.insert('file')!
+    ed.uploadInto(b.id, put('um.bin'))
+    await until(() => (block(b.id) as { fileId: string }).fileId !== '')
+    const first = (block(b.id) as { fileId: string }).fileId
+    ed.uploadInto(b.id, put('dois.png'))
+    await until(() => block(b.id).type === 'image' && (block(b.id) as { fileId?: string }).fileId !== first)
+    expect(server.files.has(first)).toBe(true)
+    await until(() => server.orphaned.has(first))
+  })
+
+  it('remover a imagem do servidor tira o arquivo do bloco e o solta', async () => {
+    const b = ed.insert('image')!
+    ed.uploadInto(b.id, put('foto.png'))
+    await until(() => !!(block(b.id) as { fileId?: string }).fileId)
+    const fileId = (block(b.id) as { fileId: string }).fileId
+    ed.setImage(b.id, null, null)
+    expect('fileId' in block(b.id)).toBe(false)
+    await until(() => server.orphaned.has(fileId))
+  })
+
+  it('uma imagem do servidor pode ser duplicada; uma da sessão (endereço temporário) continua não podendo', async () => {
+    const b = ed.insert('image')!
+    ed.uploadInto(b.id, put('foto.png'))
+    await until(() => !!(block(b.id) as { fileId?: string }).fileId)
+    expect(ed.duplicateBlock(b.id)).not.toBeNull()
+    const local = ed.insert('image')!
+    ed.setImage(local.id, 'x.png', 'blob:temporario')
+    expect(ed.duplicateBlock(local.id)).toBeNull()
+  })
+
+  it('vários arquivos de uma vez entram na fila e todos chegam', async () => {
+    const ids = Array.from({ length: 6 }, () => ed.insert('file')!.id)
+    ids.forEach((id, i) => ed.uploadInto(id, put(`f${i}.bin`, 3000)))
+    await until(() => ids.every((id) => !!(block(id) as { fileId: string }).fileId))
+    expect(server.files.size).toBe(6)
   })
 })
 

@@ -41,6 +41,7 @@
         { type: 'image', label: 'Imagem', glyph: '▣' },
         { type: 'video', label: 'Vídeo', glyph: '▶' },
         { type: 'audio', label: 'Áudio', glyph: '♪' },
+        { type: 'file', label: 'Arquivo', glyph: '📎' },
         { type: 'pdf', label: 'PDF', glyph: 'PDF' },
         { type: 'bookmark', label: 'Link', glyph: '↗' },
         { type: 'pagelink', label: 'Link para página', glyph: '📄' },

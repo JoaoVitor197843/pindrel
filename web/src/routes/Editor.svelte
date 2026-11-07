@@ -16,6 +16,7 @@
   import TocBlock from '../lib/components/editor/TocBlock.svelte'
   import BookmarkBlock from '../lib/components/editor/BookmarkBlock.svelte'
   import MediaBlock from '../lib/components/editor/MediaBlock.svelte'
+  import FileBlock from '../lib/components/editor/FileBlock.svelte'
   import PageLinkBlock from '../lib/components/editor/PageLinkBlock.svelte'
   import { applyEdit } from '../lib/components/editor/fieldEdit'
   import ShareModal from '../lib/components/editor/ShareModal.svelte'
@@ -31,7 +32,7 @@
   import TextBlock from '../lib/components/editor/TextBlock.svelte'
   import { autosize, place } from '../lib/components/editor/autosize'
   import { ms } from '../lib/motion'
-  import { ago, isTextType, levelOf, numbering, toneOf, type Block, type BlockType, type HeadingLevel } from '../lib/stores/blocks'
+  import { ago, blockTypeForFile, isTextType, levelOf, numbering, toneOf, type Block, type BlockType, type HeadingLevel } from '../lib/stores/blocks'
   import { toggleMark, type Mark } from '../lib/stores/inline'
   import { barLock, instances, type RichInstance } from '../lib/components/editor/rich/engine'
   import { Dock, dockScale } from '../lib/stores/dock.svelte'
@@ -126,6 +127,7 @@
     video: 'Vídeo',
     audio: 'Áudio',
     pdf: 'PDF',
+    file: 'Arquivo',
   }
   // the number each item of a numbered list shows, counted from the page's blocks (never stored)
   const numbers = $derived(numbering(ed.blocks))
@@ -198,6 +200,7 @@
       case 'bookmark':
       case 'pagelink':
       case 'pdf':
+      case 'file':
         return 76
       case 'video':
         return 300
@@ -244,6 +247,22 @@
     else ws.trash(id)
     toast.show(forever ? 'Página excluída' : 'Movida para a lixeira')
     onback()
+  }
+
+  const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types?.includes('Files')
+
+  /** Files dropped on the page become blocks, one after the other at the end, each sent to the server. */
+  function dropFiles(list: File[]) {
+    if (!ed.can('blocks')) return
+    if (!ed.files.available) return void toast.show('Entre em um servidor para enviar arquivos')
+    let after = ed.blocks.at(-1)?.id ?? null
+    for (const file of list.slice(0, 10)) {
+      const kind = blockTypeForFile(file.type, 1)
+      const made = ed.insert(kind === 'image' && !ed.can('images') ? 'file' : kind, after)
+      if (!made) return void toast.show('Limite de blocos da página atingido')
+      ed.uploadInto(made.id, file)
+      after = made.id
+    }
   }
 
   function pick(type: BlockType, afterId: string | null, opts: { level?: HeadingLevel } = {}) {
@@ -519,7 +538,14 @@
       {#if !zen}<PageCover {ed} />{/if}
       <div class="animate-fade relative w-full">
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <article class="mx-auto w-full min-w-0 px-7 pb-32 min-[360px]:px-7 md:px-20 {zen ? 'max-w-2xl pt-24' : 'max-w-3xl pt-10'}" onkeydown={(e) => (navKey(e), fmtKey(e))}>
+      <article class="mx-auto w-full min-w-0 px-7 pb-32 min-[360px]:px-7 md:px-20 {zen ? 'max-w-2xl pt-24' : 'max-w-3xl pt-10'}" onkeydown={(e) => (navKey(e), fmtKey(e))}
+        ondragover={(e) => hasFiles(e) && e.preventDefault()}
+        ondrop={(e) => {
+          if (!hasFiles(e)) return
+          e.preventDefault()
+          dropFiles([...(e.dataTransfer?.files ?? [])])
+        }}
+      >
         {#if ed.readOnly}
           <div class="mb-6 flex flex-wrap items-center gap-3 rounded-field border border-line bg-surface px-4 py-3 text-sm" role="status">
             Esta página está na lixeira e não pode ser editada.
@@ -561,7 +587,7 @@
               readOnly={!ed.can('blocks') || zen}
               turnable={isTextType(block.type)}
               kind={block.type}
-              canDuplicate={block.type !== 'image'}
+              canDuplicate={block.type !== 'image' || !!block.fileId}
               onduplicate={() => duplicateBlock(block.id)}
               onturn={(t, o) => ed.turnInto(block.id, t, o)}
               level={block.type === 'heading' ? levelOf(block) : 2}
@@ -607,6 +633,8 @@
                 <BookmarkBlock {ed} {block} />
               {:else if block.type === 'video' || block.type === 'audio' || block.type === 'pdf'}
                 <MediaBlock {ed} {block} />
+              {:else if block.type === 'file'}
+                <FileBlock {ed} {block} />
               {:else if block.type === 'pagelink'}
                 <PageLinkBlock {ed} {block} {onopen} />
               {:else if block.type === 'toggle'}

@@ -6,6 +6,8 @@ import { tick } from 'svelte'
 import { resetNearView } from '../lib/components/editor/nearView'
 import { instances, type RichInstance } from '../lib/components/editor/rich/engine'
 import type { Block } from '../lib/stores/blocks'
+import { FakeFiles, patterned } from '../test/fakeFiles'
+import { session } from '../lib/stores/files.svelte'
 import { prefs } from '../lib/stores/prefs.svelte'
 import { toast } from '../lib/stores/toast.svelte'
 import { Workspace } from '../lib/stores/workspace.svelte'
@@ -2407,7 +2409,7 @@ describe('Editor — menu de blocos com rolagem e categorias, cabeçalho compact
     const inside = (g: string) => within(menu.getByRole('group', { name: g })).getAllByRole('menuitem').map((m) => m.textContent!.trim().replace(/^\S+\s+/, ''))
     expect(inside('Texto')).toEqual(['Texto', 'Título 1', 'Título 2', 'Título 3', 'Citação', 'Destaque'])
     expect(inside('Listas e toggles')).toEqual(['Lista com marcadores', 'Lista numerada', 'Checklist', 'Toggle', 'Título 1 com toggle', 'Título 2 com toggle', 'Título 3 com toggle'])
-    expect(inside('Mídia e links')).toEqual(['Imagem', 'Vídeo', 'Áudio', 'PDF', 'Link', 'Link para página'])
+    expect(inside('Mídia e links')).toEqual(['Imagem', 'Vídeo', 'Áudio', 'Arquivo', 'PDF', 'Link', 'Link para página'])
     expect(inside('Dados e código')).toEqual(['Tabela', 'Código'])
     expect(inside('Estrutura e sigilo')).toEqual(['Sumário', 'Divisor', 'Spoiler', 'Bloco seguro'])
   })
@@ -3369,6 +3371,224 @@ describe('Editor — vídeo, áudio, PDF e link para página', () => {
       { id: 'e', type: 'pagelink', pageId: '', title: '' },
     ])
     open('p5')
+    expect(await violations()).toEqual([])
+  })
+})
+
+describe('Editor — arquivos no servidor', () => {
+  let server: FakeFiles
+  beforeEach(() => {
+    server = new FakeFiles()
+    vi.mocked(fetch).mockImplementation(server.fetch as typeof fetch)
+  })
+  afterEach(() => {
+    session.token = null
+  })
+  const signIn = () => (session.token = server.token)
+  const setBlocks = (blocks: Block[], id = 'p5') => {
+    ws.contentOf(id)
+    ws.page(id)!.content = blocks
+  }
+  const pickFile = async (label: RegExp | string, file: File) => {
+    const input = screen.getByLabelText(label) as HTMLInputElement
+    await fireEvent.change(input, { target: { files: [file] } })
+  }
+  const until = (cond: () => boolean) => waitFor(() => expect(cond()).toBe(true))
+  const doc = (name: string, size = 3000) => new File([patterned(size)], name)
+
+  it('sem sessão o bloco Arquivo explica e não envia', async () => {
+    setBlocks([{ id: 'f', type: 'file', fileId: '', name: '', size: 0, mime: '', level: 3 }])
+    open('p5')
+    expect(screen.getByText(/Entre em um servidor para enviar arquivos/)).toBeTruthy()
+    await pickFile('Arraste um arquivo aqui ou clique para escolher', doc('a.txt'))
+    expect(toast.message).toMatch(/Entre em um servidor/)
+    expect(server.seen).toHaveLength(0)
+  })
+
+  it('escolher um arquivo mostra o andamento e depois o cartão com nome e tamanho', async () => {
+    signIn()
+    server.delay = 30
+    setBlocks([{ id: 'f', type: 'file', fileId: '', name: '', size: 0, mime: '', level: 3 }])
+    open('p5')
+    await pickFile('Arraste um arquivo aqui ou clique para escolher', doc('relatorio.zip', 1_200_000))
+    const bar = await screen.findByRole('progressbar', { name: 'Enviando relatorio.zip' })
+    expect(bar.getAttribute('aria-valuemax')).toBe('100')
+    await until(() => !!ws.page('p5')!.content!.find((b) => b.type === 'file' && b.fileId))
+    expect(await screen.findByText('relatorio.zip')).toBeTruthy()
+    expect(screen.getByText(/1\.2 MB · application\/zip/)).toBeTruthy()
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  it('o botão Cancelar para o envio e o bloco volta a pedir o arquivo', async () => {
+    signIn()
+    server.delay = 40
+    setBlocks([{ id: 'f', type: 'file', fileId: '', name: '', size: 0, mime: '', level: 3 }])
+    open('p5')
+    await pickFile('Arraste um arquivo aqui ou clique para escolher', doc('a.bin', 2_000_000))
+    await screen.findByRole('progressbar')
+    await click(screen.getByRole('button', { name: 'Cancelar' }))
+    expect(screen.queryByRole('progressbar')).toBeNull()
+    expect(screen.getByLabelText('Arraste um arquivo aqui ou clique para escolher')).toBeTruthy()
+    await new Promise((r) => setTimeout(r, 200))
+    expect(server.files.size).toBe(0)
+  })
+
+  it('um envio que falha mostra o motivo, e dá para dispensar', async () => {
+    signIn()
+    server.quota = 10
+    setBlocks([{ id: 'f', type: 'file', fileId: '', name: '', size: 0, mime: '', level: 3 }])
+    open('p5')
+    await pickFile('Arraste um arquivo aqui ou clique para escolher', doc('a.bin', 5000))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toMatch(/espaço de arquivos/)
+    await click(screen.getByRole('button', { name: 'Dispensar' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('arquivo de documento baixa direto; arquivo desconhecido pede confirmação antes', async () => {
+    signIn()
+    const click_ = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    try {
+      setBlocks([{ id: 'f', type: 'file', fileId: '', name: '', size: 0, mime: '', level: 3 }, { id: 'g', type: 'file', fileId: '', name: '', size: 0, mime: '', level: 3 }])
+      open('p5')
+      const pickers = screen.getAllByLabelText('Arraste um arquivo aqui ou clique para escolher')
+      await fireEvent.change(pickers[0], { target: { files: [doc('notas.txt')] } })
+      await until(() => !!(ws.page('p5')!.content![0] as { fileId: string }).fileId)
+      await fireEvent.change(screen.getByLabelText('Arraste um arquivo aqui ou clique para escolher'), { target: { files: [doc('coisa.bin')] } })
+      await until(() => !!(ws.page('p5')!.content![1] as { fileId: string }).fileId)
+      await click(await screen.findByRole('button', { name: 'Baixar notas.txt' }))
+      await until(() => click_.mock.calls.length === 1)
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      await click(screen.getByRole('button', { name: 'Baixar coisa.bin' }))
+      const warn = await screen.findByRole('alertdialog', { name: 'Baixar arquivo desconhecido' })
+      expect(warn.textContent).toMatch(/só se você confia/)
+      expect(click_).toHaveBeenCalledTimes(1)
+      await click(screen.getByRole('button', { name: 'Cancelar' }))
+      expect(screen.queryByRole('alertdialog')).toBeNull()
+      await click(screen.getByRole('button', { name: 'Baixar coisa.bin' }))
+      await click(screen.getByRole('button', { name: 'Baixar mesmo assim' }))
+      await until(() => click_.mock.calls.length === 2)
+    } finally {
+      click_.mockRestore()
+    }
+  })
+
+  it('a imagem do servidor mostra o endereço assinado, e tenta um novo se o primeiro falhar', async () => {
+    signIn()
+    setBlocks([{ id: 'i', type: 'image', name: null, src: null }])
+    open('p5')
+    await pickFile('Arraste uma imagem aqui ou clique para escolher', doc('foto.png'))
+    const img = (await screen.findByAltText('foto.png')) as HTMLImageElement
+    expect(img.getAttribute('src')).toMatch(/^\/files\/f\d+\?exp=/)
+    const before = server.seen.filter((r) => r.path.endsWith('/link')).length
+    await fireEvent.error(img)
+    await until(() => server.seen.filter((r) => r.path.endsWith('/link')).length === before + 1)
+    // a second failure is not retried forever
+    await fireEvent.error(img)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(server.seen.filter((r) => r.path.endsWith('/link')).length).toBe(before + 1)
+  })
+
+  it('vídeo e áudio do servidor tocam do endereço assinado, sem baixar nada antes do play', async () => {
+    signIn()
+    setBlocks([{ id: 'v', type: 'video', url: '', title: '' }, { id: 'a', type: 'audio', url: '', title: '' }])
+    open('p5')
+    const inputs = screen.getAllByLabelText('…ou envie um arquivo daqui')
+    await fireEvent.change(inputs[0], { target: { files: [doc('aula.mp4')] } })
+    await until(() => !!(ws.page('p5')!.content![0] as { fileId?: string }).fileId)
+    await fireEvent.change(screen.getByLabelText('…ou envie um arquivo daqui'), { target: { files: [doc('som.mp3')] } })
+    await until(() => !!(ws.page('p5')!.content![1] as { fileId?: string }).fileId)
+    const video = (await screen.findByLabelText('Vídeo: aula.mp4')) as HTMLVideoElement
+    const audio = (await screen.findByLabelText('Áudio: som.mp3')) as HTMLAudioElement
+    for (const el of [video, audio]) {
+      expect(el.getAttribute('preload')).toBe('none')
+      expect(el.hasAttribute('autoplay')).toBe(false)
+      await until(() => /^\/files\/f\d+\?exp=/.test(el.getAttribute('src') ?? ''))
+    }
+    // the server's own addresses never leave the page: nothing but /files/ was asked for
+    expect(server.seen.every((r) => r.path.startsWith('/files/'))).toBe(true)
+  })
+
+  it('um PDF do servidor abre pelo endereço assinado em outra aba', async () => {
+    signIn()
+    setBlocks([{ id: 'd', type: 'pdf', url: '', title: '' }])
+    open('p5')
+    await fireEvent.change(screen.getByLabelText('…ou envie um arquivo daqui'), { target: { files: [doc('manual.pdf')] } })
+    const link = (await screen.findByRole('link', { name: /Abrir pdf manual\.pdf/ })) as HTMLAnchorElement
+    await until(() => (link.getAttribute('href') ?? '').startsWith('/files/'))
+    expect(link.target).toBe('_blank')
+    expect(link.rel).toContain('noopener')
+  })
+
+  it('arrastar arquivos para a página cria um bloco para cada um, do tipo certo, e envia', async () => {
+    signIn()
+    open('p5')
+    const before = ws.page('p5')!.content!.length
+    const article = document.querySelector('article')!
+    const files = [doc('foto.png'), doc('aula.mp4'), doc('notas.txt'), doc('coisa.bin')]
+    await fireEvent.drop(article, { dataTransfer: { files, types: ['Files'] } })
+    await until(() => ws.page('p5')!.content!.filter((b) => 'fileId' in b && b.fileId).length === 4)
+    const made = ws.page('p5')!.content!.slice(before)
+    expect(made.map((b) => b.type)).toEqual(['image', 'video', 'file', 'file'])
+  })
+
+  it('arrastar para a página sem sessão avisa e não cria nada; arrastar um bloco da página não é arquivo', async () => {
+    open('p5')
+    const before = ws.page('p5')!.content!.length
+    const article = document.querySelector('article')!
+    await fireEvent.drop(article, { dataTransfer: { files: [doc('a.txt')], types: ['Files'] } })
+    expect(toast.message).toMatch(/Entre em um servidor/)
+    await fireEvent.drop(article, { dataTransfer: { files: [], types: ['text/plain'] } })
+    expect(ws.page('p5')!.content!.length).toBe(before)
+  })
+
+  it('soltar arquivos demais de uma vez cria no máximo dez blocos', async () => {
+    signIn()
+    open('p5')
+    const before = ws.page('p5')!.content!.length
+    const article = document.querySelector('article')!
+    await fireEvent.drop(article, { dataTransfer: { files: Array.from({ length: 30 }, (_, i) => doc(`f${i}.bin`, 10)), types: ['Files'] } })
+    expect(ws.page('p5')!.content!.length).toBe(before + 10)
+  })
+
+  it('numa página só de leitura soltar arquivo não cria nada', async () => {
+    signIn()
+    open('s2')
+    const before = ws.page('s2')!.content!.length
+    await fireEvent.drop(document.querySelector('article')!, { dataTransfer: { files: [doc('a.txt')], types: ['Files'] } })
+    expect(ws.page('s2')!.content!.length).toBe(before)
+    expect(server.seen).toHaveLength(0)
+  })
+
+  it('apagar o bloco de um arquivo avisa o servidor; apagar a página de vez apaga os arquivos dela', async () => {
+    signIn()
+    setBlocks([{ id: 'f', type: 'file', fileId: 'f1', name: 'a.bin', size: 5, mime: '', level: 3 }])
+    server.files.set('f1', { id: 'f1', size: 5, mime: '', level: 3, name: 'a.bin', encrypted: false, createdAt: Date.now(), bytes: null })
+    open('p5')
+    await click(screen.getByRole('button', { name: /Opções de Arquivo 1/ }))
+    await click(screen.getByRole('menuitem', { name: 'Excluir' }))
+    await until(() => server.orphaned.has('f1'))
+    cleanup()
+    // a page deleted for good takes its files along
+    setBlocks([{ id: 'g', type: 'file', fileId: 'f2', name: 'b.bin', size: 5, mime: '', level: 3 }], 'p0')
+    server.files.set('f2', { id: 'f2', size: 5, mime: '', level: 3, name: 'b.bin', encrypted: false, createdAt: Date.now(), bytes: null })
+    ws.deleteForever('p0')
+    await until(() => server.deleted.has('f2'))
+  })
+
+  it('axe: a página com um arquivo, um selo de envio em andamento e o seletor vazio', async () => {
+    signIn()
+    server.delay = 40
+    setBlocks([
+      { id: 'a', type: 'file', fileId: 'f1', name: 'a.bin', size: 5, mime: '', level: 3 },
+      { id: 'b', type: 'file', fileId: '', name: '', size: 0, mime: '', level: 3 },
+      { id: 'c', type: 'image', name: null, src: null },
+    ])
+    server.files.set('f1', { id: 'f1', size: 5, mime: '', level: 3, name: 'a.bin', encrypted: false, createdAt: Date.now(), bytes: null })
+    open('p5')
+    expect(await violations()).toEqual([])
+    await fireEvent.change(screen.getAllByLabelText('Arraste um arquivo aqui ou clique para escolher')[0], { target: { files: [doc('x.bin', 2_000_000)] } })
+    await screen.findByRole('progressbar')
     expect(await violations()).toEqual([])
   })
 })

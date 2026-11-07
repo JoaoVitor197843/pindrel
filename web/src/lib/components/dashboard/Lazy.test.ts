@@ -3,7 +3,8 @@ import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetNearView } from '../editor/nearView'
 import { Workspace } from '../../stores/workspace.svelte'
-import { seedLoad } from '../../loadtest'
+import { seedLoad, signInFromAddress } from '../../loadtest'
+import { session } from '../../stores/files.svelte'
 import Dashboard from '../../../routes/Dashboard.svelte'
 import Editor from '../../../routes/Editor.svelte'
 import { forgetHeights } from './Lazy.svelte'
@@ -46,7 +47,7 @@ describe('seedLoad com todos os tipos de bloco (só para medir memória)', () =>
     seedLoad(ws, new URLSearchParams('blocks=400&kinds=mixed'))
     const content = ws.page('p0')!.content!
     const types = new Set(content.map((b) => b.type))
-    for (const t of ['heading', 'bullet', 'numbered', 'callout', 'toc', 'bookmark', 'pagelink', 'video', 'audio', 'pdf', 'quote', 'toggle', 'paragraph']) expect(types.has(t as never), t).toBe(true)
+    for (const t of ['heading', 'bullet', 'numbered', 'callout', 'toc', 'bookmark', 'pagelink', 'video', 'audio', 'pdf', 'quote', 'toggle', 'paragraph', 'file', 'image']) expect(types.has(t as never), t).toBe(true)
     expect(new Set(content.map((b) => b.id)).size).toBe(content.length)
     // the page links point at pages that exist
     for (const b of content) if (b.type === 'pagelink') expect(ws.page(b.pageId)).toBeTruthy()
@@ -192,3 +193,17 @@ describe('editor: só os blocos perto da tela são desenhados', () => {
     expect(drawn().length).toBeLessThan(40)
   })
 })
+
+describe('signInFromAddress (só para testar arquivos contra um servidor de verdade)', () => {
+  it('aceita um token com a forma de um JWT e ignora o resto', () => {
+    session.token = null
+    signInFromAddress(new URLSearchParams('token=abc.def.ghi'))
+    expect(session.token).toBe('abc.def.ghi')
+    session.token = null
+    for (const bad of ['token=', 'token=sem pontos', 'token=a.b', 'token=a.b.c.d', 'token=<script>.x.y', 'outro=a.b.c']) {
+      signInFromAddress(new URLSearchParams(bad))
+      expect(session.token, bad).toBeNull()
+    }
+  })
+})
+

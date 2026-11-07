@@ -1,6 +1,7 @@
 // Load-test data for the memory measurements (`yarn build --mode loadtest`, see scripts/memory.mjs). It is only reached
 // from a branch that is dead in a normal build, so none of it is shipped.
 import type { Block } from './stores/blocks'
+import { session } from './stores/files.svelte'
 import type { Workspace } from './stores/workspace.svelte'
 
 const WORDS = 'fechamento trimestre conciliação financeira revisão contratos relatório conselho servidor backup página bloco cofre senha tag projeto notas reunião'.split(' ')
@@ -44,9 +45,22 @@ function mixed(i: number, pageIds: string[]): Block {
       return { id, type: 'quote', text: sentence(i, 16) }
     case 16:
       return { id, type: 'toggle', text: sentence(i, 5), body: sentence(i, 25) }
+    case 17:
+      return { id, type: 'file', fileId: `fx${i}`, name: `arquivo-${i}.zip`, size: 1_500_000 + i, mime: 'application/zip', level: 2 }
+    case 18:
+      return { id, type: 'image', name: `foto-${i}.png`, src: null, fileId: `fx${i}` }
     default:
       return { id, type: 'paragraph', text: `${sentence(i)} **${WORDS[i % WORDS.length]}** e *${WORDS[(i + 3) % WORDS.length]}*` }
   }
+}
+
+/**
+ * `?token=` signs the page in with an access token, so the file routes can be tried against a real server before the
+ * login is connected to the editor. Like the rest of this file it is reachable only from a build in loadtest mode.
+ */
+export function signInFromAddress(params: URLSearchParams) {
+  const token = params.get('token')
+  if (token && /^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) session.token = token
 }
 
 /** `?pages=N` makes the list N pages long; `?blocks=M` gives the page p0 M paragraphs (`&kinds=mixed`: every kind of block). */
