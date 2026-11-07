@@ -2,6 +2,7 @@
   import { tick } from 'svelte'
   import { MediaQuery } from 'svelte/reactivity'
   import Icon from '../lib/components/dashboard/Icon.svelte'
+  import Lazy from '../lib/components/dashboard/Lazy.svelte'
   import PageCard from '../lib/components/dashboard/PageCard.svelte'
   import Palette from '../lib/components/dashboard/Palette.svelte'
   import SettingsModal, { type SettingsSection } from '../lib/components/dashboard/SettingsModal.svelte'
@@ -289,7 +290,8 @@
                 {#if group.label}<span class="h-px flex-1 bg-line"></span><span>{group.pages.length}</span>{/if}
               </h2>
               <div class={ws.layout === 'grid' ? 'grid gap-4 md:grid-cols-2 xl:grid-cols-3' : 'flex flex-col gap-2'}>
-                {#each group.pages as page (page.id)}
+                {#each group.pages as page, i (page.id)}
+                  <Lazy id={page.id} estimate={ws.layout === 'grid' ? 200 : 64} eager={i < 18}>
                   <PageCard
                     {page}
                     tags={ws.tags}
@@ -305,6 +307,7 @@
                     vaultUnlocked={ws.vaultUnlocked}
                     onopen={onopen ? () => openPage(page.id) : undefined}
                   />
+                  </Lazy>
                 {/each}
               </div>
             </section>

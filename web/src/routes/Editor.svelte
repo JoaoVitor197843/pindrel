@@ -2,6 +2,7 @@
   import { onDestroy, tick } from 'svelte'
   import { MediaQuery } from 'svelte/reactivity'
   import Icon from '../lib/components/dashboard/Icon.svelte'
+  import Lazy from '../lib/components/dashboard/Lazy.svelte'
   import VaultPrompt from '../lib/components/dashboard/VaultPrompt.svelte'
   import ConfirmDialog from '../lib/components/editor/ConfirmDialog.svelte'
   import ExportMenu from '../lib/components/editor/ExportMenu.svelte'
@@ -67,6 +68,8 @@
   function jump(blockId: string) {
     const el = root?.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)
     el?.scrollIntoView?.({ block: 'start', behavior: ms(250) ? 'smooth' : 'auto' })
+    // a block far away is an empty box of an estimated height: once it is drawn the real one may differ, so land again
+    if (el?.getAttribute('data-lazy') === 'empty') setTimeout(() => root?.querySelector(`[data-block-id="${blockId}"]`)?.scrollIntoView?.({ block: 'start' }), 120)
     if (!wide.current) panel.closeDrawer()
   }
 
@@ -153,6 +156,31 @@
     const made = ed.duplicateBlock(blockId)
     if (!made) return void toast.show(ed.blocks.length >= 500 ? 'Limite de blocos da página atingido' : 'Este bloco não pode ser duplicado')
     void focusBlock(made.id, 'end')
+  }
+
+  /** About how tall a block is, for the empty box it leaves while far from the screen. */
+  function estimateHeight(b: Block): number {
+    switch (b.type) {
+      case 'heading':
+        return 44
+      case 'checklist':
+        return 12 + 34 * b.items.length
+      case 'table':
+        return 80 + 44 * b.rows.length
+      case 'code':
+        return 60 + 23 * b.text.split('\n').length
+      case 'image':
+        return 220
+      case 'divider':
+        return 30
+      case 'paragraph':
+      case 'quote':
+      case 'callout':
+      case 'toggle':
+      case 'spoiler':
+      case 'secure':
+        return Math.max(1, Math.ceil(b.text.length / 70)) * 28
+    }
   }
 
   async function focusBlock(blockId: string, where: 'start' | 'end' = 'end') {
@@ -481,6 +509,8 @@
 
         <div class="flex flex-col gap-3 {zen ? 'zen-dim' : ''}">
           {#each ed.blocks as block, i (block.id)}
+            <Lazy id={block.id} blockId={block.id} estimate={estimateHeight(block)} eager={i < 14}>
+              {#snippet children(first)}
             <BlockRow
               id={block.id}
               label={labels[block.type]}
@@ -505,6 +535,7 @@
               ondragover={(e) => dragOver(e, i)}
               ondrop={dragDrop}
               dragging={dragFrom === i}
+              enter={first}
               onpointerdrag={(phase, y) => pointerDrag(phase, y, i)}
             >
               {#if block.type === 'paragraph'}
@@ -533,6 +564,8 @@
                 <ImageBlock {ed} {block} />
               {/if}
             </BlockRow>
+              {/snippet}
+            </Lazy>
             {#if menuFor === block.id && replacing === block.id}
               <div class="relative -mt-3"><InsertMenu onpick={(t) => pick(t, block.id)} onclose={() => ((menuFor = null), (replacing = null))} disabled={ed.can('images') ? [] : ['image']} /></div>
             {/if}

@@ -59,3 +59,4 @@ gateway/target
 
 # local state of deploy/update.sh
 .deploy-state/
+dist-loadtest
