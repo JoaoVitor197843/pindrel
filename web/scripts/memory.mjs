@@ -19,7 +19,7 @@ const BUDGET = Number(process.env.BUDGET_MB ?? 100)
 const CHROME = process.env.CHROME ?? ['/opt/google/chrome/chrome', '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find(existsSync)
 if (!CHROME) throw new Error('Chrome not found: set CHROME=/path/to/chrome')
 
-// [name, path, budgeted, what to do once loaded]
+// [name, path, budgeted, JavaScript to run once loaded (optional)]
 const SCENARIOS = [
   ['aba em branco', 'about:blank', false],
   ['login', '/', true],
@@ -31,6 +31,18 @@ const SCENARIOS = [
   ['editor, 6000 blocos', '/notes/p0?tela=painel&blocks=6000', true],
   ['editor, 10000 blocos (extremo)', '/notes/p0?tela=painel&blocks=10000', false],
 ]
+
+// A focused block loads the rich-text editor (TipTap) and mounts it: the cost of editing, on top of the page itself
+const FOCUS = "document.querySelector('[data-view]')?.focus()"
+SCENARIOS.push(
+  ['exemplo, bloco em edição', '/notes/p0?tela=painel', true, FOCUS],
+  ['3000 blocos, bloco em edição', '/notes/p0?tela=painel&blocks=3000', true, FOCUS],
+  ['6000 blocos, bloco em edição', '/notes/p0?tela=painel&blocks=6000', true, FOCUS],
+)
+if (process.env.ONLY) {
+  const keep = process.env.ONLY.split('|')
+  SCENARIOS.splice(0, SCENARIOS.length, ...SCENARIOS.filter((s) => keep.some((k) => s[0].includes(k))))
+}
 
 if (!process.env.SKIP_BUILD) execSync('yarn build --mode loadtest --outDir dist-loadtest --emptyOutDir', { cwd: ROOT, stdio: 'ignore' })
 
@@ -51,7 +63,7 @@ const processes = () =>
 const descendants = (root) => { const all = processes(); const out = []; const walk = (p) => all.filter((r) => r.ppid === p).forEach((r) => (out.push(r), walk(r.pid))); walk(root); return out }
 const pss = (pid) => { try { return +readFileSync(`/proc/${pid}/smaps_rollup`, 'utf8').match(/^Pss:\s+(\d+)/m)[1] / 1024 } catch { return 0 } }
 
-async function measure([name, path]) {
+async function measure([name, path, , act]) {
   const dir = mkdtempSync('/tmp/pindrel-mem-')
   const chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`, '--no-first-run', '--disable-extensions', '--window-size=1500,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] })
   const port = await new Promise((resolve) => {
@@ -66,8 +78,16 @@ async function measure([name, path]) {
   ws.onmessage = (m) => { const d = JSON.parse(m.data); pending.get(d.id)?.(d.result ?? d.error) }
   const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })) })
   await send('Page.enable'); await send('Performance.enable'); await send('HeapProfiler.enable')
+  // a headless page is never "focused": without this, element.focus() fires no focus event
+  await send('Emulation.setFocusEmulationEnabled', { enabled: true })
   await send('Page.navigate', { url: path.startsWith('about:') ? path : BASE + path })
   await sleep(path.startsWith('about:') ? 2000 : 6000)
+  let mounted = null
+  if (act) {
+    await send('Runtime.evaluate', { expression: act })
+    await sleep(2500)
+    mounted = (await send('Runtime.evaluate', { expression: "!!document.querySelector('[data-rich]')" })).result?.value
+  }
   await send('HeapProfiler.collectGarbage'); await sleep(500)
   const heap = await send('Runtime.getHeapUsage')
   const metrics = Object.fromEntries((await send('Performance.getMetrics')).metrics.map((x) => [x.name, x.value]))
@@ -76,7 +96,7 @@ async function measure([name, path]) {
   const renderer = Math.max(0, ...procs.filter((p) => kind(p.args) === 'renderer').map((p) => pss(p.pid)))
   const gpu = procs.filter((p) => kind(p.args) === 'gpu-process').reduce((s, p) => s + pss(p.pid), 0)
   ws.close(); chrome.kill('SIGKILL'); await sleep(300); rmSync(dir, { recursive: true, force: true })
-  return { renderer, gpu, heap: heap.usedSize / 1048576, nodes: metrics.Nodes }
+  return { renderer, gpu, heap: heap.usedSize / 1048576, nodes: metrics.Nodes, mounted }
 }
 
 let failed = false
@@ -86,7 +106,7 @@ for (const s of SCENARIOS) {
   const r = await measure(s)
   const over = s[2] && r.renderer > BUDGET
   failed ||= over
-  console.log(s[0].padEnd(30), `${r.renderer.toFixed(0)} MB`.padStart(9), `${r.gpu.toFixed(0)} MB`.padStart(6), `${r.heap.toFixed(1)} MB`.padStart(9), String(r.nodes).padStart(9), over ? '  ACIMA DO ORÇAMENTO' : '')
+  console.log(s[0].padEnd(30), `${r.renderer.toFixed(0)} MB`.padStart(9), `${r.gpu.toFixed(0)} MB`.padStart(6), `${r.heap.toFixed(1)} MB`.padStart(9), String(r.nodes).padStart(9), r.mounted === null ? '' : r.mounted ? '  editor montado' : '  EDITOR NÃO MONTOU', over ? '  ACIMA DO ORÇAMENTO' : '')
 }
 server.close()
 process.exit(failed ? 1 : 0)

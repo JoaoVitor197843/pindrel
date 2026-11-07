@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { instances } from './lib/components/editor/rich/engine'
 import App from './App.svelte'
 import { viewport } from './test/setup'
 
@@ -23,7 +24,11 @@ describe('App — painel e editor', () => {
     expect(title.value).toBe('Pão de fermentação natural')
 
     await fireEvent.input(title, { target: { value: 'Pão de forma' } })
-    await fireEvent.input(screen.getByLabelText('Parágrafo'), { target: { value: 'Receita nova do dia' } })
+    // the paragraph is drawn text until focused: open its editor and write through it
+    screen.getByRole('textbox', { name: 'Parágrafo' }).focus()
+    await waitFor(() => expect(document.querySelector('[data-rich] [aria-label="Parágrafo"]')).not.toBeNull())
+    const inst = instances.get(document.querySelector<HTMLElement>('[data-rich]')!)!
+    inst.replace(0, inst.runs().reduce((n, r) => n + r.text.length, 0), [{ text: 'Receita nova do dia', marks: {} }])
     await fireEvent.click(screen.getByRole('button', { name: /Dashboard/ }))
     await settle()
 

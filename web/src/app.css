@@ -170,3 +170,13 @@ a,
     color 0.15s,
     opacity 0.15s;
 }
+
+/* the placeholder that TipTap and the ProseMirror engine draw themselves on an empty block */
+[data-rich] p.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-muted);
+  opacity: 0.7;
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

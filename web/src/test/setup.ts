@@ -50,6 +50,18 @@ window.matchMedia = (query: string) => {
 
 afterEach(() => viewport.set(450))
 
+// The rich-text editor (ProseMirror) asks ranges and the document for geometry when it scrolls to the caret; jsdom has no
+// layout, and Lexical-style paste code names DragEvent and ClipboardEvent, which it lacks too.
+{
+  const rect = { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }
+  Range.prototype.getBoundingClientRect = () => rect as DOMRect
+  Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as unknown as DOMRectList
+  document.elementFromPoint = () => null
+  const g = globalThis as { DragEvent?: unknown; ClipboardEvent?: unknown }
+  g.DragEvent ??= class DragEvent extends Event {}
+  g.ClipboardEvent ??= class ClipboardEvent extends Event {}
+}
+
 // No server behind it: the gateway "does not exist" (404) unless the test swaps fetch.
 const noGateway = async () => new Response(null, { status: 404 })
 vi.stubGlobal('fetch', vi.fn(noGateway))

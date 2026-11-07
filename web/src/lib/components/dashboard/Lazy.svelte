@@ -36,6 +36,8 @@
   let height = heights.get(id) ?? estimate
 
   function report(isNear: boolean) {
+    // the row that has the focus (an open editor, a field being typed in) is never taken away from under the person
+    if (!isNear && near && box?.contains(document.activeElement)) return
     if (!isNear && near && box) {
       const h = box.getBoundingClientRect().height
       if (h > 0) {
