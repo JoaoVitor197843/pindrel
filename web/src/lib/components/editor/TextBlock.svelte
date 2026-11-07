@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Block } from '../../stores/blocks'
+  import { TONES, levelOf, toneOf, type Block } from '../../stores/blocks'
   import type { PageEditor } from '../../stores/editor.svelte'
   import { renderMarks } from '../../stores/inline'
   import { autosize } from './autosize'
@@ -10,7 +10,7 @@
 
   interface Props {
     ed: PageEditor
-    block: Extract<Block, { type: 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'spoiler' | 'secure' }>
+    block: Extract<Block, { type: 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'spoiler' | 'secure' | 'bullet' | 'numbered' }>
     variant?: 'paragraph' | 'heading'
     /** The selection toolbar (bold, italic, underline, strike, code, link) works here. Off for secrets. */
     format?: boolean
@@ -74,23 +74,39 @@
     if (!barLock.linking && !(e.relatedTarget as Element | null)?.closest?.('[aria-label="Formatar texto"]')) editing = false
   }
 
+  const TONE_LOOK = {
+    info: 'border-line bg-surface',
+    success: 'border-tag-teal/50 bg-tag-teal/10',
+    warning: 'border-tag-gold/50 bg-tag-gold/10',
+    danger: 'border-tag-rust/50 bg-tag-rust/10',
+  } as const
+  const HEADING_LOOK = {
+    1: 'font-serif text-3xl leading-tight font-semibold',
+    2: 'font-serif text-2xl leading-snug font-semibold',
+    3: 'font-serif text-xl leading-snug font-semibold',
+  } as const
+  const tone = $derived(block.type === 'callout' ? toneOf(block) : 'info')
+
   const look = $derived(
     variant === 'heading'
-      ? 'font-serif text-2xl leading-snug font-semibold'
+      ? HEADING_LOOK[block.type === 'heading' ? levelOf(block) : 2]
       : block.type === 'quote'
         ? 'border-l-2 border-accent-line pl-4 font-serif text-lg leading-[1.6] text-fg/85 italic'
         : block.type === 'callout'
-          ? 'rounded-field border border-line bg-surface py-3 pr-4 pl-12 text-[16px] leading-[1.6]'
+          ? `rounded-field border py-3 pr-4 pl-12 text-[16px] leading-[1.6] ${TONE_LOOK[tone]}`
           : block.type === 'toggle'
             ? 'text-[16.5px] leading-[1.68] font-medium'
             : 'text-[16.5px] leading-[1.68] text-fg/90',
+  )
+  const hint = $derived(
+    variant === 'heading' ? 'Título' : block.type === 'quote' ? 'Citação' : block.type === 'callout' ? 'Destaque' : block.type === 'toggle' ? 'Título do toggle' : block.type === 'bullet' || block.type === 'numbered' ? 'Item da lista' : '',
   )
 
   function onkeydown(e: KeyboardEvent) {
     const el = e.currentTarget as HTMLTextAreaElement
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault()
-      if (block.type === 'toggle' && onenter) return onenter()
+      if ((block.type === 'toggle' || (block.type === 'heading' && block.toggle)) && onenter) return onenter()
       const made = ed.split(block.id, el.selectionStart)
       if (made) onsplit(made.id)
     } else if (e.key === 'Backspace' && el.value === '' && (block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout')) {
@@ -112,7 +128,7 @@
 </script>
 
 <div class="relative" use:nearView={(n) => (near = n)}>
-{#if block.type === 'callout'}<span class="pointer-events-none absolute top-3 left-4 text-lg" aria-hidden="true">💡</span>{/if}
+{#if block.type === 'callout'}<span class="pointer-events-none absolute top-3 left-4 text-lg" aria-hidden="true">{TONES.find((t) => t.key === tone)!.icon}</span>{/if}
 {#if asView}
   <div
     role="textbox"
@@ -133,7 +149,7 @@
     {block}
     {label}
     className={look}
-    placeholder={variant === 'heading' ? 'Título' : block.type === 'quote' ? 'Citação' : block.type === 'callout' ? 'Destaque' : block.type === 'toggle' ? 'Título do toggle' : ''}
+    placeholder={hint}
     {caret}
     onclose={() => (editing = false)}
     {onsplit}
@@ -157,7 +173,7 @@
     spellcheck="false"
     maxlength="20000"
     aria-label={label}
-    placeholder={variant === 'heading' ? 'Título' : block.type === 'quote' ? 'Citação' : block.type === 'callout' ? 'Destaque' : block.type === 'toggle' ? 'Título do toggle' : ''}
+    placeholder={hint}
     class="block w-full resize-none overflow-hidden bg-transparent break-words placeholder:text-muted/70 {look}"
   ></textarea>
 {/if}

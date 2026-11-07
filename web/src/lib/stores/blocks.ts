@@ -13,13 +13,33 @@ export interface TableColumn {
   w: number
 }
 
-export type BlockType = 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'divider' | 'checklist' | 'code' | 'spoiler' | 'secure' | 'table' | 'image'
+export type BlockType = 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'divider' | 'checklist' | 'code' | 'spoiler' | 'secure' | 'table' | 'image' | 'bullet' | 'numbered' | 'toc' | 'bookmark' | 'pagelink' | 'video' | 'audio' | 'pdf'
+
+/** Section titles come in three sizes; an old heading without a level is the middle one. */
+export type HeadingLevel = 1 | 2 | 3
+export const HEADING_LEVELS: readonly HeadingLevel[] = [1, 2, 3]
+export const levelOf = (b: { level?: HeadingLevel }): HeadingLevel => b.level ?? 2
+
+/** How a callout looks and what it says: a note, good news, a warning, a danger. */
+export type CalloutTone = 'info' | 'success' | 'warning' | 'danger'
+export const TONES: readonly { key: CalloutTone; label: string; icon: string }[] = [
+  { key: 'info', label: 'Nota', icon: '💡' },
+  { key: 'success', label: 'Sucesso', icon: '✅' },
+  { key: 'warning', label: 'Atenção', icon: '⚠️' },
+  { key: 'danger', label: 'Perigo', icon: '🚫' },
+]
+export const isTone = (t: unknown): t is CalloutTone => TONES.some((x) => x.key === t)
+export const toneOf = (b: { tone?: CalloutTone }): CalloutTone => b.tone ?? 'info'
+
+/** List items nest up to this many levels (the flat model keeps the level on the item). */
+export const MAX_INDENT = 3
 
 export type Block =
   | { id: string; type: 'paragraph'; text: string }
-  | { id: string; type: 'heading'; text: string }
+  /** With `toggle` the title opens and closes a plain-text `body`, like the toggle block does. */
+  | { id: string; type: 'heading'; text: string; level?: HeadingLevel; toggle?: true; body?: string }
   | { id: string; type: 'quote'; text: string }
-  | { id: string; type: 'callout'; text: string }
+  | { id: string; type: 'callout'; text: string; tone?: CalloutTone }
   /** A title that opens and closes a body (the flat model has no children, so the body is plain text). */
   | { id: string; type: 'toggle'; text: string; body: string }
   | { id: string; type: 'divider' }
@@ -29,6 +49,17 @@ export type Block =
   /** Hidden until the vault is unlocked; its text is never rendered while locked. */
   | { id: string; type: 'secure'; text: string }
   | { id: string; type: 'table'; cols: TableColumn[]; rows: Record<string, string>[] }
+  /** Items of a bulleted or numbered list; the numbers are counted when the page is drawn, never stored. */
+  | { id: string; type: 'bullet'; text: string; indent?: number }
+  | { id: string; type: 'numbered'; text: string; indent?: number }
+  /** The page's own section titles as links; it holds nothing, so it never goes stale. */
+  | { id: string; type: 'toc' }
+  /** A link shown as a card. `url` is http(s) or mailto, checked when it is set; nothing is fetched from it. */
+  | { id: string; type: 'bookmark'; url: string; title: string }
+  /** A card that opens another page of the workspace. `title` is the name it had the last time the page was seen (the card shows the live one). */
+  | { id: string; type: 'pagelink'; pageId: string; title: string }
+  /** Media that stays where it is: only the address is kept, and nothing is fetched until the person plays or opens it. */
+  | { id: string; type: 'video' | 'audio' | 'pdf'; url: string; title: string }
   /** `src` is an object URL of a file picked in this session (not persisted yet). */
   | { id: string; type: 'image'; name: string | null; src: string | null }
 
@@ -45,11 +76,24 @@ export const MAX_ITEMS = 100
 let seq = 0
 export const newId = (prefix = 'b') => `${prefix}${Date.now().toString(36)}${(seq++).toString(36)}`
 
-export function makeBlock(type: BlockType): Block {
+export function makeBlock(type: BlockType, opts: { level?: HeadingLevel; toggle?: boolean } = {}): Block {
   const id = newId()
   switch (type) {
-    case 'paragraph':
     case 'heading':
+      return { id, type, text: '', ...(opts.level && opts.level !== 2 ? { level: opts.level } : {}), ...(opts.toggle ? { toggle: true as const, body: '' } : {}) }
+    case 'bullet':
+    case 'numbered':
+      return { id, type, text: '', indent: 0 }
+    case 'toc':
+      return { id, type }
+    case 'bookmark':
+    case 'video':
+    case 'audio':
+    case 'pdf':
+      return { id, type, url: '', title: '' }
+    case 'pagelink':
+      return { id, type, pageId: '', title: '' }
+    case 'paragraph':
     case 'quote':
     case 'callout':
     case 'spoiler':
@@ -75,13 +119,22 @@ export function makeBlock(type: BlockType): Block {
 /** Plain text of a block, for the card excerpt and for search. Secure blocks never contribute. */
 export function blockText(b: Block): string {
   switch (b.type) {
-    case 'paragraph':
     case 'heading':
+      return b.toggle ? `${b.text} ${b.body ?? ''}`.trim() : b.text
+    case 'paragraph':
     case 'quote':
     case 'callout':
     case 'code':
     case 'spoiler':
+    case 'bullet':
+    case 'numbered':
       return b.text
+    case 'bookmark':
+    case 'video':
+    case 'audio':
+    case 'pdf':
+    case 'pagelink':
+      return b.title
     case 'toggle':
       return `${b.text} ${b.body}`.trim()
     case 'checklist':
@@ -142,7 +195,26 @@ export function moveItem<T>(list: T[], from: number, at: number): boolean {
 }
 
 /** Blocks that are just a piece of text, and so can be turned into one another without losing anything. */
-export const TEXT_TYPES = ['paragraph', 'heading', 'quote', 'callout'] as const
+/** Blocks that hold an address and a title: a link card, and the three kinds of media that stay on their own server. */
+export type UrlBlockType = 'bookmark' | 'video' | 'audio' | 'pdf'
+export const URL_TYPES: readonly UrlBlockType[] = ['bookmark', 'video', 'audio', 'pdf']
+export const isUrlBlock = (b: Block): b is Extract<Block, { type: UrlBlockType }> => (URL_TYPES as readonly string[]).includes(b.type)
+
+const MEDIA_EXT = {
+  video: /\.(mp4|m4v|webm|ogv|mov)$/i,
+  audio: /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i,
+} as const
+
+/** Whether an address points straight at a file the browser can play (not a page that shows a player, like YouTube). */
+export function isDirectMedia(kind: 'video' | 'audio', url: string): boolean {
+  try {
+    return MEDIA_EXT[kind].test(new URL(url).pathname)
+  } catch {
+    return false
+  }
+}
+
+export const TEXT_TYPES = ['paragraph', 'heading', 'quote', 'callout', 'bullet', 'numbered'] as const
 export type TextType = (typeof TEXT_TYPES)[number]
 export const isTextType = (t: string): t is TextType => (TEXT_TYPES as readonly string[]).includes(t)
 
@@ -170,11 +242,33 @@ export function pageStats(blocks: Block[]): PageStats {
 export interface OutlineItem {
   id: string
   text: string
+  level: HeadingLevel
 }
 
-/** The section titles of the page, in order. */
+/** The section titles of the page, in order, with their sizes. */
 export function outline(blocks: Block[]): OutlineItem[] {
-  return blocks.flatMap((b) => (b.type === 'heading' ? [{ id: b.id, text: b.text.replace(/\s+/g, ' ').trim() || 'Sem título' }] : []))
+  return blocks.flatMap((b) => (b.type === 'heading' ? [{ id: b.id, text: b.text.replace(/\s+/g, ' ').trim() || 'Sem título', level: levelOf(b) }] : []))
+}
+
+/**
+ * The number each item of a numbered list shows. Items count up at their own level; a deeper level starts again under
+ * every new parent, and any block that is not part of the list ends it.
+ */
+export function numbering(blocks: Block[]): Map<string, number> {
+  const out = new Map<string, number>()
+  let counters: number[] = []
+  for (const b of blocks) {
+    if (b.type === 'numbered') {
+      const d = Math.min(Math.max(b.indent ?? 0, 0), MAX_INDENT)
+      counters = counters.slice(0, d + 1)
+      while (counters.length < d) counters.push(0)
+      counters[d] = (counters[d] ?? 0) + 1
+      out.set(b.id, counters[d])
+    } else if (b.type === 'bullet') {
+      counters = counters.slice(0, Math.min(Math.max(b.indent ?? 0, 0), MAX_INDENT))
+    } else counters = []
+  }
+  return out
 }
 
 /** Cover bands: gradients of the app's own tokens, so a cover costs no image, no upload and no memory. */

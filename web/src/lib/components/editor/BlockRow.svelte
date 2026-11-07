@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
-  import type { BlockType } from '../../stores/blocks'
+  import { TONES, type BlockType, type CalloutTone, type HeadingLevel } from '../../stores/blocks'
   import Icon from '../dashboard/Icon.svelte'
   import InsertMenu from './InsertMenu.svelte'
 
@@ -14,7 +14,7 @@
     /** Where a block being dragged would land relative to this one. */
     dropEdge: 'before' | 'after' | null
     onplus: () => void
-    onpick: (type: BlockType) => void
+    onpick: (type: BlockType, opts?: { level?: HeadingLevel; toggle?: boolean }) => void
     onclosemenu: () => void
     disabledTypes?: BlockType[]
     onmove: (delta: -1 | 1) => void
@@ -24,7 +24,13 @@
     kind?: string
     canDuplicate?: boolean
     onduplicate?: () => void
-    onturn?: (type: 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle') => void
+    onturn?: (type: 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'bullet' | 'numbered', opts?: { level?: HeadingLevel; toggle?: boolean }) => void
+    /** A heading's size, and a callout's tone: the menu offers the others. */
+    level?: HeadingLevel
+    /** The heading is also a toggle. */
+    headingToggle?: boolean
+    tone?: CalloutTone
+    ontone?: (tone: CalloutTone) => void
     ondragstart: (e: DragEvent) => void
     ondragend: () => void
     ondragover: (e: DragEvent) => void
@@ -38,7 +44,7 @@
     children: Snippet
   }
 
-  let { id, label, index, count, readOnly, menuOpen, dropEdge, onplus, onpick, onclosemenu, disabledTypes = [], onmove, onremove, turnable = false, kind = '', canDuplicate = true, onduplicate, onturn, ondragstart, ondragend, ondragover, ondrop, onpointerdrag, dragging = false, enter = true, children }: Props = $props()
+  let { id, label, index, count, readOnly, menuOpen, dropEdge, onplus, onpick, onclosemenu, disabledTypes = [], onmove, onremove, turnable = false, kind = '', canDuplicate = true, onduplicate, onturn, level = 2, headingToggle = false, tone = 'info', ontone, ondragstart, ondragend, ondragover, ondrop, onpointerdrag, dragging = false, enter = true, children }: Props = $props()
 
   let options = $state(false)
   // On narrow screens the controls take no side gutter: they appear under the block that was last touched.
@@ -85,13 +91,21 @@
     options = !options
   }
 
-  const TURN = [
+  const TURN: { type: 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'bullet' | 'numbered'; level?: HeadingLevel; toggle?: boolean; label: string }[] = [
     { type: 'paragraph', label: 'Texto' },
-    { type: 'heading', label: 'Título' },
+    { type: 'heading', level: 1, label: 'Título 1' },
+    { type: 'heading', level: 2, label: 'Título 2' },
+    { type: 'heading', level: 3, label: 'Título 3' },
+    { type: 'bullet', label: 'Lista com marcadores' },
+    { type: 'numbered', label: 'Lista numerada' },
     { type: 'quote', label: 'Citação' },
     { type: 'callout', label: 'Destaque' },
     { type: 'toggle', label: 'Toggle' },
-  ] as const
+    { type: 'heading', level: 1, toggle: true, label: 'Título 1 com toggle' },
+    { type: 'heading', level: 2, toggle: true, label: 'Título 2 com toggle' },
+    { type: 'heading', level: 3, toggle: true, label: 'Título 3 com toggle' },
+  ]
+  const isCurrent = (t: (typeof TURN)[number]) => t.type === kind && (t.type !== 'heading' || (t.level === level && !!t.toggle === headingToggle))
 
   function handleKey(e: KeyboardEvent) {
     if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
@@ -160,10 +174,18 @@
             {#if canDuplicate}
               <button type="button" role="menuitem" class="w-full rounded-[7px] px-2.5 py-1.5 text-left text-sm hover:bg-line/50" onclick={() => ((options = false), onduplicate?.())}>Duplicar</button>
             {/if}
+            {#if kind === 'callout'}
+              <div class="my-1 border-t border-line pt-1 pl-2.5 font-mono text-[10px] tracking-[0.14em] text-muted uppercase" aria-hidden="true">Tom do destaque</div>
+              <div class="flex gap-1 px-1.5 pb-1">
+                {#each TONES as t (t.key)}
+                  <button type="button" role="menuitemradio" aria-checked={tone === t.key} aria-label="Tom {t.label}" title={t.label} class="grid size-8 place-items-center rounded text-base hover:bg-line/50 {tone === t.key ? 'bg-line/60 ring-1 ring-accent-line' : ''}" onclick={() => ((options = false), ontone?.(t.key))}>{t.icon}</button>
+                {/each}
+              </div>
+            {/if}
             {#if turnable}
               <div class="my-1 border-t border-line pt-1 pl-2.5 font-mono text-[10px] tracking-[0.14em] text-muted uppercase" aria-hidden="true">Transformar em</div>
-              {#each TURN.filter((t) => t.type !== kind) as t (t.type)}
-                <button type="button" role="menuitem" class="w-full rounded-[7px] px-2.5 py-1.5 text-left text-sm hover:bg-line/50" onclick={() => ((options = false), onturn?.(t.type))}>{t.label}</button>
+              {#each TURN.filter((t) => !isCurrent(t)) as t (`${t.type}${t.level ?? ''}${t.toggle ? 't' : ''}`)}
+                <button type="button" role="menuitem" class="w-full rounded-[7px] px-2.5 py-1.5 text-left text-sm hover:bg-line/50" onclick={() => ((options = false), onturn?.(t.type, t.level ? { level: t.level, toggle: t.toggle } : undefined))}>{t.label}</button>
               {/each}
               <div class="my-1 border-t border-line" aria-hidden="true"></div>
             {/if}

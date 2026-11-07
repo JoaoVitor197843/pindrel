@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { tick } from 'svelte'
 import { resetNearView } from '../lib/components/editor/nearView'
 import { instances, type RichInstance } from '../lib/components/editor/rich/engine'
+import type { Block } from '../lib/stores/blocks'
 import { prefs } from '../lib/stores/prefs.svelte'
 import { toast } from '../lib/stores/toast.svelte'
 import { Workspace } from '../lib/stores/workspace.svelte'
@@ -239,7 +240,7 @@ describe('Editor — inserir blocos', () => {
     await click(screen.getByRole('button', { name: /Inserir bloco depois de Parágrafo 2/ }))
     const menu = within(screen.getByRole('menu', { name: 'Inserir bloco' }))
     expect(menu.getAllByRole('menuitem').map((m) => m.textContent!.trim().replace(/^\S+\s+/, ''))).toEqual(
-      expect.arrayContaining(['Texto', 'Título', 'Checklist', 'Código', 'Imagem', 'Tabela', 'Spoiler', 'Bloco seguro']),
+      expect.arrayContaining(['Texto', 'Título 1', 'Título 2', 'Título 3', 'Lista com marcadores', 'Lista numerada', 'Checklist', 'Código', 'Imagem', 'Vídeo', 'Áudio', 'PDF', 'Tabela', 'Link', 'Link para página', 'Sumário', 'Spoiler', 'Bloco seguro']),
     )
     await click(menu.getByRole('menuitem', { name: /Checklist/ }))
     expect(screen.queryByRole('menu', { name: 'Inserir bloco' })).toBeNull()
@@ -269,7 +270,7 @@ describe('Editor — inserir blocos', () => {
     const draft = screen.getByLabelText('Nova linha') as HTMLTextAreaElement
     await type(draft, '/')
     expect(draft.value).toBe('')
-    await click(screen.getByRole('menuitem', { name: /Título/ }))
+    await click(screen.getByRole('menuitem', { name: /^Título 2$/ }))
     expect(kindsOf().at(-1)).toBe('Título de seção')
     expect(kindsOf()).toHaveLength(8)
   })
@@ -305,7 +306,18 @@ describe('Editor — inserir blocos', () => {
     open('p5')
     const cases: [RegExp, string][] = [
       [/Texto/, 'Parágrafo'],
-      [/Título/, 'Título de seção'],
+      [/^Título 1$/, 'Título de seção'],
+      [/^Título 2$/, 'Título de seção'],
+      [/^Título 3$/, 'Título de seção'],
+      [/Título 2 com toggle/, 'Título de seção'],
+      [/Lista com marcadores/, 'Item de lista'],
+      [/Lista numerada/, 'Item numerado'],
+      [/^Link$/, 'Link'],
+      [/Link para página/, 'Link para página'],
+      [/Vídeo/, 'Vídeo'],
+      [/Áudio/, 'Áudio'],
+      [/PDF/, 'PDF'],
+      [/Sumário/, 'Sumário'],
       [/Checklist/, 'Checklist'],
       [/Código/, 'Bloco de código'],
       [/Imagem/, 'Imagem'],
@@ -1358,7 +1370,7 @@ describe('Editor — painel lateral', () => {
     Element.prototype.scrollIntoView = scroll
     open()
     await click(screen.getByRole('button', { name: /Inserir bloco depois de Parágrafo 2/ }))
-    await click(screen.getByRole('menuitem', { name: /Título/ }))
+    await click(screen.getByRole('menuitem', { name: /^Título 2$/ }))
     const links = within(panel().getAllByRole('list')[0]).getAllByRole('button')
     expect(links.map((l) => l.textContent!.trim())).toEqual(['O que precisa acontecer antes do dia 31', 'Sem título'])
     scroll.mockClear()
@@ -2391,12 +2403,13 @@ describe('Editor — menu de blocos com rolagem e categorias, cabeçalho compact
     open()
     const menu = within(await openMenu())
     const groups = menu.getAllByRole('group').map((g) => g.getAttribute('aria-label'))
-    expect(groups).toEqual(['Texto', 'Listas e dados', 'Mídia e código', 'Estrutura e sigilo'])
+    expect(groups).toEqual(['Texto', 'Listas e toggles', 'Mídia e links', 'Dados e código', 'Estrutura e sigilo'])
     const inside = (g: string) => within(menu.getByRole('group', { name: g })).getAllByRole('menuitem').map((m) => m.textContent!.trim().replace(/^\S+\s+/, ''))
-    expect(inside('Texto')).toEqual(['Texto', 'Título', 'Citação', 'Destaque'])
-    expect(inside('Listas e dados')).toEqual(['Checklist', 'Tabela', 'Toggle'])
-    expect(inside('Mídia e código')).toEqual(['Imagem', 'Código'])
-    expect(inside('Estrutura e sigilo')).toEqual(['Divisor', 'Spoiler', 'Bloco seguro'])
+    expect(inside('Texto')).toEqual(['Texto', 'Título 1', 'Título 2', 'Título 3', 'Citação', 'Destaque'])
+    expect(inside('Listas e toggles')).toEqual(['Lista com marcadores', 'Lista numerada', 'Checklist', 'Toggle', 'Título 1 com toggle', 'Título 2 com toggle', 'Título 3 com toggle'])
+    expect(inside('Mídia e links')).toEqual(['Imagem', 'Vídeo', 'Áudio', 'PDF', 'Link', 'Link para página'])
+    expect(inside('Dados e código')).toEqual(['Tabela', 'Código'])
+    expect(inside('Estrutura e sigilo')).toEqual(['Sumário', 'Divisor', 'Spoiler', 'Bloco seguro'])
   })
 
   it('rola dentro de si, cabe em telas pequenas, e fica sobre o texto, com fundo', async () => {
@@ -2425,12 +2438,12 @@ describe('Editor — menu de blocos com rolagem e categorias, cabeçalho compact
     open()
     await openMenu()
     const names = []
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       names.push(document.activeElement!.textContent!.trim().replace(/^\S+\s+/, ''))
       await keys(document.activeElement!, 'ArrowDown')
     }
-    expect(names).toEqual(['Texto', 'Título', 'Citação', 'Destaque'])
-    expect(document.activeElement!.textContent).toContain('Checklist')
+    expect(names).toEqual(['Texto', 'Título 1', 'Título 2', 'Título 3', 'Citação', 'Destaque'])
+    expect(document.activeElement!.textContent).toContain('Lista com marcadores')
   })
 
   it('as animações terminam no estado natural, sem manter uma camada que esconda o menu', () => {
@@ -2907,3 +2920,456 @@ describe('Editor — arrastar colunas e linhas da tabela com o dedo', () => {
     finger('pointerUp', g, 160, 20)
   })
 })
+
+describe('Editor — títulos de três tamanhos, listas, sumário, link e destaques', () => {
+  const insert = async (name: RegExp | string, after = /Inserir bloco depois de Parágrafo 2/) => {
+    await click(screen.getByRole('button', { name: after }))
+    await click(screen.getByRole('menuitem', { name }))
+  }
+  const setBlocks = (blocks: Block[], id = 'p5') => {
+    ws.contentOf(id)
+    ws.page(id)!.content = blocks
+  }
+  const item = (type: 'bullet' | 'numbered', id: string, text = '', indent = 0): Block => ({ id, type, text, indent })
+
+  it('Título 1, 2 e 3 do menu criam títulos de tamanhos diferentes', async () => {
+    open('p5')
+    for (const [name, level, size] of [[/^Título 1$/, 1, 'text-3xl'], [/^Título 2$/, 2, 'text-2xl'], [/^Título 3$/, 3, 'text-xl']] as const) {
+      await type(screen.getByLabelText('Nova linha'), '/')
+      await click(screen.getByRole('menuitem', { name }))
+      const made = ws.page('p5')!.content!.at(-1) as { type: string; level?: number }
+      expect(made.type).toBe('heading')
+      expect(made.level ?? 2).toBe(level)
+      await waitFor(() => expect(document.querySelector('[data-rich]')!.className).toContain(size))
+    }
+  })
+
+  it('a lista com marcadores mostra o marcador, e Enter faz outro item e leva o cursor a ele', async () => {
+    open('p5')
+    await type(screen.getByLabelText('Nova linha'), '/')
+    await click(screen.getByRole('menuitem', { name: /Lista com marcadores/ }))
+    const { inst, dom } = await rich('Item de lista')
+    await put(inst, 'primeiro')
+    await keys(dom, 'Enter')
+    await fireEvent.blur(dom)
+    await tick()
+    const items = ws.page('p5')!.content!.filter((b) => b.type === 'bullet')
+    expect(items).toHaveLength(2)
+    expect(screen.getAllByRole('group').filter((g) => g.getAttribute('aria-label')?.startsWith('Item de lista')).map((g) => g.querySelector('span.select-none')!.textContent === '•')).toEqual([true, true])
+  })
+
+  it('a lista numerada conta 1, 2, 3 e recomeça depois de um texto', async () => {
+    setBlocks([item('numbered', 'a', 'um'), item('numbered', 'b', 'dois'), { id: 'p', type: 'paragraph', text: 'quebra' }, item('numbered', 'c', 'tres')])
+    open('p5')
+    const marks = screen.getAllByRole('group').filter((g) => g.getAttribute('aria-label')?.startsWith('Item numerado')).map((g) => g.querySelector('span.select-none')!.textContent)
+    expect(marks).toEqual(['1.', '2.', '1.'])
+  })
+
+  it('a numeração acompanha quando se muda a ordem', async () => {
+    setBlocks([item('numbered', 'a', 'um'), item('numbered', 'b', 'dois'), { id: 'p', type: 'paragraph', text: 'meio' }])
+    open('p5')
+    ws.page('p5')!.content!.splice(1, 0, ws.page('p5')!.content!.splice(2, 1)[0])
+    await tick()
+    const marks = screen.getAllByRole('group').filter((g) => g.getAttribute('aria-label')?.startsWith('Item numerado')).map((g) => g.querySelector('span.select-none')!.textContent)
+    expect(marks).toEqual(['1.', '1.'])
+  })
+
+  it('Tab recua o item e Shift+Tab traz de volta; fora de uma lista Tab não faz nada de especial', async () => {
+    setBlocks([item('bullet', 'a', 'item'), { id: 'p', type: 'paragraph', text: 'texto' }])
+    open('p5')
+    const { dom } = await rich('Item de lista')
+    expect(await keys(dom, 'Tab')).toBe(false)
+    await tick()
+    expect((ws.page('p5')!.content![0] as { indent: number }).indent).toBe(1)
+    expect(document.querySelector<HTMLElement>('[data-block-id="a"] [style*="padding-left"]')!.style.paddingLeft).toBe('1.75rem')
+    await keys(dom, 'Tab', { shiftKey: true })
+    expect((ws.page('p5')!.content![0] as { indent: number }).indent).toBe(0)
+    await fireEvent.blur(dom)
+    const para = await rich('Parágrafo')
+    expect(await keys(para.dom, 'Tab')).toBe(true)
+  })
+
+  it('Enter e Backspace num item vazio saem da lista: primeiro um nível, depois viram texto', async () => {
+    setBlocks([item('bullet', 'a', '', 1)])
+    open('p5')
+    const { dom } = await rich('Item de lista')
+    await keys(dom, 'Enter')
+    expect((ws.page('p5')!.content![0] as { indent: number }).indent).toBe(0)
+    await keys(dom, 'Backspace')
+    await waitFor(() => expect(ws.page('p5')!.content![0].type).toBe('paragraph'))
+    // the block was not deleted: Backspace on an empty list item only ends the list
+    expect(ws.page('p5')!.content).toHaveLength(1)
+  })
+
+  it('"# ", "## ", "### ", "- ", "1. " e "> " num parágrafo vazio viram título, lista e citação', async () => {
+    const cases: [string, string, number | undefined][] = [['# ', 'heading', 1], ['## ', 'heading', undefined], ['### ', 'heading', 3], ['- ', 'bullet', undefined], ['* ', 'bullet', undefined], ['1. ', 'numbered', undefined], ['> ', 'quote', undefined]]
+    for (const [typed, kind, level] of cases) {
+      cleanup()
+      setBlocks([{ id: 'p', type: 'paragraph', text: '' }], 'p5')
+      open('p5')
+      const { inst } = await rich()
+      await put(inst, typed)
+      await waitFor(() => expect(ws.page('p5')!.content![0].type, typed).toBe(kind))
+      expect((ws.page('p5')!.content![0] as { text: string; level?: number }).text).toBe('')
+      if (kind === 'heading') expect((ws.page('p5')!.content![0] as { level?: number }).level, typed).toBe(level)
+      // the caret is back in the new field, ready to write
+      await waitFor(() => expect(document.querySelector('[data-rich]')).not.toBeNull())
+    }
+  })
+
+  it('os atalhos só valem no começo de um parágrafo vazio: nada muda no meio de um texto, num título ou numa citação', async () => {
+    setBlocks([{ id: 'p', type: 'paragraph', text: '' }, { id: 'h', type: 'heading', text: '' }, { id: 'q', type: 'quote', text: '' }])
+    open('p5')
+    const para = await rich('Parágrafo')
+    await put(para.inst, 'abc - ')
+    expect(ws.page('p5')!.content![0].type).toBe('paragraph')
+    await put(para.inst, '-')
+    expect(ws.page('p5')!.content![0].type).toBe('paragraph')
+    await fireEvent.blur(para.dom)
+    const h = await rich('Título de seção')
+    await put(h.inst, '- ')
+    expect(ws.page('p5')!.content![1].type).toBe('heading')
+    await fireEvent.blur(h.dom)
+    const q = await rich('Citação')
+    await put(q.inst, '1. ')
+    expect(ws.page('p5')!.content![2].type).toBe('quote')
+  })
+
+  it('o sumário lista os títulos com recuo por tamanho, e clicar leva até o título', async () => {
+    setBlocks([
+      { id: 'h1', type: 'heading', text: 'Grande', level: 1 },
+      { id: 'h2', type: 'heading', text: 'Médio' },
+      { id: 'h3', type: 'heading', text: 'Pequeno', level: 3 },
+      { id: 't', type: 'toc' },
+    ])
+    const scrolled: string[] = []
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this.getAttribute('data-block-id') ?? '')
+    }
+    open('p5')
+    const toc = within(screen.getByRole('navigation', { name: 'Sumário da página' }))
+    expect(toc.getAllByRole('button').map((b) => b.textContent)).toEqual(['Grande', 'Médio', 'Pequeno'])
+    expect(toc.getAllByRole('listitem').map((li) => (li as HTMLElement).style.paddingLeft)).toEqual(['0rem', '1.1rem', '2.2rem'])
+    await click(toc.getByRole('button', { name: 'Pequeno' }))
+    expect(scrolled).toContain('h3')
+  })
+
+  it('o sumário acompanha o que se escreve e avisa quando ainda não há títulos', async () => {
+    setBlocks([{ id: 't', type: 'toc' }, { id: 'h', type: 'heading', text: 'Antes' }])
+    open('p5')
+    const { inst } = await rich('Título de seção')
+    await put(inst, 'Depois')
+    expect(within(screen.getByRole('navigation', { name: 'Sumário da página' })).getAllByRole('button').map((b) => b.textContent)).toEqual(['Depois'])
+    cleanup()
+    setBlocks([{ id: 't', type: 'toc' }])
+    open('p5')
+    expect(screen.getByRole('navigation', { name: 'Sumário da página' }).textContent).toContain('Os títulos de seção aparecem aqui')
+  })
+
+  it('o painel "Nesta página" recua os títulos menores', () => {
+    setBlocks([{ id: 'h1', type: 'heading', text: 'Grande', level: 1 }, { id: 'h3', type: 'heading', text: 'Pequeno', level: 3 }])
+    open('p5')
+    const list = within(screen.getByRole('complementary', { name: 'Painel da página' }))
+    const rows = list.getAllByRole('listitem').filter((li) => ['Grande', 'Pequeno'].includes(li.textContent!.trim()))
+    expect(rows.map((li) => (li as HTMLElement).style.paddingLeft)).toEqual(['0rem', '1.8rem'])
+  })
+
+  it('o link: pede o endereço, recusa o perigoso, e depois mostra um cartão que abre em outra aba com segurança', async () => {
+    open('p5')
+    await type(screen.getByLabelText('Nova linha'), '/')
+    await click(screen.getByRole('menuitem', { name: /^Link$/ }))
+    const url = (await screen.findByLabelText('Endereço do link')) as HTMLInputElement
+    await type(url, 'javascript:alert(1)')
+    await fireEvent.submit(url.closest('form')!)
+    expect(toast.message).toContain('Endereço inválido')
+    expect(ws.page('p5')!.content!.at(-1)).toMatchObject({ type: 'bookmark', url: '' })
+    await type(url, 'exemplo.com/pagina')
+    await type(screen.getByLabelText('Título do link (opcional)'), 'Meu site')
+    await fireEvent.submit(url.closest('form')!)
+    const card = (await screen.findByRole('link', { name: /Abrir Meu site/ })) as HTMLAnchorElement
+    expect(card.href).toBe('https://exemplo.com/pagina')
+    expect(card.target).toBe('_blank')
+    expect(card.rel).toContain('noopener')
+    expect(card.rel).toContain('noreferrer')
+    // edit it again
+    await click(screen.getByRole('button', { name: 'Editar' }))
+    expect((screen.getByLabelText('Endereço do link') as HTMLInputElement).value).toBe('https://exemplo.com/pagina')
+  })
+
+  it('um link sem título mostra o site; numa página só de leitura não há como editar', async () => {
+    setBlocks([{ id: 'b', type: 'bookmark', url: 'https://www.exemplo.com/x', title: '' }], 's2')
+    open('s2')
+    expect(screen.getByRole('link', { name: 'Abrir exemplo.com' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Editar' })).toBeNull()
+    cleanup()
+    setBlocks([{ id: 'b', type: 'bookmark', url: '', title: '' }], 's2')
+    open('s2')
+    expect(screen.queryByLabelText('Endereço do link')).toBeNull()
+    expect(screen.getByText('Link sem endereço')).toBeTruthy()
+  })
+
+  it('o destaque troca de tom pelo menu do bloco, muda a cor e o ícone, e o tom padrão volta a não guardar nada', async () => {
+    setBlocks([{ id: 'c', type: 'callout', text: 'cuidado' }])
+    open('p5')
+    const group = () => screen.getByRole('group', { name: /Destaque 1 de 1/ })
+    expect(group().textContent).toContain('💡')
+    await click(screen.getByRole('button', { name: 'Opções de Destaque 1' }))
+    await click(screen.getByRole('menuitemradio', { name: 'Tom Atenção' }))
+    expect(ws.page('p5')!.content![0]).toMatchObject({ tone: 'warning' })
+    expect(group().textContent).toContain('⚠️')
+    expect(drawn('Destaque').className).toContain('bg-tag-gold/10')
+    await click(screen.getByRole('button', { name: 'Opções de Destaque 1' }))
+    expect(screen.getByRole('menuitemradio', { name: 'Tom Atenção' }).getAttribute('aria-checked')).toBe('true')
+    await click(screen.getByRole('menuitemradio', { name: 'Tom Nota' }))
+    expect('tone' in ws.page('p5')!.content![0]).toBe(false)
+  })
+
+  it('"Transformar em" oferece os três títulos e as listas, e esconde o tipo atual', async () => {
+    setBlocks([{ id: 'p', type: 'paragraph', text: 'palavras' }])
+    open('p5')
+    await click(screen.getByRole('button', { name: 'Opções de Parágrafo 1' }))
+    const names = screen.getAllByRole('menuitem').map((m) => m.textContent!.trim())
+    expect(names).toEqual(expect.arrayContaining(['Título 1', 'Título 2', 'Título 3', 'Título 1 com toggle', 'Lista com marcadores', 'Lista numerada']))
+    expect(names).not.toContain('Texto')
+    await click(screen.getByRole('menuitem', { name: /^Título 3$/ }))
+    expect(ws.page('p5')!.content![0]).toMatchObject({ type: 'heading', level: 3, text: 'palavras' })
+    await click(screen.getByRole('button', { name: 'Opções de Título de seção 1' }))
+    const again = screen.getAllByRole('menuitem').map((m) => m.textContent!.trim())
+    expect(again).toContain('Título 1')
+    expect(again).not.toContain('Título 3')
+  })
+
+  it('numa página só de leitura os itens de lista e títulos são só texto', async () => {
+    setBlocks([item('bullet', 'a', 'item'), { id: 'h', type: 'heading', text: 'Título', level: 1 }], 's2')
+    open('s2')
+    drawn('Item de lista').focus()
+    drawn('Título de seção').focus()
+    await tick()
+    noEditor()
+    expect(screen.queryByRole('button', { name: /Opções de/ })).toBeNull()
+  })
+
+  it('axe: a página com todos os blocos novos, e o menu de inserir com as novas opções', async () => {
+    setBlocks([
+      { id: 'h1', type: 'heading', text: 'Grande', level: 1 },
+      { id: 't', type: 'toc' },
+      item('bullet', 'a', 'item', 1),
+      item('numbered', 'n', 'um'),
+      { id: 'b', type: 'bookmark', url: 'https://exemplo.com', title: 'Exemplo' },
+      { id: 'c', type: 'callout', text: 'aviso', tone: 'danger' },
+    ])
+    open('p5')
+    expect(await violations()).toEqual([])
+    await click(screen.getAllByRole('button', { name: /Inserir bloco depois/ })[0])
+    expect(await violations()).toEqual([])
+  })
+
+  it('uma página enorme de itens de lista continua leve: 500 itens numerados, contagem certa', () => {
+    setBlocks(Array.from({ length: 500 }, (_, i) => item('numbered', `n${i}`, `item ${i}`, i % 3)))
+    const t0 = performance.now()
+    open('p5')
+    expect(performance.now() - t0).toBeLessThan(4000)
+    expect(document.querySelectorAll('[data-block-id]').length).toBeGreaterThan(100)
+  })
+})
+
+describe('Editor — título com toggle', () => {
+  const setBlocks = (blocks: Block[]) => {
+    ws.contentOf('p5')
+    ws.page('p5')!.content = blocks
+  }
+
+  it('o menu cria um título de cada tamanho que abre e fecha um texto', async () => {
+    open('p5')
+    for (const [name, level] of [[/Título 1 com toggle/, 1], [/Título 2 com toggle/, 2], [/Título 3 com toggle/, 3]] as const) {
+      await type(screen.getByLabelText('Nova linha'), '/')
+      await click(screen.getByRole('menuitem', { name }))
+      const made = ws.page('p5')!.content!.at(-1) as { type: string; level?: number; toggle?: boolean; body?: string }
+      expect(made).toMatchObject({ type: 'heading', toggle: true, body: '' })
+      expect(made.level ?? 2).toBe(level)
+    }
+    expect(screen.getAllByRole('button', { name: 'Abrir toggle' })).toHaveLength(3)
+  })
+
+  it('Enter no título abre o texto de baixo e leva o cursor a ele; a seta fecha de novo', async () => {
+    setBlocks([{ id: 'h', type: 'heading', text: 'Seção', level: 1, toggle: true, body: '' }])
+    open('p5')
+    expect(screen.queryByLabelText('Conteúdo do toggle')).toBeNull()
+    const { dom } = await rich('Título de seção')
+    await keys(dom, 'Enter')
+    const body = (await screen.findByLabelText('Conteúdo do toggle')) as HTMLTextAreaElement
+    await waitFor(() => expect(document.activeElement).toBe(body))
+    await type(body, 'escondido')
+    expect(ws.page('p5')!.content![0]).toMatchObject({ text: 'Seção', body: 'escondido' })
+    await click(screen.getByRole('button', { name: 'Fechar toggle' }))
+    expect(screen.queryByLabelText('Conteúdo do toggle')).toBeNull()
+  })
+
+  it('o título com toggle aparece no sumário e conta as palavras do texto escondido', () => {
+    setBlocks([{ id: 'h', type: 'heading', text: 'Seção', toggle: true, body: 'uma duas três' }])
+    open('p5')
+    const side = within(screen.getByRole('complementary', { name: 'Painel da página' }))
+    expect(side.getAllByRole('listitem').some((li) => li.textContent!.trim() === 'Seção')).toBe(true)
+    expect(Number(side.getByTestId('stat-words').textContent)).toBe(4)
+  })
+
+  it('"Transformar em" liga e desliga o toggle do título sem perder o texto', async () => {
+    setBlocks([{ id: 'h', type: 'heading', text: 'Seção', level: 3 }])
+    open('p5')
+    await click(screen.getByRole('button', { name: 'Opções de Título de seção 1' }))
+    await click(screen.getByRole('menuitem', { name: 'Título 3 com toggle' }))
+    expect(ws.page('p5')!.content![0]).toMatchObject({ type: 'heading', level: 3, toggle: true, body: '', text: 'Seção' })
+    await click(screen.getByRole('button', { name: 'Opções de Título de seção 1' }))
+    const names = screen.getAllByRole('menuitem').map((m) => m.textContent!.trim())
+    expect(names).not.toContain('Título 3 com toggle')
+    expect(names).toContain('Título 3')
+    await click(screen.getByRole('menuitem', { name: /^Título 3$/ }))
+    expect('toggle' in ws.page('p5')!.content![0]).toBe(false)
+  })
+
+  it('exporta com <details> e o tamanho do título', async () => {
+    const { pageToHtml, pageToMarkdown, pageToText } = await import('../lib/stores/transfer')
+    setBlocks([{ id: 'h', type: 'heading', text: 'Seção <b>', level: 1, toggle: true, body: 'dentro **forte**' }])
+    const p = ws.page('p5')!
+    expect(pageToMarkdown(p, [])).toContain('<details><summary><h1>Seção &lt;b&gt;</h1></summary>\n\ndentro **forte**\n\n</details>')
+    expect(pageToHtml(p, [])).toContain('<details><summary><h1>Seção &lt;b&gt;</h1></summary><p>dentro <strong>forte</strong></p></details>')
+    expect(pageToText(p, [])).toContain('SEÇÃO <B>\ndentro **forte**')
+  })
+
+  it('numa página só de leitura o título com toggle abre e fecha, mas não se escreve', async () => {
+    ws.contentOf('s2')
+    ws.page('s2')!.content = [{ id: 'h', type: 'heading', text: 'Seção', toggle: true, body: 'texto' }]
+    open('s2')
+    await click(screen.getByRole('button', { name: 'Abrir toggle' }))
+    expect((screen.getByLabelText('Conteúdo do toggle') as HTMLTextAreaElement).readOnly).toBe(true)
+    drawn('Título de seção').focus()
+    await tick()
+    noEditor()
+  })
+})
+
+describe('Editor — vídeo, áudio, PDF e link para página', () => {
+  const setBlocks = (blocks: Block[], id = 'p5') => {
+    ws.contentOf(id)
+    ws.page(id)!.content = blocks
+  }
+
+  it('o vídeo pede o endereço, recusa o que não é http(s), e depois mostra um player que só carrega ao tocar', async () => {
+    open('p5')
+    await type(screen.getByLabelText('Nova linha'), '/')
+    await click(screen.getByRole('menuitem', { name: /Vídeo/ }))
+    const url = (await screen.findByLabelText('Endereço do link')) as HTMLInputElement
+    await type(url, 'ana@exemplo.com')
+    await fireEvent.submit(url.closest('form')!)
+    expect(toast.message).toMatch(/http ou https/)
+    expect(ws.page('p5')!.content!.at(-1)).toMatchObject({ type: 'video', url: '' })
+    await type(url, 'https://exemplo.com/aula.mp4')
+    await type(screen.getByLabelText('Título do link (opcional)'), 'Aula 1')
+    await fireEvent.submit(url.closest('form')!)
+    const video = (await screen.findByLabelText('Vídeo: Aula 1')) as HTMLVideoElement
+    expect(video.tagName).toBe('VIDEO')
+    expect(video.getAttribute('preload')).toBe('none')
+    expect(video.getAttribute('src')).toBe('https://exemplo.com/aula.mp4')
+    expect(video.hasAttribute('autoplay')).toBe(false)
+  })
+
+  it('um endereço de player (YouTube) não vira player: vira link para abrir em outra aba', async () => {
+    setBlocks([{ id: 'v', type: 'video', url: 'https://www.youtube.com/watch?v=abc', title: 'Vídeo do canal' }])
+    open('p5')
+    expect(document.querySelector('video')).toBeNull()
+    expect(screen.getByText(/não é um arquivo direto/)).toBeTruthy()
+    const link = screen.getByRole('link', { name: /Abrir vídeo Vídeo do canal/ }) as HTMLAnchorElement
+    expect(link.target).toBe('_blank')
+    expect(link.rel).toContain('noopener')
+  })
+
+  it('o áudio é um player sem carregar nada antes de tocar, e um arquivo que falha vira link', async () => {
+    setBlocks([{ id: 'a', type: 'audio', url: 'https://exemplo.com/som.mp3', title: '' }])
+    open('p5')
+    const audio = document.querySelector('audio')!
+    expect(audio.getAttribute('preload')).toBe('none')
+    expect(audio.getAttribute('aria-label')).toBe('Áudio: som.mp3')
+    await fireEvent.error(audio)
+    await tick()
+    expect(document.querySelector('audio')).toBeNull()
+    expect(screen.getByText(/Não foi possível carregar/)).toBeTruthy()
+  })
+
+  it('o PDF é um cartão que abre em outra aba; nunca embute o arquivo', () => {
+    setBlocks([{ id: 'd', type: 'pdf', url: 'https://exemplo.com/docs/Manual%20de%20uso.pdf', title: '' }])
+    open('p5')
+    expect(document.querySelector('iframe, embed, object')).toBeNull()
+    const link = screen.getByRole('link', { name: /Abrir pdf Manual de uso\.pdf/ }) as HTMLAnchorElement
+    expect(link.href).toBe('https://exemplo.com/docs/Manual%20de%20uso.pdf')
+    expect(link.target).toBe('_blank')
+  })
+
+  it('numa página só de leitura a mídia toca, mas não se edita', () => {
+    setBlocks([{ id: 'v', type: 'video', url: 'https://exemplo.com/v.mp4', title: 'Aula' }, { id: 'e', type: 'video', url: '', title: '' }], 's2')
+    open('s2')
+    expect(document.querySelector('video')).not.toBeNull()
+    expect(screen.queryByRole('button', { name: 'Editar' })).toBeNull()
+    expect(screen.queryByLabelText('Endereço do link')).toBeNull()
+    expect(screen.getByText('Vídeo sem endereço')).toBeTruthy()
+  })
+
+  it('o link para página busca por nome, liga e abre a página; não oferece a própria, a da lixeira nem a do cofre', async () => {
+    const onopen = vi.fn()
+    setBlocks([{ id: 'l', type: 'pagelink', pageId: '', title: '' }])
+    render(Editor, { ws, id: 'p5', onback: vi.fn(), onopen })
+    const list = () => screen.queryAllByRole('button', { name: /^Ligar à página/ }).map((b) => b.getAttribute('aria-label'))
+    expect(list().length).toBeGreaterThan(1)
+    expect(list().length).toBeLessThanOrEqual(8)
+    expect(list().join()).not.toContain(ws.page('p5')!.title)
+    expect(list().join()).not.toContain(ws.pages.find((p) => p.locked)!.title)
+    ws.trash('p1')
+    await type(screen.getByLabelText('Buscar página para ligar'), 'encerramento do trimestre')
+    expect(list()).toEqual(['Ligar à página Rotina de encerramento do trimestre'])
+    await click(screen.getByRole('button', { name: /Ligar à página Rotina/ }))
+    expect(ws.page('p5')!.content![0]).toMatchObject({ type: 'pagelink', pageId: 'p0', title: 'Rotina de encerramento do trimestre' })
+    await click(await screen.findByRole('button', { name: 'Abrir a página Rotina de encerramento do trimestre' }))
+    expect(onopen).toHaveBeenCalledWith('p0')
+  })
+
+  it('o cartão mostra o nome atual da página, e o aviso certo quando ela some, vai para a lixeira ou para o cofre', async () => {
+    setBlocks([{ id: 'l', type: 'pagelink', pageId: 'p0', title: 'Nome antigo' }])
+    open('p5')
+    expect(screen.getByRole('button', { name: /Abrir a página Rotina de encerramento/ })).toBeTruthy()
+    await waitFor(() => expect((ws.page('p5')!.content![0] as { title: string }).title).toBe('Rotina de encerramento do trimestre'))
+    cleanup()
+    ws.trash('p0')
+    open('p5')
+    expect(screen.queryByRole('button', { name: /Abrir a página/ })).toBeNull()
+    expect(screen.getByText(/na lixeira/)).toBeTruthy()
+    cleanup()
+    ws.pages.splice(ws.pages.findIndex((p) => p.id === 'p0'), 1)
+    open('p5')
+    expect(screen.getByText(/página não encontrada/)).toBeTruthy()
+    cleanup()
+    const vault = ws.pages.find((p) => p.locked)!
+    setBlocks([{ id: 'l', type: 'pagelink', pageId: vault.id, title: '' }])
+    open('p5')
+    expect(screen.getByText('Página do cofre')).toBeTruthy()
+    expect(document.body.textContent).not.toContain(vault.title)
+  })
+
+  it('numa página só de leitura o link para página abre, mas não troca de destino', () => {
+    setBlocks([{ id: 'l', type: 'pagelink', pageId: 'p0', title: 'Rotina' }], 's2')
+    open('s2')
+    expect(screen.getByRole('button', { name: /Abrir a página/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Trocar' })).toBeNull()
+  })
+
+  it('axe: a página com vídeo, áudio, PDF e link para página', async () => {
+    setBlocks([
+      { id: 'v', type: 'video', url: 'https://exemplo.com/v.mp4', title: 'Aula' },
+      { id: 'a', type: 'audio', url: 'https://exemplo.com/a.mp3', title: 'Som' },
+      { id: 'd', type: 'pdf', url: 'https://exemplo.com/d.pdf', title: 'Manual' },
+      { id: 'l', type: 'pagelink', pageId: 'p0', title: 'Rotina' },
+      { id: 'e', type: 'pagelink', pageId: '', title: '' },
+    ])
+    open('p5')
+    expect(await violations()).toEqual([])
+  })
+})
+
