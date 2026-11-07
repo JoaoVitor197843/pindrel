@@ -73,6 +73,16 @@ body {
   outline-offset: 2px;
 }
 
+/* An outline follows the corners of the box it is drawn around. A text block is a plain box with square corners, so its
+   ring looked harsher than every other one: the fields that hold a block take the app's rounded corner too. */
+textarea:focus-visible,
+input:focus-visible,
+[data-nav]:focus-visible,
+[data-rich]:focus-visible,
+[contenteditable='true']:focus-visible {
+  border-radius: var(--radius-field);
+}
+
 /* "Reduce motion" is honoured by the components (`ms()`); this covers whatever animates through plain CSS. */
 @media (prefers-reduced-motion: reduce) {
   *,
