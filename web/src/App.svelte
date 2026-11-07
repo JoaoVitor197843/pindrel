@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { seedLoad } from './lib/loadtest'
+  import { seedLoad, signInFromAddress } from './lib/loadtest'
   import { Nav } from './lib/stores/nav.svelte'
   import { Workspace } from './lib/stores/workspace.svelte'
   import Dashboard from './routes/Dashboard.svelte'
@@ -11,7 +11,10 @@
   const preview = new URLSearchParams(location.search).get('tela') === 'painel'
   const ws = new Workspace()
   // memory measurements only (a build with --mode loadtest); this branch is removed from every other build
-  if (import.meta.env.MODE === 'loadtest') seedLoad(ws, new URLSearchParams(location.search))
+  if (import.meta.env.MODE === 'loadtest') {
+    seedLoad(ws, new URLSearchParams(location.search))
+    signInFromAddress(new URLSearchParams(location.search))
+  }
   const nav = new Nav()
 </script>
 

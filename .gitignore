@@ -61,3 +61,4 @@ gateway/target
 .deploy-state/
 dist-loadtest
 dist-e2e
+dist-e2e-files

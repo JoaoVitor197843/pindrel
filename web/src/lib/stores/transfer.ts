@@ -105,9 +105,13 @@ function mdBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
     case 'video':
     case 'audio':
     case 'pdf':
+      if (!b.url && 'fileId' in b && b.fileId) return `📎 ${oneLine(b.title) || 'arquivo'}`
       return b.url ? `[${oneLine(b.title) || b.url}](${b.url})` : ''
     case 'pagelink':
       return b.pageId && b.title ? `[${oneLine(b.title)}](/notes/${b.pageId})` : ''
+    case 'file':
+      // a file kept on the server has no public address: the name is all that goes out
+      return b.fileId ? `📎 ${oneLine(b.name) || 'arquivo'}` : ''
   }
 }
 
@@ -147,9 +151,12 @@ function txtBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
     case 'video':
     case 'audio':
     case 'pdf':
+      if (!b.url && 'fileId' in b && b.fileId) return `[arquivo: ${oneLine(b.title) || 'sem nome'}]`
       return b.url ? `${oneLine(b.title) || b.url} (${b.url})` : ''
     case 'pagelink':
       return b.title ? `→ ${oneLine(b.title)}` : ''
+    case 'file':
+      return b.fileId ? `[arquivo: ${oneLine(b.name) || 'sem nome'}]` : ''
     default:
       return blockText(b)
   }
@@ -204,9 +211,11 @@ function htmlBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
       return `<nav><ul>${ctx.titles.map((t) => `<li style="margin-left:${(t.level - 1) * 1.5}em">${escapeHtml(oneLine(t.text))}</li>`).join('')}</ul></nav>`
     case 'bookmark':
     case 'pdf':
+      if (!b.url && 'fileId' in b && b.fileId) return `<p><em>[arquivo: ${escapeHtml(oneLine(b.title) || 'sem nome')}]</em></p>`
       return b.url ? `<p><a href="${escapeHtml(b.url)}" rel="noopener noreferrer">${escapeHtml(oneLine(b.title) || b.url)}</a></p>` : ''
     case 'video':
     case 'audio': {
+      if (!b.url && b.fileId) return `<p><em>[arquivo: ${escapeHtml(oneLine(b.title) || 'sem nome')}]</em></p>`
       if (!b.url) return ''
       const tag = b.type === 'video' ? 'video' : 'audio'
       const caption = oneLine(b.title) ? `<p>${escapeHtml(oneLine(b.title))}</p>` : ''
@@ -214,6 +223,8 @@ function htmlBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
     }
     case 'pagelink':
       return b.pageId && b.title ? `<p><a href="/notes/${escapeHtml(b.pageId)}">${escapeHtml(oneLine(b.title))}</a></p>` : ''
+    case 'file':
+      return b.fileId ? `<p><em>[arquivo: ${escapeHtml(oneLine(b.name) || 'sem nome')}]</em></p>` : ''
   }
 }
 

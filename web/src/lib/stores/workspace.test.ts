@@ -1,5 +1,6 @@
 import { flushSync } from 'svelte'
 import { describe, expect, it } from 'vitest'
+import type { Block } from './blocks'
 import { fold, formatDate, pageMeta, Workspace } from './workspace.svelte'
 
 const titles = (w: Workspace) => w.visible.map((p) => p.title)
@@ -354,3 +355,69 @@ describe('Workspace', () => {
     })
   })
 })
+
+describe('Workspace — arquivos de páginas apagadas de vez', () => {
+  const file = (fileId: string, id = fileId): Block => ({ id, type: 'file', fileId, name: fileId, size: 1, mime: '', level: 3 })
+  const setup = () => {
+    const w = new Workspace()
+    const gone: string[][] = []
+    w.filesGone = (ids) => gone.push(ids)
+    return { w, gone }
+  }
+
+  it('apagar a página de vez solta os arquivos que só ela usava', () => {
+    const { w, gone } = setup()
+    w.contentOf('p5')
+    w.page('p5')!.content = [file('a'), file('b'), { id: 'img', type: 'image', name: 'x', src: null, fileId: 'c' }]
+    w.deleteForever('p5')
+    expect(gone).toEqual([['a', 'b', 'c']])
+  })
+
+  it('um arquivo que outra página ainda usa fica', () => {
+    const { w, gone } = setup()
+    w.contentOf('p5')
+    w.contentOf('p0')
+    w.page('p5')!.content = [file('a'), file('b')]
+    w.page('p0')!.content!.push(file('b', 'outro'))
+    w.deleteForever('p5')
+    expect(gone).toEqual([['a']])
+  })
+
+  it('esvaziar a lixeira solta os arquivos de todas as páginas que saem', () => {
+    const { w, gone } = setup()
+    w.contentOf('p5')
+    w.contentOf('p0')
+    w.page('p5')!.content = [file('a')]
+    w.page('p0')!.content!.push(file('b'))
+    w.trash('p5')
+    w.trash('p0')
+    w.emptyTrash()
+    expect(gone).toHaveLength(1)
+    expect(gone[0].sort()).toEqual(['a', 'b'])
+  })
+
+  it('páginas sem arquivos, ou ainda nunca abertas, não chamam ninguém', () => {
+    const { w, gone } = setup()
+    w.deleteForever('p5')
+    w.trash('p0')
+    w.emptyTrash()
+    expect(gone).toEqual([])
+  })
+
+  it('a página que outra pessoa compartilhou comigo não leva os arquivos dela embora', () => {
+    const { w, gone } = setup()
+    const shared = w.pages.find((p) => p.sharedBy)!
+    w.contentOf(shared.id)
+    shared.content = [file('alheio')]
+    w.deleteForever(shared.id)
+    expect(gone).toEqual([])
+  })
+
+  it('apagar uma página que não existe não faz nada', () => {
+    const { w, gone } = setup()
+    w.deleteForever('nada')
+    expect(gone).toEqual([])
+    expect(w.pages.length).toBeGreaterThan(0)
+  })
+})
+

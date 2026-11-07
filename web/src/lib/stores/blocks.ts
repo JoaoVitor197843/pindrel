@@ -13,7 +13,7 @@ export interface TableColumn {
   w: number
 }
 
-export type BlockType = 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'divider' | 'checklist' | 'code' | 'spoiler' | 'secure' | 'table' | 'image' | 'bullet' | 'numbered' | 'toc' | 'bookmark' | 'pagelink' | 'video' | 'audio' | 'pdf'
+export type BlockType = 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'divider' | 'checklist' | 'code' | 'spoiler' | 'secure' | 'table' | 'image' | 'bullet' | 'numbered' | 'toc' | 'bookmark' | 'pagelink' | 'video' | 'audio' | 'pdf' | 'file'
 
 /** Section titles come in three sizes; an old heading without a level is the middle one. */
 export type HeadingLevel = 1 | 2 | 3
@@ -59,9 +59,11 @@ export type Block =
   /** A card that opens another page of the workspace. `title` is the name it had the last time the page was seen (the card shows the live one). */
   | { id: string; type: 'pagelink'; pageId: string; title: string }
   /** Media that stays where it is: only the address is kept, and nothing is fetched until the person plays or opens it. */
-  | { id: string; type: 'video' | 'audio' | 'pdf'; url: string; title: string }
+  | { id: string; type: 'video' | 'audio' | 'pdf'; url: string; title: string; fileId?: string }
+  /** A file kept on this server (sent in pieces, see api/files.ts). `level`: 1 plays or shows in the page, 2 and 3 only download. */
+  | { id: string; type: 'file'; fileId: string; name: string; size: number; mime: string; level: 1 | 2 | 3 }
   /** `src` is an object URL of a file picked in this session (not persisted yet). */
-  | { id: string; type: 'image'; name: string | null; src: string | null }
+  | { id: string; type: 'image'; name: string | null; src: string | null; fileId?: string }
 
 export const LANGUAGES = ['texto', 'python', 'javascript', 'typescript', 'go', 'rust', 'sql', 'bash', 'json', 'html', 'css'] as const
 
@@ -93,6 +95,8 @@ export function makeBlock(type: BlockType, opts: { level?: HeadingLevel; toggle?
       return { id, type, url: '', title: '' }
     case 'pagelink':
       return { id, type, pageId: '', title: '' }
+    case 'file':
+      return { id, type, fileId: '', name: '', size: 0, mime: '', level: 3 }
     case 'paragraph':
     case 'quote':
     case 'callout':
@@ -135,6 +139,8 @@ export function blockText(b: Block): string {
     case 'pdf':
     case 'pagelink':
       return b.title
+    case 'file':
+      return b.name
     case 'toggle':
       return `${b.text} ${b.body}`.trim()
     case 'checklist':
@@ -212,6 +218,23 @@ export function isDirectMedia(kind: 'video' | 'audio', url: string): boolean {
   } catch {
     return false
   }
+}
+
+/** The block that shows a file of this type: media where the browser can show it, a file card for everything else. */
+export function blockTypeForFile(mime: string, level: number): 'image' | 'video' | 'audio' | 'pdf' | 'file' {
+  if (level !== 1) return 'file'
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/') || mime === 'application/ogg') return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
+  if (mime === 'application/pdf') return 'pdf'
+  return 'file'
+}
+
+/** Ids of the files kept on the server that these blocks use. */
+export function fileIdsOf(blocks: readonly Block[]): string[] {
+  const out = new Set<string>()
+  for (const b of blocks) if ('fileId' in b && b.fileId) out.add(b.fileId)
+  return [...out]
 }
 
 export const TEXT_TYPES = ['paragraph', 'heading', 'quote', 'callout', 'bullet', 'numbered'] as const

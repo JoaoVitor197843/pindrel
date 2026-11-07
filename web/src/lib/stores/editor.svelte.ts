@@ -16,6 +16,8 @@ import {
   isTextType,
   isTone,
   isUrlBlock,
+  blockTypeForFile,
+  fileIdsOf,
   levelOf,
   type Block,
   type BlockType,
@@ -23,6 +25,8 @@ import {
   type HeadingLevel,
 } from './blocks'
 import { isCover } from './cover'
+import { files as fileService, type FilesPort, type Upload } from './files.svelte'
+import { toast } from './toast.svelte'
 import { isEmoji } from './emoji'
 import { safeUrl } from './inline'
 import type { PermKey } from './permissions'
@@ -40,6 +44,10 @@ export class PageEditor {
   save = $state<'saved' | 'saving'>('saved')
   /** Spoilers and secure blocks that are open right now (not stored: they close with the page). */
   revealed = $state<Record<string, boolean>>({})
+  /** Files being sent into blocks right now (block id to upload); a failed one stays until it is dismissed or tried again. */
+  uploading = $state<Record<string, Upload>>({})
+  /** The file service (a test can stand in for it). */
+  files: FilesPort = fileService
   #timer: ReturnType<typeof setTimeout> | undefined
 
   constructor(ws: Workspace, id: string) {
@@ -148,8 +156,76 @@ export class PageEditor {
     const p = this.page
     const i = this.#index(id)
     if (!p?.content || i < 0 || !this.can('blocks')) return
-    p.content.splice(i, 1)
+    const [gone] = p.content.splice(i, 1)
     this.#changed()
+    this.#release(fileIdsOf([gone]))
+    this.#cancelUpload(id)
+  }
+
+  /** Whether any block of any open page still points at this file. */
+  #inUse(fileId: string): boolean {
+    return this.ws.pages.some((page) => page.content && fileIdsOf(page.content).includes(fileId))
+  }
+
+  /** Tells the server which files nothing uses any more (it deletes them after a grace period). */
+  #release(ids: string[]) {
+    for (const id of ids) if (!this.#inUse(id)) this.files.orphan(id, true)
+  }
+
+  #cancelUpload(blockId: string) {
+    const u = this.uploading[blockId]
+    if (!u) return
+    if (u.status === 'queued' || u.status === 'sending') this.files.cancel(u.key)
+    delete this.uploading[blockId]
+  }
+
+  /**
+   * Sends a file into a block. When it arrives the block becomes what suits the file: an image, a video, a sound, a PDF, or
+   * a file card for the rest. False when it cannot start (nobody signed in, no permission).
+   */
+  uploadInto(blockId: string, file: File): boolean {
+    const b = this.blocks.find((x) => x.id === blockId)
+    if (!b || !this.can('blocks') || (b.type === 'image' && !this.can('images'))) return false
+    if (!this.files.available) {
+      toast.show('Entre em um servidor para enviar arquivos')
+      return false
+    }
+    if (file.size === 0) {
+      toast.show('O arquivo está vazio')
+      return false
+    }
+    this.#cancelUpload(blockId)
+    const pageId = this.id
+    this.uploading[blockId] = this.files.start(file, (info) => this.#arrived(pageId, blockId, info))
+    return true
+  }
+
+  /** Gives up on a file that is being sent or that failed. */
+  dismissUpload(blockId: string) {
+    this.#cancelUpload(blockId)
+  }
+
+  #arrived(pageId: string, blockId: string, info: { id: string; name: string; size: number; mime: string; level: number }) {
+    delete this.uploading[blockId]
+    const page = this.ws.page(pageId)
+    const i = page?.content ? page.content.findIndex((x) => x.id === blockId) : -1
+    if (!page?.content || i < 0) {
+      // the block (or the whole page) went away while the file travelled: nothing uses it
+      this.files.orphan(info.id, true)
+      return
+    }
+    const before = fileIdsOf([page.content[i]])
+    const type = blockTypeForFile(info.mime, info.level)
+    const level = (info.level === 1 || info.level === 2 ? info.level : 3) as 1 | 2 | 3
+    page.content[i] =
+      type === 'image'
+        ? { id: blockId, type, name: info.name || null, src: null, fileId: info.id }
+        : type === 'file'
+          ? { id: blockId, type, fileId: info.id, name: info.name, size: info.size, mime: info.mime, level }
+          : { id: blockId, type, url: '', title: info.name, fileId: info.id }
+    if (pageId === this.id) this.#changed()
+    else this.ws.touch(pageId)
+    this.#release(before.filter((f) => f !== info.id))
   }
 
   move(from: number, at: number) {
@@ -213,7 +289,8 @@ export class PageEditor {
     const i = this.#index(id)
     if (!p?.content || i < 0 || !this.can('blocks') || p.content.length >= MAX_BLOCKS) return null
     const src = p.content[i]
-    if (src.type === 'image') return null
+    // an image picked in this session has a temporary address that belongs to the original; one kept on the server can be shared
+    if (src.type === 'image' && !src.fileId) return null
     const copy: Block = JSON.parse(JSON.stringify(src))
     copy.id = newId()
     if (copy.type === 'checklist') copy.items.forEach((item) => (item.id = newId('i')))
@@ -438,9 +515,12 @@ export class PageEditor {
     const b = this.#block(id, 'image')
     if (!b || !this.can('images')) return
     if (b.src && b.src !== src) URL.revokeObjectURL?.(b.src)
+    const had = b.fileId
     b.name = name
     b.src = src
+    delete b.fileId
     this.#changed()
+    if (had) this.#release([had])
   }
 
   // spoiler / secure
