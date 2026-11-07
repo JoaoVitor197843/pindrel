@@ -41,6 +41,8 @@
   let { id, label, index, count, readOnly, menuOpen, dropEdge, onplus, onpick, onclosemenu, disabledTypes = [], onmove, onremove, turnable = false, kind = '', canDuplicate = true, onduplicate, onturn, ondragstart, ondragend, ondragover, ondrop, onpointerdrag, dragging = false, enter = true, children }: Props = $props()
 
   let options = $state(false)
+  // On narrow screens the controls take no side gutter: they appear under the block that was last touched.
+  let active = $state(false)
 
   // The mouse drags natively; touch and pen drag by pointer events (a short movement starts it, so a plain tap still opens the menu).
   let pointerKind = $state<'mouse' | 'touch'>('mouse')
@@ -98,22 +100,28 @@
     } else if (e.key === 'Escape') options = false
   }
 
-  const reveal = 'transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100'
+  const reveal = 'transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 focus-visible:opacity-100 max-md:opacity-100 [@media(hover:none)]:opacity-100'
 </script>
 
-<svelte:window onmousedown={(e) => options && !(e.target as Element).closest?.(`[data-options="${id}"]`) && (options = false)} />
+<svelte:window
+  onmousedown={(e) => options && !(e.target as Element).closest?.(`[data-options="${id}"]`) && (options = false)}
+  onpointerdown={(e) => active && !(e.target as Element).closest?.(`[data-block-id="${id}"]`) && (active = false)}
+/>
 
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <div
-  class="{enter ? 'animate-rise' : ''} group/row relative pl-16 md:pl-0 {dragging ? 'opacity-40' : ''} {menuOpen || options ? 'z-30' : ''} {dropEdge === 'before' ? 'shadow-[0_-2px_0_var(--color-accent-line)]' : ''} {dropEdge === 'after' ? 'shadow-[0_2px_0_var(--color-accent-line)]' : ''}"
+  class="{enter ? 'animate-rise' : ''} group/row relative max-md:flex max-md:flex-col {dragging ? 'opacity-40' : ''} {menuOpen || options ? 'z-30' : ''} {dropEdge === 'before' ? 'shadow-[0_-2px_0_var(--color-accent-line)]' : ''} {dropEdge === 'after' ? 'shadow-[0_2px_0_var(--color-accent-line)]' : ''}"
   data-block-id={id}
   role="group"
   aria-label="{label} {index + 1} de {count}"
   style:animation-delay="{Math.min(index, 10) * 28}ms"
   {ondragover}
   {ondrop}
+  onfocusin={() => (active = true)}
+  onclick={() => (active = true)}
 >
   {#if !readOnly}
-    <div class="absolute top-1 left-0 flex items-center gap-0.5 md:-left-[4.25rem]">
+    <div class="flex items-center gap-0.5 max-md:order-last max-md:justify-end max-md:pt-1 md:absolute md:top-1 md:-left-[4.25rem] {active || options || menuOpen ? '' : 'max-md:hidden'}">
       <button
         type="button"
         data-insert-trigger
@@ -146,7 +154,7 @@
           ⠿
         </button>
         {#if options}
-          <div role="menu" aria-label="Opções do bloco" class="animate-pop absolute top-full left-0 z-40 mt-1 w-48 rounded-field border border-line bg-surface p-1 shadow-xl">
+          <div role="menu" aria-label="Opções do bloco" class="animate-pop absolute top-full left-0 max-md:right-0 max-md:left-auto z-40 mt-1 w-48 rounded-field border border-line bg-surface p-1 shadow-xl">
             <button type="button" role="menuitem" class="w-full rounded-[7px] px-2.5 py-1.5 text-left text-sm hover:bg-line/50 disabled:opacity-40" disabled={index === 0} onclick={() => ((options = false), onmove(-1))}>Subir</button>
             <button type="button" role="menuitem" class="w-full rounded-[7px] px-2.5 py-1.5 text-left text-sm hover:bg-line/50 disabled:opacity-40" disabled={index === count - 1} onclick={() => ((options = false), onmove(1))}>Descer</button>
             {#if canDuplicate}
