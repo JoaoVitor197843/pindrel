@@ -1,13 +1,19 @@
+import { parseInline, runsToHtml } from './inlineParse'
+
 // Inline formatting kept as plain markdown markers inside the text, so it survives every export and costs nothing
 // at rest: the editor edits text, and these functions only add or take away the markers.
 
-export type Mark = 'bold' | 'italic' | 'underline' | 'code'
+export type Mark = 'bold' | 'italic' | 'underline' | 'strike' | 'highlight' | 'code'
 
-// markdown has no underline: `++text++` is the usual extension, and it becomes <u> wherever the text is shown or exported
-// `++x++` between words; a plus sign next to a letter (C++, i++) is never a mark, nor is one around spaces
-const UNDERLINE = /(^|[^\w+])\+\+(?=\S)([^+\n]*?[^\s+])\+\+(?![\w+])/g
+// The markers are the ones most apps use: **bold**, *italic*, __underline__, ~~strike~~, `code`. Markdown has no
+// underline, so `__x__` becomes <u> wherever the text is shown or exported. `_x_` is still read as italic (it is
+// standard markdown) but the editor writes `*x*`.
+// A marker only counts hugging text: `2 * 3 * 4`, `snake_case_name`, `a ~~ b` and `~~ a ~~` are plain text.
+// `__x__` is read by the shared reader; this one only serves the markdown export, where it must become <u>
+const HIGHLIGHT = /(^|[^\w=])==(?=[^\s=])([^=\n]*?[^\s=])==(?![\w=])/g
+const UNDERLINE = /(^|[^\w_])__(?=[^\s_])([^_\n]*?[^\s_])__(?![\w_])/g
 
-export const MARKERS: Record<Mark, string> = { bold: '**', italic: '_', underline: '++', code: '`' }
+export const MARKERS: Record<Mark, string> = { bold: '**', italic: '*', underline: '__', strike: '~~', highlight: '==', code: '`' }
 
 export interface TextEdit {
   text: string
@@ -28,11 +34,30 @@ export function toggleMark(text: string, start: number, end: number, mark: Mark)
   if (from === to) return null
 
   const sel = text.slice(from, to)
-  if (text.slice(from - m.length, from) === m && text.slice(to, to + m.length) === m && from >= m.length) {
+  // `*` is shared by bold (`**`) and italic (`*`): it is italic only when the run of stars is odd (`***x***` is both)
+  const run = (i: number, step: 1 | -1) => {
+    let n = 0
+    while (text[i + (step === 1 ? n : -n - 1)] === '*') n++
+    return n
+  }
+  const selRun = (str: string, fromEnd: boolean) => {
+    let n = 0
+    while (n < str.length && str[fromEnd ? str.length - 1 - n : n] === '*') n++
+    return n
+  }
+  const around =
+    mark === 'italic'
+      ? Math.min(run(from, -1), run(to, 1)) % 2 === 1
+      : from >= m.length && text.slice(from - m.length, from) === m && text.slice(to, to + m.length) === m
+  if (around) {
     const next = text.slice(0, from - m.length) + sel + text.slice(to + m.length)
     return { text: next, start: from - m.length, end: to - m.length }
   }
-  if (sel.length > 2 * m.length && sel.startsWith(m) && sel.endsWith(m)) {
+  const inside =
+    mark === 'italic'
+      ? Math.min(selRun(sel, false), selRun(sel, true)) % 2 === 1 && sel.length > 2
+      : sel.length > 2 * m.length && sel.startsWith(m) && sel.endsWith(m)
+  if (inside) {
     const inner = sel.slice(m.length, sel.length - m.length)
     return { text: text.slice(0, from) + inner + text.slice(to), start: from, end: from + inner.length }
   }
@@ -67,19 +92,9 @@ export function makeLink(text: string, start: number, end: number, url: string):
   return { text: text.slice(0, from) + link + text.slice(to), start: from + 1, end: from + 1 + sel.length }
 }
 
-/** Markers in text that is already HTML-escaped become tags. Only the three marks and safe links are recognised. */
+/** Markers in text that is already HTML-escaped become tags. Only the marks and safe links are recognised. */
 export function inlineHtml(escaped: string): string {
-  return escaped
-    .split(/(`[^`\n]+`)/)
-    .map((part, i) => {
-      if (i % 2 === 1) return `<code>${part.slice(1, -1)}</code>`
-      return part
-        .replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|mailto:)[^\s)]+)\)/g, '<a href="$2" rel="noopener noreferrer">$1</a>')
-        .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-        .replace(UNDERLINE, '$1<u>$2</u>')
-        .replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g, '$1<em>$2</em>')
-    })
-    .join('')
+  return runsToHtml(parseInline(escaped))
 }
 
 /** Every character that could start markup, so text can never inject anything where it is shown or exported. */
@@ -89,16 +104,16 @@ export const escapeHtml = (s: string) =>
 /** The text drawn with its marks (for a block that is not being edited), or null when it has none: no work, no node. */
 export function renderMarks(text: string): string | null {
   // cheap exit for the common case before any regex work
-  if (!/[*_`[+]/.test(text)) return null
+  if (!/[*_`[~=]/.test(text)) return null
   const plain = escapeHtml(text)
   const html = inlineHtml(plain)
   return html === plain ? null : html.replace(/<a href=/g, '<a target="_blank" href=')
 }
 
-/** Markdown for text with marks: everything is kept as typed, except `++underline++`, which markdown lacks (it becomes <u>). */
+/** Markdown for text with marks: everything is kept as typed, except `__underline__` (markdown reads it as bold), which becomes <u> (and `==highlight==`, which becomes <mark>). */
 export function markdownMarks(text: string): string {
   return text
     .split(/(`[^`\n]+`)/)
-    .map((part, i) => (i % 2 === 1 ? part : part.replace(UNDERLINE, '$1<u>$2</u>')))
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(UNDERLINE, '$1<u>$2</u>').replace(HIGHLIGHT, '$1<mark>$2</mark>')))
     .join('')
 }

@@ -239,16 +239,16 @@ describe('sublinhado na exportação', () => {
     title: 'T',
     tags: [],
     content: [
-      { id: 'a', type: 'paragraph', text: 'um ++sublinhado++ e **forte**' },
-      { id: 'b', type: 'heading', text: 'título ++sublinhado++' },
-      { id: 'c', type: 'quote', text: '++citação++' },
+      { id: 'a', type: 'paragraph', text: 'um __sublinhado__ e **forte** e ~~cortado~~' },
+      { id: 'b', type: 'heading', text: 'título __sublinhado__' },
+      { id: 'c', type: 'quote', text: '__citação__' },
       { id: 'd', type: 'code', lang: 'texto', text: 'i++ e j++' },
     ],
   })
 
-  it('markdown troca ++ por <u>, menos no código', () => {
+  it('markdown troca __ por <u> e mantém ~~, menos no código', () => {
     const md = pageToMarkdown(page(), [])
-    expect(md).toContain('um <u>sublinhado</u> e **forte**')
+    expect(md).toContain('um <u>sublinhado</u> e **forte** e ~~cortado~~')
     expect(md).toContain('## título <u>sublinhado</u>')
     expect(md).toContain('> <u>citação</u>')
     expect(md).toContain('i++ e j++')
@@ -256,7 +256,7 @@ describe('sublinhado na exportação', () => {
 
   it('html faz <u> e escapa o resto', () => {
     const html = pageToHtml(page(), [])
-    expect(html).toContain('um <u>sublinhado</u> e <strong>forte</strong>')
+    expect(html).toContain('um <u>sublinhado</u> e <strong>forte</strong> e <s>cortado</s>')
     expect(html).toContain('<h2>título <u>sublinhado</u></h2>')
     expect(html).toContain('<code>i++ e j++</code>')
   })
