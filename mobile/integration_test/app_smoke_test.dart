@@ -40,6 +40,18 @@ void main() {
     app.main();
     await frames(tester);
 
+    // the app opens on the notes of the device (no server needed)
+    expect(find.text('Minhas páginas'), findsWidgets);
+    expect(find.text('Nenhuma página ainda'), findsOneWidget);
+
+    // the way to the account screen: the drawer on a phone, the side column on a wide window
+    if (find.text('Conta e servidor').evaluate().isEmpty) {
+      await tester.tap(find.byTooltip('Menu'));
+      await frames(tester, 3);
+    }
+    await tester.tap(find.text('Conta e servidor'));
+    await frames(tester);
+
     expect(find.text('Pindrel'), findsWidgets);
     expect(find.text('Bem-vindo de volta'), findsOneWidget);
     expect(find.text('Continuar offline neste dispositivo'), findsOneWidget);
@@ -71,7 +83,8 @@ void main() {
     );
     await tester.tap(find.text('Continuar offline neste dispositivo'));
     await frames(tester, 3);
-    expect(find.text('Notas locais chegam em breve.'), findsOneWidget);
+    // ...and goes back to the notes
+    expect(find.text('Nenhuma página ainda'), findsOneWidget);
 
     expect(
       tester.takeException(),
