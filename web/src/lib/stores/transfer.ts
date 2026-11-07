@@ -1,4 +1,4 @@
-import { blockText, type Block } from './blocks'
+import { TONES, blockText, levelOf, numbering, outline, toneOf, type Block } from './blocks'
 import { escapeHtml, inlineHtml, markdownMarks } from './inline'
 import type { NotePage, Tag } from './workspace.svelte'
 
@@ -28,6 +28,31 @@ const tagNames = (p: NotePage, tags: Tag[]) => p.tags.map((id) => tags.find((t) 
 
 const oneLine = (s: string) => s.replace(/\s+/g, ' ').trim()
 
+/** What a block needs to know about the others: the number of a list item, the titles a table of contents lists. */
+interface Ctx {
+  numbers: Map<string, number>
+  titles: ReturnType<typeof outline>
+}
+const ctxOf = (blocks: Block[]): Ctx => ({ numbers: numbering(blocks), titles: outline(blocks) })
+const isItem = (b: Block) => b.type === 'bullet' || b.type === 'numbered'
+
+/** Blocks, one under the other: list items stay together, everything else is set apart by a blank line. */
+function joinBlocks(blocks: Block[], render: (b: Block, ctx: Ctx) => string): string {
+  const ctx = ctxOf(blocks)
+  let out = ''
+  let prev: Block | null = null
+  for (const b of blocks) {
+    const text = render(b, ctx)
+    if (!text) continue
+    out += prev ? (isItem(prev) && isItem(b) ? '\n' : '\n\n') : ''
+    out += text
+    prev = b
+  }
+  return out
+}
+
+const ALERT = { info: 'NOTE', success: 'TIP', warning: 'WARNING', danger: 'CAUTION' } as const
+
 /** A code fence longer than any run of backticks inside the code, so the code can never close it early. */
 function fence(text: string): string {
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length))
@@ -36,16 +61,18 @@ function fence(text: string): string {
 
 const cell = (s: string) => oneLine(s).replace(/\|/g, '\\|')
 
-function mdBlock(b: Block, opt: ExportOptions): string {
+function mdBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
   switch (b.type) {
     case 'heading':
-      return `## ${markdownMarks(oneLine(b.text))}`
+      return b.toggle
+        ? `<details><summary><h${levelOf(b)}>${escapeHtml(oneLine(b.text))}</h${levelOf(b)}></summary>\n\n${markdownMarks(b.body ?? '')}\n\n</details>`
+        : `${'#'.repeat(levelOf(b))} ${markdownMarks(oneLine(b.text))}`
     case 'paragraph':
       return markdownMarks(b.text)
     case 'quote':
       return markdownMarks(b.text).split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')
     case 'callout':
-      return `> [!NOTE]\n${markdownMarks(b.text).split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')}`
+      return `> [!${ALERT[toneOf(b)]}]\n${markdownMarks(b.text).split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')}`
     case 'toggle':
       return `<details><summary>${escapeHtml(oneLine(b.text))}</summary>\n\n${markdownMarks(b.body)}\n\n</details>`
     case 'divider':
@@ -68,26 +95,36 @@ function mdBlock(b: Block, opt: ExportOptions): string {
     }
     case 'image':
       return b.name ? `![${oneLine(b.name)}](${encodeURI(b.name)})` : ''
+    case 'bullet':
+      return `${'  '.repeat(b.indent ?? 0)}- ${markdownMarks(oneLine(b.text))}`
+    case 'numbered':
+      return `${'   '.repeat(b.indent ?? 0)}${ctx.numbers.get(b.id) ?? 1}. ${markdownMarks(oneLine(b.text))}`
+    case 'toc':
+      return ctx.titles.map((t) => `${'  '.repeat(t.level - 1)}- ${oneLine(t.text)}`).join('\n')
+    case 'bookmark':
+    case 'video':
+    case 'audio':
+    case 'pdf':
+      return b.url ? `[${oneLine(b.title) || b.url}](${b.url})` : ''
+    case 'pagelink':
+      return b.pageId && b.title ? `[${oneLine(b.title)}](/notes/${b.pageId})` : ''
   }
 }
 
 export function pageToMarkdown(p: NotePage, tags: Tag[], opt: ExportOptions = {}): string {
   const names = tagNames(p, tags)
-  const body = blocksOf(p)
-    .map((b) => mdBlock(b, opt))
-    .filter(Boolean)
-    .join('\n\n')
+  const body = joinBlocks(blocksOf(p), (b, ctx) => mdBlock(b, opt, ctx))
   return `# ${oneLine(p.title) || 'Sem título'}\n\n${names.length ? `tags: ${names.join(', ')}\n\n` : ''}${body}${body ? '\n' : ''}`
 }
 
-function txtBlock(b: Block, opt: ExportOptions): string {
+function txtBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
   switch (b.type) {
     case 'heading':
-      return b.text.toUpperCase()
+      return b.toggle ? [b.text.toUpperCase(), b.body].filter(Boolean).join('\n') : b.text.toUpperCase()
     case 'quote':
       return b.text.split('\n').map((l) => `> ${l}`.trimEnd()).join('\n')
     case 'callout':
-      return `Nota: ${b.text}`
+      return `${TONES.find((t) => t.key === toneOf(b))!.label}: ${b.text}`
     case 'toggle':
       return [b.text, b.body].filter(Boolean).join('\n')
     case 'divider':
@@ -100,6 +137,19 @@ function txtBlock(b: Block, opt: ExportOptions): string {
       return [b.cols.map((c) => oneLine(c.label)).join('\t'), ...b.rows.map((r) => b.cols.map((c) => oneLine(r[c.id] ?? '')).join('\t'))].join('\n')
     case 'image':
       return b.name ? `[imagem: ${oneLine(b.name)}]` : ''
+    case 'bullet':
+      return `${'  '.repeat(b.indent ?? 0)}• ${oneLine(b.text)}`
+    case 'numbered':
+      return `${'   '.repeat(b.indent ?? 0)}${ctx.numbers.get(b.id) ?? 1}. ${oneLine(b.text)}`
+    case 'toc':
+      return ctx.titles.map((t) => `${'  '.repeat(t.level - 1)}${oneLine(t.text)}`).join('\n')
+    case 'bookmark':
+    case 'video':
+    case 'audio':
+    case 'pdf':
+      return b.url ? `${oneLine(b.title) || b.url} (${b.url})` : ''
+    case 'pagelink':
+      return b.title ? `→ ${oneLine(b.title)}` : ''
     default:
       return blockText(b)
   }
@@ -107,10 +157,7 @@ function txtBlock(b: Block, opt: ExportOptions): string {
 
 export function pageToText(p: NotePage, tags: Tag[], opt: ExportOptions = {}): string {
   const names = tagNames(p, tags)
-  const body = blocksOf(p)
-    .map((b) => txtBlock(b, opt))
-    .filter(Boolean)
-    .join('\n\n')
+  const body = joinBlocks(blocksOf(p), (b, ctx) => txtBlock(b, opt, ctx))
   return `${oneLine(p.title) || 'Sem título'}\n${names.length ? `tags: ${names.join(', ')}\n` : ''}\n${body}${body ? '\n' : ''}`
 }
 
@@ -119,16 +166,18 @@ export { escapeHtml }
 const rich = (t: string) => inlineHtml(escapeHtml(t)).replace(/\n/g, '<br>')
 const para = (t: string) => `<p>${rich(t)}</p>`
 
-function htmlBlock(b: Block, opt: ExportOptions): string {
+function htmlBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
   switch (b.type) {
     case 'heading':
-      return `<h2>${inlineHtml(escapeHtml(oneLine(b.text)))}</h2>`
+      return b.toggle
+        ? `<details><summary><h${levelOf(b)}>${inlineHtml(escapeHtml(oneLine(b.text)))}</h${levelOf(b)}></summary>${para(b.body ?? '')}</details>`
+        : `<h${levelOf(b)}>${inlineHtml(escapeHtml(oneLine(b.text)))}</h${levelOf(b)}>`
     case 'paragraph':
       return para(b.text)
     case 'quote':
       return `<blockquote>${rich(b.text)}</blockquote>`
     case 'callout':
-      return `<aside class="callout">${rich(b.text)}</aside>`
+      return `<aside class="callout ${toneOf(b)}">${rich(b.text)}</aside>`
     case 'toggle':
       return `<details><summary>${inlineHtml(escapeHtml(oneLine(b.text)))}</summary>${para(b.body)}</details>`
     case 'divider':
@@ -147,16 +196,31 @@ function htmlBlock(b: Block, opt: ExportOptions): string {
         .join('')}</tbody></table>`
     case 'image':
       return b.name ? `<p><em>[imagem: ${escapeHtml(oneLine(b.name))}]</em></p>` : ''
+    case 'bullet':
+      return `<ul><li style="margin-left:${(b.indent ?? 0) * 1.5}em">${inlineHtml(escapeHtml(oneLine(b.text)))}</li></ul>`
+    case 'numbered':
+      return `<ol><li value="${ctx.numbers.get(b.id) ?? 1}" style="margin-left:${(b.indent ?? 0) * 1.5}em">${inlineHtml(escapeHtml(oneLine(b.text)))}</li></ol>`
+    case 'toc':
+      return `<nav><ul>${ctx.titles.map((t) => `<li style="margin-left:${(t.level - 1) * 1.5}em">${escapeHtml(oneLine(t.text))}</li>`).join('')}</ul></nav>`
+    case 'bookmark':
+    case 'pdf':
+      return b.url ? `<p><a href="${escapeHtml(b.url)}" rel="noopener noreferrer">${escapeHtml(oneLine(b.title) || b.url)}</a></p>` : ''
+    case 'video':
+    case 'audio': {
+      if (!b.url) return ''
+      const tag = b.type === 'video' ? 'video' : 'audio'
+      const caption = oneLine(b.title) ? `<p>${escapeHtml(oneLine(b.title))}</p>` : ''
+      return `<${tag} controls preload="none" src="${escapeHtml(b.url)}"></${tag}>${caption}`
+    }
+    case 'pagelink':
+      return b.pageId && b.title ? `<p><a href="/notes/${escapeHtml(b.pageId)}">${escapeHtml(oneLine(b.title))}</a></p>` : ''
   }
 }
 
 export function pageToHtml(p: NotePage, tags: Tag[], opt: ExportOptions = {}): string {
   const names = tagNames(p, tags)
   const title = escapeHtml(oneLine(p.title) || 'Sem título')
-  const body = blocksOf(p)
-    .map((b) => htmlBlock(b, opt))
-    .filter(Boolean)
-    .join('\n')
+  const body = joinBlocks(blocksOf(p), (b, ctx) => htmlBlock(b, opt, ctx)).replace(/<\/(ul|ol)>\n<\1>/g, '\n')
   return `<!doctype html>
 <html lang="pt-BR">
 <head>

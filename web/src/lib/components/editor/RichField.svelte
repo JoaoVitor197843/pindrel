@@ -6,7 +6,7 @@
   import type { PageEditor } from '../../stores/editor.svelte'
   import { barLock, instances, loadEngine, type RichInstance } from './rich/engine'
   import { autoMark, parseRuns, plainText, serializeRuns, sliceRuns } from './rich/runs'
-  import { MAX_TEXT } from '../../stores/blocks'
+  import { MAX_TEXT, type HeadingLevel } from '../../stores/blocks'
   import { place } from './autosize'
 
   interface Props {
@@ -73,6 +73,17 @@
     let runs = inst.runs()
     const text = plainText(runs)
     empty = text === ''
+    // "# ", "- ", "1. ", "> " typed in an empty paragraph turn it into a title, a list item or a quote
+    if (block.type === 'paragraph' && ed.can('blocks') && /^(#{1,3}|[-*+]|\d{1,3}[.)]|>) $/.test(text)) {
+      const mark = text.trimEnd()
+      const done = mark[0] === '#' ? ed.turnInto(block.id, 'heading', { level: mark.length as HeadingLevel }) : mark === '>' ? ed.turnInto(block.id, 'quote') : /\d/.test(mark[0]) ? ed.turnInto(block.id, 'numbered') : ed.turnInto(block.id, 'bullet')
+      if (done) {
+        ed.setText(block.id, '')
+        // the block changed kind, so a new field takes over: the caret goes back into it
+        onsplit(block.id)
+        return
+      }
+    }
     if (text === '/' && block.type === 'paragraph' && ed.can('blocks')) {
       inst.replace(0, 1, [])
       ed.setText(block.id, '')
@@ -121,14 +132,32 @@
     const sel = inst.selection()
     const runs = inst.runs()
     const len = plainText(runs).length
+    const isItem = block.type === 'bullet' || block.type === 'numbered'
+    if (e.key === 'Tab' && isItem && !e.altKey) {
+      // a list item goes in one level (Tab) or out (Shift+Tab); outside a list Tab keeps moving through the page
+      e.preventDefault()
+      e.stopPropagation()
+      if (ed.can('text')) ed.indent(block.id, e.shiftKey ? -1 : 1)
+      return
+    }
     if (e.key === 'Enter' && !e.altKey) {
       e.preventDefault()
       e.stopPropagation()
       if (!ed.can('text')) return
+      // Enter on an empty list item ends the list (or comes out one level)
+      if (isItem && len === 0 && !e.shiftKey) {
+        if (ed.leaveList(block.id)) onsplit(block.id)
+        return
+      }
       if (e.shiftKey) return inst.replace(sel.from, sel.to, [{ text: '\n', marks: {} }])
-      if (block.type === 'toggle' && onenter) return onenter()
+      if ((block.type === 'toggle' || (block.type === 'heading' && block.toggle)) && onenter) return onenter()
       const made = ed.splitText(block.id, serializeRuns(sliceRuns(runs, 0, sel.from)), serializeRuns(sliceRuns(runs, sel.to, len)))
       if (made) onsplit(made.id)
+    } else if (e.key === 'Backspace' && len === 0 && isItem && ed.can('text')) {
+      // Backspace on an empty list item undoes the list the same way Enter does
+      e.preventDefault()
+      e.stopPropagation()
+      if (ed.leaveList(block.id)) onsplit(block.id)
     } else if (e.key === 'Backspace' && len === 0 && (block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout')) {
       e.preventDefault()
       e.stopPropagation()

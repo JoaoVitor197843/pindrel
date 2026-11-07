@@ -42,7 +42,7 @@
     {:else}
       <ol class="flex flex-col border-l border-line">
         {#each items as item (item.id)}
-          <li>
+          <li style:padding-left="{(item.level - 1) * 0.9}rem">
             <button type="button" class="-ml-px block w-full truncate border-l-2 border-transparent py-1.5 pl-3 text-left text-sm text-muted hover:border-accent-line hover:text-fg" onclick={() => onjump(item.id)}>
               {item.text}
             </button>

@@ -6,7 +6,8 @@
 
   interface Props {
     ed: PageEditor
-    block: Extract<Block, { type: 'toggle' }>
+    /** A toggle, or a heading that is also a toggle. */
+    block: Extract<Block, { type: 'toggle' | 'heading' }>
     onsplit: (id: string) => void
     onremove: (id: string) => void
     onslash: (id: string) => void
@@ -39,16 +40,16 @@
     <span aria-hidden="true" class="inline-block transition-transform motion-reduce:transition-none {open ? 'rotate-90' : ''}">▸</span>
   </button>
   <div class="min-w-0 flex-1">
-    <TextBlock {ed} {block} label="Título do toggle" {onsplit} {onremove} {onslash} onenter={enter} />
+    <TextBlock {ed} {block} variant={block.type === 'heading' ? 'heading' : 'paragraph'} label={block.type === 'heading' ? 'Título de seção' : 'Título do toggle'} {onsplit} {onremove} {onslash} onenter={enter} />
     {#if open}
       <textarea
         bind:this={body}
         data-nav
         data-fmt
         rows="1"
-        value={block.body}
+        value={block.body ?? ''}
         oninput={(e) => ed.setBody(block.id, e.currentTarget.value)}
-        use:autosize={block.body}
+        use:autosize={block.body ?? ''}
         readonly={!ed.can('text')}
         spellcheck="false"
         maxlength="20000"

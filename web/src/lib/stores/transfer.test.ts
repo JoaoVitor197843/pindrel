@@ -223,7 +223,7 @@ describe('exportação dos blocos novos', () => {
   it('html converte as marcas e escapa todo o resto', () => {
     const html = pageToHtml(page(), [])
     expect(html).toContain('<blockquote>linha 1<br>linha 2</blockquote>')
-    expect(html).toContain('<aside class="callout">cuidado</aside>')
+    expect(html).toContain('<aside class="callout info">cuidado</aside>')
     expect(html).toContain('<details><summary>mais</summary><p>escondido</p></details>')
     expect(html).toContain('<hr>')
     expect(html).toContain('<strong>forte</strong>')
@@ -261,3 +261,122 @@ describe('sublinhado na exportação', () => {
     expect(html).toContain('<code>i++ e j++</code>')
   })
 })
+
+describe('exportação: títulos, listas, sumário, link e destaques', () => {
+  const page = (): NotePage => {
+    const w = new Workspace()
+    const p = w.page('p5')!
+    p.title = 'Teste'
+    p.content = [
+      { id: 'a', type: 'heading', text: 'Grande', level: 1 },
+      { id: 'b', type: 'heading', text: 'Médio' },
+      { id: 'c', type: 'heading', text: 'Pequeno', level: 3 },
+      { id: 'd', type: 'toc' },
+      { id: 'e', type: 'bullet', text: 'um **forte**', indent: 0 },
+      { id: 'f', type: 'bullet', text: 'filho', indent: 1 },
+      { id: 'g', type: 'numbered', text: 'primeiro', indent: 0 },
+      { id: 'h', type: 'numbered', text: 'segundo', indent: 0 },
+      { id: 'i', type: 'paragraph', text: 'fim' },
+      { id: 'j', type: 'bookmark', url: 'https://exemplo.com/a?x=1&y=2', title: 'Meu <site>' },
+      { id: 'k', type: 'callout', text: 'cuidado', tone: 'warning' },
+      { id: 'l', type: 'callout', text: 'ok', tone: 'success' },
+      { id: 'm', type: 'callout', text: 'nota' },
+    ]
+    return p
+  }
+
+  it('markdown: # por tamanho, listas coladas, números certos, sumário em lista, link e avisos do GitHub', () => {
+    const md = pageToMarkdown(page(), [])
+    expect(md).toContain('# Grande\n\n## Médio\n\n### Pequeno')
+    expect(md).toContain('- Grande\n  - Médio\n    - Pequeno')
+    expect(md).toContain('- um **forte**\n  - filho\n1. primeiro\n2. segundo\n\nfim')
+    expect(md).toContain('[Meu <site>](https://exemplo.com/a?x=1&y=2)')
+    expect(md).toContain('> [!WARNING]\n> cuidado')
+    expect(md).toContain('> [!TIP]\n> ok')
+    expect(md).toContain('> [!NOTE]\n> nota')
+  })
+
+  it('texto simples: marcadores, números, sumário e link com o endereço entre parênteses', () => {
+    const txt = pageToText(page(), [])
+    expect(txt).toContain('• um **forte**\n  • filho\n1. primeiro\n2. segundo')
+    expect(txt).toContain('Grande\n  Médio\n    Pequeno')
+    expect(txt).toContain('Meu <site> (https://exemplo.com/a?x=1&y=2)')
+    expect(txt).toContain('Atenção: cuidado')
+    expect(txt).toContain('Sucesso: ok')
+    expect(txt).toContain('Nota: nota')
+  })
+
+  it('html: h1 a h3, uma lista só para itens vizinhos, número guardado, tom na classe e tudo escapado', () => {
+    const html = pageToHtml(page(), [])
+    expect(html).toContain('<h1>Grande</h1>')
+    expect(html).toContain('<h2>Médio</h2>')
+    expect(html).toContain('<h3>Pequeno</h3>')
+    expect(html).toMatch(/<ul><li style="margin-left:0em">um <strong>forte<\/strong><\/li>\n<li style="margin-left:1.5em">filho<\/li><\/ul>/)
+    expect(html).toMatch(/<ol><li value="1"[^>]*>primeiro<\/li>\n<li value="2"[^>]*>segundo<\/li><\/ol>/)
+    expect(html).toContain('<aside class="callout warning">cuidado</aside>')
+    expect(html).toContain('<a href="https://exemplo.com/a?x=1&amp;y=2" rel="noopener noreferrer">Meu &lt;site&gt;</a>')
+    expect(html).toContain('<nav><ul>')
+    expect(html).not.toContain('<site>')
+  })
+
+  it('JSON leva os campos novos como estão', () => {
+    const json = JSON.parse(pageToJson(page(), []))
+    expect(json.blocks.find((b: { id: string }) => b.id === 'a')).toMatchObject({ level: 1 })
+    expect(json.blocks.find((b: { id: string }) => b.id === 'k')).toMatchObject({ tone: 'warning' })
+    expect(json.blocks.find((b: { id: string }) => b.id === 'j')).toMatchObject({ url: 'https://exemplo.com/a?x=1&y=2' })
+  })
+
+  it('um link ainda sem endereço e um sumário sem títulos não deixam rastro nem quebram', () => {
+    const w = new Workspace()
+    const p = w.page('p5')!
+    p.content = [{ id: 'a', type: 'bookmark', url: '', title: '' }, { id: 'b', type: 'toc' }, { id: 'c', type: 'paragraph', text: 'fim' }]
+    expect(pageToMarkdown(p, [])).toContain('fim')
+    expect(() => pageToHtml(p, [])).not.toThrow()
+    expect(() => pageToText(p, [])).not.toThrow()
+  })
+})
+
+describe('exportação: vídeo, áudio, PDF e link para página', () => {
+  const page = (): NotePage => {
+    const w = new Workspace()
+    const p = w.page('p5')!
+    p.title = 'Teste'
+    p.content = [
+      { id: 'a', type: 'video', url: 'https://exemplo.com/aula.mp4?x=1&y=2', title: 'Aula <1>' },
+      { id: 'b', type: 'audio', url: 'https://exemplo.com/som.mp3', title: '' },
+      { id: 'c', type: 'pdf', url: 'https://exemplo.com/doc.pdf', title: 'Manual' },
+      { id: 'd', type: 'pagelink', pageId: 'p0', title: 'Rotina <x>' },
+      { id: 'e', type: 'pagelink', pageId: '', title: '' },
+      { id: 'f', type: 'video', url: '', title: '' },
+    ]
+    return p
+  }
+
+  it('markdown: tudo vira um link; texto simples: título e endereço; o link de página aponta para /notes/', () => {
+    const md = pageToMarkdown(page(), [])
+    expect(md).toContain('[Aula <1>](https://exemplo.com/aula.mp4?x=1&y=2)')
+    expect(md).toContain('[https://exemplo.com/som.mp3](https://exemplo.com/som.mp3)')
+    expect(md).toContain('[Manual](https://exemplo.com/doc.pdf)')
+    expect(md).toContain('[Rotina <x>](/notes/p0)')
+    const txt = pageToText(page(), [])
+    expect(txt).toContain('Manual (https://exemplo.com/doc.pdf)')
+    expect(txt).toContain('→ Rotina <x>')
+  })
+
+  it('html: player sem carregar nada sozinho, tudo escapado, e blocos vazios não deixam rastro', () => {
+    const html = pageToHtml(page(), [])
+    expect(html).toContain('<video controls preload="none" src="https://exemplo.com/aula.mp4?x=1&amp;y=2"></video><p>Aula &lt;1&gt;</p>')
+    expect(html).toContain('<audio controls preload="none" src="https://exemplo.com/som.mp3"></audio>')
+    expect(html).toContain('<a href="https://exemplo.com/doc.pdf" rel="noopener noreferrer">Manual</a>')
+    expect(html).toContain('<a href="/notes/p0">Rotina &lt;x&gt;</a>')
+    expect(html).not.toContain('<x>')
+    expect(html).not.toContain('<video controls preload="none" src=""')
+  })
+
+  it('JSON leva os campos como estão', () => {
+    const json = JSON.parse(pageToJson(page(), []))
+    expect(json.blocks.find((b: { id: string }) => b.id === 'd')).toMatchObject({ pageId: 'p0', title: 'Rotina <x>' })
+    expect(json.blocks.find((b: { id: string }) => b.id === 'a')).toMatchObject({ type: 'video', url: 'https://exemplo.com/aula.mp4?x=1&y=2' })
+  })
+})
+

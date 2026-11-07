@@ -6,6 +6,7 @@ import {
   moveItem,
   newId,
   MAX_BLOCKS,
+  MAX_INDENT,
   MAX_COL_WIDTH,
   MAX_COLS,
   MAX_ITEMS,
@@ -13,11 +14,17 @@ import {
   MAX_TEXT,
   MIN_COL_WIDTH,
   isTextType,
+  isTone,
+  isUrlBlock,
+  levelOf,
   type Block,
   type BlockType,
+  type CalloutTone,
+  type HeadingLevel,
 } from './blocks'
 import { isCover } from './cover'
 import { isEmoji } from './emoji'
+import { safeUrl } from './inline'
 import type { PermKey } from './permissions'
 import { MAX_TAG_NAME, type NotePage, type TagColor, type Workspace } from './workspace.svelte'
 
@@ -124,11 +131,11 @@ export class PageEditor {
   }
 
   /** Inserts a new block after `afterId` (or at the end when null). Returns it, or null at the block limit. */
-  insert(type: BlockType, afterId: string | null = null): Block | null {
+  insert(type: BlockType, afterId: string | null = null, opts: { level?: HeadingLevel; toggle?: boolean } = {}): Block | null {
     const p = this.page
     if (!p?.content || !this.can('blocks') || p.content.length >= MAX_BLOCKS) return null
     if (type === 'image' && !this.can('images')) return null
-    const block = makeBlock(type)
+    const block = makeBlock(type, opts)
     const found = afterId === null ? -1 : this.#index(afterId)
     const at = found < 0 ? p.content.length : found + 1
     p.content.splice(at, 0, block)
@@ -179,9 +186,12 @@ export class PageEditor {
   /** The same, with the two halves already cut (a rich-text engine knows where its marks begin and end). */
   splitText(id: string, head: string, tail: string): Block | null {
     const b = this.blocks.find((x) => x.id === id)
-    if (!b || !['paragraph', 'heading', 'quote', 'callout', 'toggle', 'spoiler'].includes(b.type) || !('text' in b) || !this.can('text')) return null
-    const made = this.insert('paragraph', id)
-    if (!made || made.type !== 'paragraph') return null
+    if (!b || !['paragraph', 'heading', 'quote', 'callout', 'toggle', 'spoiler', 'bullet', 'numbered'].includes(b.type) || !('text' in b) || !this.can('text')) return null
+    // Enter in a list item makes another item of the same list; anywhere else, a paragraph
+    const kind = b.type === 'bullet' || b.type === 'numbered' ? b.type : 'paragraph'
+    const made = this.insert(kind, id)
+    if (!made || made.type !== kind || !('text' in made)) return null
+    if ((b.type === 'bullet' || b.type === 'numbered') && (made.type === 'bullet' || made.type === 'numbered')) made.indent = b.indent ?? 0
     b.text = head.slice(0, MAX_TEXT)
     made.text = tail.slice(0, MAX_TEXT)
     this.#changed()
@@ -189,7 +199,8 @@ export class PageEditor {
   }
 
   setBody(id: string, body: string) {
-    const b = this.#block(id, 'toggle')
+    const found = this.blocks.find((x) => x.id === id)
+    const b = found?.type === 'toggle' || (found?.type === 'heading' && found.toggle) ? found : undefined
     if (b && this.can('text')) {
       b.body = body.slice(0, MAX_TEXT)
       this.#changed()
@@ -212,16 +223,88 @@ export class PageEditor {
   }
 
   /** Changes a text block into another kind of text block, keeping the words. Secrets and spoilers never convert. */
-  turnInto(id: string, type: 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle'): boolean {
+  turnInto(id: string, type: 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle' | 'bullet' | 'numbered', opts: { level?: HeadingLevel; toggle?: boolean } = {}): boolean {
     const p = this.page
     const i = this.#index(id)
     if (!p?.content || i < 0 || !this.can('blocks') || !this.can('text')) return false
     const b = p.content[i]
-    if (!isTextType(b.type) || b.type === type) return false
+    if (!isTextType(b.type)) return false
+    const level = opts.level ?? 2
+    const wantsToggle = type === 'heading' && !!opts.toggle
+    if (b.type === type && (type !== 'heading' || (levelOf(b as Of<'heading'>) === level && !!(b as Of<'heading'>).toggle === wantsToggle))) return false
     const text = (b as Of<'paragraph'>).text
-    p.content[i] = type === 'toggle' ? { id, type, text, body: '' } : { id, type, text }
+    p.content[i] =
+      type === 'toggle' ? { id, type, text, body: '' } : type === 'heading' ? { id, type, text, ...(level === 2 ? {} : { level }), ...(wantsToggle ? { toggle: true as const, body: (b.type === 'heading' ? (b.body ?? '') : '') } : {}) } : type === 'bullet' || type === 'numbered' ? { id, type, text, indent: 0 } : { id, type, text }
     this.#changed()
     return true
+  }
+
+  /** Nests a list item one level deeper (+1) or brings it back (-1). False when it cannot move. */
+  indent(id: string, delta: -1 | 1): boolean {
+    const b = this.blocks.find((x) => x.id === id)
+    if (!b || (b.type !== 'bullet' && b.type !== 'numbered') || !this.can('text')) return false
+    const next = Math.min(Math.max((b.indent ?? 0) + delta, 0), MAX_INDENT)
+    if (next === (b.indent ?? 0)) return false
+    b.indent = next
+    this.#changed()
+    return true
+  }
+
+  /** Enter on an empty list item: it comes out one level, and from the first level it stops being a list item. */
+  leaveList(id: string): boolean {
+    const b = this.blocks.find((x) => x.id === id)
+    if (!b || (b.type !== 'bullet' && b.type !== 'numbered')) return false
+    return (b.indent ?? 0) > 0 ? this.indent(id, -1) : this.turnInto(id, 'paragraph')
+  }
+
+  setTone(id: string, tone: CalloutTone) {
+    const b = this.#block(id, 'callout')
+    if (b && this.can('text') && isTone(tone)) {
+      if (tone === 'info') delete b.tone
+      else b.tone = tone
+      this.#changed()
+    }
+  }
+
+  /**
+   * Sets the address (and the title) of a link card, a video, an audio or a PDF. An address that is not safe is refused
+   * (false) and nothing changes; media and PDFs take http(s) only, since an e-mail address plays nothing.
+   */
+  setUrl(id: string, url: string, title = ''): boolean {
+    const b = this.blocks.find((x) => x.id === id)
+    const safe = safeUrl(url)
+    if (!b || !isUrlBlock(b) || !this.can('text') || !safe) return false
+    if (b.type !== 'bookmark' && !/^https?:/i.test(safe)) return false
+    b.url = safe
+    b.title = title.replace(/\s+/g, ' ').trim().slice(0, 200)
+    this.#changed()
+    return true
+  }
+
+  /** Points a page link at another page of the workspace. Not itself, not a page in the trash, not one in the vault. */
+  setPageLink(id: string, pageId: string): boolean {
+    const b = this.#block(id, 'pagelink')
+    const target = this.ws.page(pageId)
+    if (!b || !this.can('text') || !target || target.id === this.id || target.trashed || target.locked) return false
+    b.pageId = target.id
+    b.title = target.title
+    this.#changed()
+    return true
+  }
+
+  /**
+   * Keeps the name a page link remembers in step with the page (the card shows the live one; the remembered one goes into
+   * exports). A page that moved into the vault is forgotten by name, so an export never carries it out.
+   */
+  syncPageLink(id: string): void {
+    const b = this.#block(id, 'pagelink')
+    if (!b || !this.can('text')) return
+    const target = this.ws.page(b.pageId)
+    const name = !target ? b.title : target.locked ? '' : target.title
+    if (b.title !== name) {
+      b.title = name
+      this.#changed()
+    }
   }
 
   setIcon(icon: string) {

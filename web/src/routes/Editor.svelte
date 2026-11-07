@@ -13,6 +13,10 @@
   import PageProps from '../lib/components/editor/PageProps.svelte'
   import SelectionToolbar from '../lib/components/editor/SelectionToolbar.svelte'
   import ToggleBlock from '../lib/components/editor/ToggleBlock.svelte'
+  import TocBlock from '../lib/components/editor/TocBlock.svelte'
+  import BookmarkBlock from '../lib/components/editor/BookmarkBlock.svelte'
+  import MediaBlock from '../lib/components/editor/MediaBlock.svelte'
+  import PageLinkBlock from '../lib/components/editor/PageLinkBlock.svelte'
   import { applyEdit } from '../lib/components/editor/fieldEdit'
   import ShareModal from '../lib/components/editor/ShareModal.svelte'
   import SidePanel from '../lib/components/editor/SidePanel.svelte'
@@ -27,7 +31,7 @@
   import TextBlock from '../lib/components/editor/TextBlock.svelte'
   import { autosize, place } from '../lib/components/editor/autosize'
   import { ms } from '../lib/motion'
-  import { ago, isTextType, type Block, type BlockType } from '../lib/stores/blocks'
+  import { ago, isTextType, levelOf, numbering, toneOf, type Block, type BlockType, type HeadingLevel } from '../lib/stores/blocks'
   import { toggleMark, type Mark } from '../lib/stores/inline'
   import { barLock, instances, type RichInstance } from '../lib/components/editor/rich/engine'
   import { Dock, dockScale } from '../lib/stores/dock.svelte'
@@ -114,7 +118,18 @@
     secure: 'Bloco seguro',
     table: 'Tabela',
     image: 'Imagem',
+    bullet: 'Item de lista',
+    numbered: 'Item numerado',
+    toc: 'Sumário',
+    bookmark: 'Link',
+    pagelink: 'Link para página',
+    video: 'Vídeo',
+    audio: 'Áudio',
+    pdf: 'PDF',
   }
+  // the number each item of a numbered list shows, counted from the page's blocks (never stored)
+  const numbers = $derived(numbering(ed.blocks))
+  const BULLETS = ['•', '◦', '▪']
   /** Deleting cannot be undone when the trash is off, for a vault page, in the trash itself, or for a page I was given. */
   const permanent = $derived(!!page && (page.trashed || page.locked || page.sharedBy !== null || !ws.settings.useTrash))
 
@@ -177,7 +192,17 @@
   function estimateHeight(b: Block): number {
     switch (b.type) {
       case 'heading':
-        return 44
+        return levelOf(b) === 1 ? 56 : levelOf(b) === 3 ? 38 : 44
+      case 'toc':
+        return 90
+      case 'bookmark':
+      case 'pagelink':
+      case 'pdf':
+        return 76
+      case 'video':
+        return 300
+      case 'audio':
+        return 110
       case 'checklist':
         return 12 + 34 * b.items.length
       case 'table':
@@ -194,6 +219,8 @@
       case 'toggle':
       case 'spoiler':
       case 'secure':
+      case 'bullet':
+      case 'numbered':
         return Math.max(1, Math.ceil(b.text.length / 70)) * 28
     }
   }
@@ -219,11 +246,11 @@
     onback()
   }
 
-  function pick(type: BlockType, afterId: string | null) {
+  function pick(type: BlockType, afterId: string | null, opts: { level?: HeadingLevel } = {}) {
     const replace = replacing
     menuFor = null
     replacing = null
-    const made = ed.insert(type, afterId)
+    const made = ed.insert(type, afterId, opts)
     if (!made) return void toast.show('Limite de blocos da página atingido')
     if (replace) ed.remove(replace)
     void focusBlock(made.id, 'start')
@@ -536,12 +563,16 @@
               kind={block.type}
               canDuplicate={block.type !== 'image'}
               onduplicate={() => duplicateBlock(block.id)}
-              onturn={(t) => ed.turnInto(block.id, t)}
+              onturn={(t, o) => ed.turnInto(block.id, t, o)}
+              level={block.type === 'heading' ? levelOf(block) : 2}
+              headingToggle={block.type === 'heading' && !!block.toggle}
+              tone={block.type === 'callout' ? toneOf(block) : 'info'}
+              ontone={(t) => ed.setTone(block.id, t)}
               disabledTypes={ed.can('images') ? [] : ['image']}
               menuOpen={menuFor === block.id && replacing === null}
               dropEdge={edge(i)}
               onplus={() => ((replacing = null), (menuFor = menuFor === block.id ? null : block.id))}
-              onpick={(t) => pick(t, block.id)}
+              onpick={(t, o) => pick(t, block.id, o)}
               onclosemenu={() => ((menuFor = null), (replacing = null))}
               onmove={(d) => ed.moveBy(block.id, d)}
               onremove={() => removeBlock(block.id)}
@@ -555,12 +586,29 @@
             >
               {#if block.type === 'paragraph'}
                 <TextBlock {ed} {block} label="Parágrafo" onsplit={(n) => focusBlock(n, 'start')} onremove={removeBlock} onslash={slash} />
+              {:else if block.type === 'heading' && block.toggle}
+                <ToggleBlock {ed} {block} onsplit={(n) => focusBlock(n, 'start')} onremove={removeBlock} onslash={slash} />
               {:else if block.type === 'heading'}
                 <TextBlock {ed} {block} variant="heading" label="Título de seção" onsplit={(n) => focusBlock(n, 'start')} onremove={removeBlock} onslash={slash} />
               {:else if block.type === 'quote'}
                 <TextBlock {ed} {block} label="Citação" onsplit={(n) => focusBlock(n, 'start')} onremove={removeBlock} onslash={slash} />
               {:else if block.type === 'callout'}
                 <TextBlock {ed} {block} label="Destaque" onsplit={(n) => focusBlock(n, 'start')} onremove={removeBlock} onslash={slash} />
+              {:else if block.type === 'bullet' || block.type === 'numbered'}
+                <div class="flex items-start" style:padding-left="{(block.indent ?? 0) * 1.75}rem">
+                  <span class="w-7 shrink-0 pr-2 text-right text-[16.5px] leading-[1.68] text-muted select-none" aria-hidden="true">{block.type === 'bullet' ? BULLETS[(block.indent ?? 0) % BULLETS.length] : `${numbers.get(block.id) ?? 1}.`}</span>
+                  <div class="min-w-0 flex-1">
+                    <TextBlock {ed} {block} label={block.type === 'bullet' ? 'Item de lista' : 'Item numerado'} onsplit={(n) => focusBlock(n, 'start')} onremove={removeBlock} onslash={slash} />
+                  </div>
+                </div>
+              {:else if block.type === 'toc'}
+                <TocBlock {ed} onjump={jump} />
+              {:else if block.type === 'bookmark'}
+                <BookmarkBlock {ed} {block} />
+              {:else if block.type === 'video' || block.type === 'audio' || block.type === 'pdf'}
+                <MediaBlock {ed} {block} />
+              {:else if block.type === 'pagelink'}
+                <PageLinkBlock {ed} {block} {onopen} />
               {:else if block.type === 'toggle'}
                 <ToggleBlock {ed} {block} onsplit={(n) => focusBlock(n, 'start')} onremove={removeBlock} onslash={slash} />
               {:else if block.type === 'divider'}
@@ -582,7 +630,7 @@
               {/snippet}
             </Lazy>
             {#if menuFor === block.id && replacing === block.id}
-              <div class="relative -mt-3"><InsertMenu onpick={(t) => pick(t, block.id)} onclose={() => ((menuFor = null), (replacing = null))} disabled={ed.can('images') ? [] : ['image']} /></div>
+              <div class="relative -mt-3"><InsertMenu onpick={(t, o) => pick(t, block.id, o)} onclose={() => ((menuFor = null), (replacing = null))} disabled={ed.can('images') ? [] : ['image']} /></div>
             {/if}
           {/each}
 
@@ -602,7 +650,7 @@
                 placeholder="Escreva algo, ou digite “/” para inserir um bloco"
                 class="block w-full resize-none overflow-hidden bg-transparent text-[16.5px] leading-[1.68] placeholder:text-muted/70"
               ></textarea>
-              {#if menuFor === 'draft'}<InsertMenu onpick={(t) => pick(t, null)} onclose={() => (menuFor = null)} disabled={ed.can('images') ? [] : ['image']} />{/if}
+              {#if menuFor === 'draft'}<InsertMenu onpick={(t, o) => pick(t, null, o)} onclose={() => (menuFor = null)} disabled={ed.can('images') ? [] : ['image']} />{/if}
             </div>
           {/if}
         </div>

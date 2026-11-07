@@ -347,7 +347,7 @@ describe('PageEditor — permissões de quem recebeu a página', () => {
 
 describe('PageEditor — painel', () => {
   it('sumário, estatísticas e relacionadas acompanham a edição', () => {
-    expect(ed.outline).toEqual([{ id: 'r1', text: 'O que precisa acontecer antes do dia 31' }])
+    expect(ed.outline).toEqual([{ id: 'r1', text: 'O que precisa acontecer antes do dia 31', level: 2 }])
     const before = ed.stats.words
     ed.setText('r2', 'uma palavra só')
     expect(ed.stats.words).toBeLessThan(before)
@@ -489,3 +489,197 @@ describe('PageEditor — novos blocos, ícone e capa', () => {
     expect(ws.page(made.id)).toMatchObject({ icon: '📋', cover: 'musgo' })
   })
 })
+
+describe('PageEditor — títulos, listas, destaque e link', () => {
+  const add = (type: Parameters<PageEditor['insert']>[0], after: string | null = null, opts = {}) => ed.insert(type, after, opts)!
+
+  it('insere títulos nos três tamanhos', () => {
+    const a = add('heading', null, { level: 1 })
+    const b = add('heading', null, { level: 3 })
+    expect(a).toMatchObject({ type: 'heading', level: 1 })
+    expect(b).toMatchObject({ type: 'heading', level: 3 })
+  })
+
+  it('transforma um texto em título de cada tamanho, em lista e de volta, sem perder as palavras', () => {
+    const p = add('paragraph') as Extract<Block, { type: 'paragraph' }>
+    ed.setText(p.id, 'minhas palavras')
+    expect(ed.turnInto(p.id, 'heading', { level: 1 })).toBe(true)
+    expect(ed.blocks.at(-1)).toMatchObject({ type: 'heading', text: 'minhas palavras', level: 1 })
+    // the same kind and size again changes nothing; another size does
+    expect(ed.turnInto(p.id, 'heading', { level: 1 })).toBe(false)
+    expect(ed.turnInto(p.id, 'heading', { level: 3 })).toBe(true)
+    expect(ed.turnInto(p.id, 'heading')).toBe(true)
+    expect('level' in ed.blocks.at(-1)!).toBe(false)
+    expect(ed.turnInto(p.id, 'bullet')).toBe(true)
+    expect(ed.blocks.at(-1)).toMatchObject({ type: 'bullet', text: 'minhas palavras', indent: 0 })
+    expect(ed.turnInto(p.id, 'numbered')).toBe(true)
+    expect(ed.turnInto(p.id, 'paragraph')).toBe(true)
+    expect(ed.blocks.at(-1)).toEqual({ id: p.id, type: 'paragraph', text: 'minhas palavras' })
+  })
+
+  it('Enter no meio de um item de lista faz outro item da mesma lista, no mesmo nível', () => {
+    const item = add('bullet') as Extract<Block, { type: 'bullet' }>
+    ed.setText(item.id, 'abcdef')
+    ed.indent(item.id, 1)
+    const made = ed.splitText(item.id, 'abc', 'def')!
+    expect(made).toMatchObject({ type: 'bullet', text: 'def', indent: 1 })
+    expect(ed.blocks.at(-2)).toMatchObject({ text: 'abc', indent: 1 })
+    const numbered = add('numbered')
+    expect(ed.splitText(numbered.id, '', '')).toMatchObject({ type: 'numbered' })
+    // anywhere else a paragraph follows
+    const h = add('heading')
+    expect(ed.splitText(h.id, '', '')).toMatchObject({ type: 'paragraph' })
+  })
+
+  it('o recuo vai de 0 a 3 e nunca passa disso; só itens de lista recuam', () => {
+    const item = add('numbered') as Extract<Block, { type: 'numbered' }>
+    expect(ed.indent(item.id, -1)).toBe(false)
+    for (let i = 0; i < 3; i++) expect(ed.indent(item.id, 1)).toBe(true)
+    expect(ed.indent(item.id, 1)).toBe(false)
+    expect(item.indent).toBe(3)
+    expect(ed.indent(item.id, -1)).toBe(true)
+    expect(ed.indent(add('paragraph').id, 1)).toBe(false)
+    expect(ed.indent('não existe', 1)).toBe(false)
+  })
+
+  it('sair da lista: primeiro sobe um nível, no primeiro deixa de ser item', () => {
+    const item = add('bullet') as Extract<Block, { type: 'bullet' }>
+    ed.indent(item.id, 1)
+    expect(ed.leaveList(item.id)).toBe(true)
+    expect(ed.blocks.at(-1)).toMatchObject({ type: 'bullet', indent: 0 })
+    expect(ed.leaveList(item.id)).toBe(true)
+    expect(ed.blocks.at(-1)).toMatchObject({ type: 'paragraph' })
+    expect(ed.leaveList(item.id)).toBe(false)
+  })
+
+  it('o tom do destaque: o padrão não guarda nada, os outros ficam guardados, o inválido é recusado', () => {
+    const c = add('callout') as Extract<Block, { type: 'callout' }>
+    ed.setTone(c.id, 'warning')
+    expect(c.tone).toBe('warning')
+    ed.setTone(c.id, 'rosa' as never)
+    expect(c.tone).toBe('warning')
+    ed.setTone(c.id, 'info')
+    expect('tone' in c).toBe(false)
+  })
+
+  it('o link só aceita endereço seguro e guarda o título sem espaços sobrando', () => {
+    const b = add('bookmark') as Extract<Block, { type: 'bookmark' }>
+    expect(ed.setUrl(b.id, 'javascript:alert(1)')).toBe(false)
+    expect(ed.setUrl(b.id, 'não é endereço')).toBe(false)
+    expect(b.url).toBe('')
+    expect(ed.setUrl(b.id, 'exemplo.com/a b', '  Meu   site  ')).toBe(false)
+    expect(ed.setUrl(b.id, 'exemplo.com', '  Meu   site  ')).toBe(true)
+    expect(b).toMatchObject({ url: 'https://exemplo.com', title: 'Meu site' })
+    expect(ed.setUrl(b.id, 'x'.repeat(10), 'y'.repeat(900))).toBe(false)
+    ed.setUrl(b.id, 'https://a.com', 'y'.repeat(900))
+    expect(b.title).toHaveLength(200)
+  })
+
+  it('sem permissão de texto nada disso muda', () => {
+    const only = new PageEditor(ws, 's2')
+    expect(only.blocks.length).toBeGreaterThan(0)
+    const first = only.blocks[0]
+    expect(only.turnInto(first.id, 'bullet')).toBe(false)
+    expect(only.indent(first.id, 1)).toBe(false)
+    expect(only.insert('bullet')).toBeNull()
+    only.destroy()
+  })
+
+  it('duplicar um item de lista, um sumário ou um link copia o bloco com outra identidade', () => {
+    for (const type of ['bullet', 'numbered', 'toc', 'bookmark'] as const) {
+      const src = add(type)
+      const copy = ed.duplicateBlock(src.id)!
+      expect(copy.type).toBe(type)
+      expect(copy.id).not.toBe(src.id)
+    }
+  })
+})
+
+describe('PageEditor — título com toggle', () => {
+  it('insere, escreve o texto escondido e transforma de volta sem perder o título', () => {
+    const h = ed.insert('heading', null, { level: 2, toggle: true })!
+    expect(h).toMatchObject({ type: 'heading', toggle: true, body: '' })
+    ed.setText(h.id, 'Seção')
+    ed.setBody(h.id, 'escondido')
+    expect(ed.blocks.at(-1)).toMatchObject({ text: 'Seção', body: 'escondido' })
+    // another size keeps the hidden text; turning the toggle off drops it
+    expect(ed.turnInto(h.id, 'heading', { level: 1, toggle: true })).toBe(true)
+    expect(ed.blocks.at(-1)).toMatchObject({ level: 1, toggle: true, body: 'escondido' })
+    expect(ed.turnInto(h.id, 'heading', { level: 1, toggle: true })).toBe(false)
+    expect(ed.turnInto(h.id, 'heading', { level: 1 })).toBe(true)
+    expect('toggle' in ed.blocks.at(-1)!).toBe(false)
+    expect('body' in ed.blocks.at(-1)!).toBe(false)
+  })
+
+  it('um título que não é toggle não ganha texto escondido por setBody', () => {
+    const h = ed.insert('heading')!
+    ed.setBody(h.id, 'solto')
+    expect('body' in h).toBe(false)
+  })
+})
+
+describe('PageEditor — endereços, mídia e link para página', () => {
+  const add = (type: Parameters<PageEditor['insert']>[0]) => ed.insert(type)!
+
+  it('vídeo, áudio e PDF só aceitam http e https; o link aceita também e-mail', () => {
+    for (const type of ['video', 'audio', 'pdf'] as const) {
+      const b = add(type) as Extract<Block, { type: 'video' | 'audio' | 'pdf' }>
+      expect(ed.setUrl(b.id, 'mailto:a@b.com')).toBe(false)
+      expect(ed.setUrl(b.id, 'javascript:alert(1)')).toBe(false)
+      expect(ed.setUrl(b.id, 'data:video/mp4;base64,AAAA')).toBe(false)
+      expect(ed.setUrl(b.id, 'file:///etc/passwd')).toBe(false)
+      expect(b.url).toBe('')
+      expect(ed.setUrl(b.id, 'https://a.com/x', ' Meu  arquivo ')).toBe(true)
+      expect(b).toMatchObject({ url: 'https://a.com/x', title: 'Meu arquivo' })
+    }
+    const link = add('bookmark') as Extract<Block, { type: 'bookmark' }>
+    expect(ed.setUrl(link.id, 'ana@exemplo.com')).toBe(true)
+    expect(link.url).toBe('mailto:ana@exemplo.com')
+  })
+
+  it('setUrl não mexe em blocos de outro tipo nem em blocos que não existem', () => {
+    const p = add('paragraph')
+    expect(ed.setUrl(p.id, 'https://a.com')).toBe(false)
+    expect(ed.setUrl('nada', 'https://a.com')).toBe(false)
+  })
+
+  it('o link para página guarda a página e o nome dela; recusa a própria, a da lixeira, a do cofre e a que não existe', () => {
+    const l = add('pagelink') as Extract<Block, { type: 'pagelink' }>
+    expect(ed.setPageLink(l.id, 'p0')).toBe(false)
+    expect(ed.setPageLink(l.id, 'não existe')).toBe(false)
+    const locked = ws.pages.find((p) => p.locked)!
+    expect(ed.setPageLink(l.id, locked.id)).toBe(false)
+    ws.trash('p5')
+    expect(ed.setPageLink(l.id, 'p5')).toBe(false)
+    ws.restore('p5')
+    expect(ed.setPageLink(l.id, 'p5')).toBe(true)
+    expect(l).toMatchObject({ pageId: 'p5', title: ws.page('p5')!.title })
+  })
+
+  it('o nome lembrado acompanha a página, e uma página que foi para o cofre é esquecida pelo nome', () => {
+    const l = add('pagelink') as Extract<Block, { type: 'pagelink' }>
+    ed.setPageLink(l.id, 'p5')
+    ws.page('p5')!.title = 'Novo nome'
+    ed.syncPageLink(l.id)
+    expect(l.title).toBe('Novo nome')
+    ws.page('p5')!.locked = true
+    ed.syncPageLink(l.id)
+    expect(l.title).toBe('')
+    ws.page('p5')!.locked = false
+    // a page that no longer exists keeps the last name
+    ws.page('p5')!.title = 'Último nome'
+    ed.syncPageLink(l.id)
+    ws.pages.splice(ws.pages.findIndex((p) => p.id === 'p5'), 1)
+    ed.syncPageLink(l.id)
+    expect(l.title).toBe('Último nome')
+  })
+
+  it('sem permissão de texto nada disso muda', () => {
+    const only = new PageEditor(ws, 's2')
+    const b = only.blocks[0]
+    expect(only.setUrl(b.id, 'https://a.com')).toBe(false)
+    expect(only.setPageLink(b.id, 'p5')).toBe(false)
+    only.destroy()
+  })
+})
+

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ago, blockText, outline, pageStats, wordCount, checklistProgress, excerptOf, makeBlock, moveItem, newId, type Block } from './blocks'
+import { MAX_INDENT, TONES, isDirectMedia, isUrlBlock, ago, blockText, isTextType, isTone, levelOf, numbering, outline, toneOf, pageStats, wordCount, checklistProgress, excerptOf, makeBlock, moveItem, newId, type Block } from './blocks'
 
 describe('blocks', () => {
   it('moveItem usa o vão de soltar: antes do item, não o índice final', () => {
@@ -96,7 +96,122 @@ describe('blocks', () => {
       { id: 'p', type: 'paragraph', text: 'texto' },
       { id: 'h2', type: 'heading', text: '   ' },
     ]
-    expect(outline(blocks)).toEqual([{ id: 'h1', text: 'Primeiro título' }, { id: 'h2', text: 'Sem título' }])
+    expect(outline(blocks)).toEqual([{ id: 'h1', text: 'Primeiro título', level: 2 }, { id: 'h2', text: 'Sem título', level: 2 }])
     expect(outline([])).toEqual([])
   })
 })
+
+describe('blocos novos: títulos de três tamanhos, listas, sumário e link', () => {
+  it('um título antigo, sem nível, é o do meio; o menu cria os outros', () => {
+    expect(levelOf({})).toBe(2)
+    expect(makeBlock('heading')).toMatchObject({ type: 'heading', text: '' })
+    expect('level' in makeBlock('heading')).toBe(false)
+    expect(makeBlock('heading', { level: 1 })).toMatchObject({ level: 1 })
+    expect(makeBlock('heading', { level: 3 })).toMatchObject({ level: 3 })
+    expect('level' in makeBlock('heading', { level: 2 })).toBe(false)
+  })
+
+  it('cada tipo novo nasce vazio e válido', () => {
+    expect(makeBlock('bullet')).toMatchObject({ type: 'bullet', text: '', indent: 0 })
+    expect(makeBlock('numbered')).toMatchObject({ type: 'numbered', text: '', indent: 0 })
+    expect(makeBlock('toc')).toMatchObject({ type: 'toc' })
+    expect(makeBlock('bookmark')).toMatchObject({ type: 'bookmark', url: '', title: '' })
+    expect(isTextType('bullet') && isTextType('numbered')).toBe(true)
+    expect(isTextType('toc') || isTextType('bookmark')).toBe(false)
+  })
+
+  it('o texto de uma lista conta para o resumo e a busca; o sumário nunca; o link só pelo título', () => {
+    expect(blockText({ id: 'a', type: 'bullet', text: 'um item' })).toBe('um item')
+    expect(blockText({ id: 'a', type: 'numbered', text: 'outro' })).toBe('outro')
+    expect(blockText({ id: 'a', type: 'toc' })).toBe('')
+    expect(blockText({ id: 'a', type: 'bookmark', url: 'https://a.com', title: 'Site' })).toBe('Site')
+    expect(excerptOf([{ id: 'a', type: 'toc' }, { id: 'b', type: 'bullet', text: 'primeiro item' }])).toBe('primeiro item')
+  })
+
+  it('o sumário traz o tamanho de cada título', () => {
+    const blocks: Block[] = [
+      { id: 'a', type: 'heading', text: 'Grande', level: 1 },
+      { id: 'b', type: 'heading', text: 'Médio' },
+      { id: 'c', type: 'heading', text: 'Pequeno', level: 3 },
+    ]
+    expect(outline(blocks).map((o) => o.level)).toEqual([1, 2, 3])
+  })
+
+  it('tons de destaque: o padrão é a nota, e só os quatro existem', () => {
+    expect(toneOf({})).toBe('info')
+    expect(TONES.map((t) => t.key)).toEqual(['info', 'success', 'warning', 'danger'])
+    expect(isTone('warning') && !isTone('rosa') && !isTone(undefined) && !isTone(1)).toBe(true)
+  })
+})
+
+describe('numeração das listas', () => {
+  const n = (type: 'numbered' | 'bullet' | 'paragraph', id: string, indent = 0): Block => (type === 'paragraph' ? { id, type, text: '' } : { id, type, text: '', indent })
+
+  it('conta de um em um e recomeça depois de qualquer bloco que não seja da lista', () => {
+    const out = numbering([n('numbered', 'a'), n('numbered', 'b'), n('paragraph', 'p'), n('numbered', 'c'), n('numbered', 'd')])
+    expect([...out.values()]).toEqual([1, 2, 1, 2])
+  })
+
+  it('um nível mais fundo conta por conta própria e recomeça sob cada item novo', () => {
+    const out = numbering([n('numbered', 'a'), n('numbered', 'a1', 1), n('numbered', 'a2', 1), n('numbered', 'b'), n('numbered', 'b1', 1), n('numbered', 'c')])
+    expect([...out.entries()]).toEqual([['a', 1], ['a1', 1], ['a2', 2], ['b', 2], ['b1', 1], ['c', 3]])
+  })
+
+  it('um item com marcador entre os numerados corta a contagem do nível dele, mas não a do nível de fora', () => {
+    const out = numbering([n('numbered', 'a'), n('bullet', 'x', 1), n('numbered', 'b'), n('bullet', 'y'), n('numbered', 'c')])
+    expect([...out.entries()]).toEqual([['a', 1], ['b', 2], ['c', 1]])
+  })
+
+  it('um item que pula níveis, ou um nível fora do limite, não quebra a conta', () => {
+    const out = numbering([n('numbered', 'a', 3), n('numbered', 'b', 99), n('numbered', 'c', -4)])
+    expect(out.get('a')).toBe(1)
+    expect(out.get('b')).toBe(2)
+    expect(out.get('c')).toBe(1)
+    expect(MAX_INDENT).toBe(3)
+    expect(numbering([]).size).toBe(0)
+  })
+
+  it('é rápida mesmo com a página cheia', () => {
+    const blocks = Array.from({ length: 500 }, (_, i) => n('numbered', `n${i}`, i % 4))
+    const t0 = performance.now()
+    for (let i = 0; i < 200; i++) numbering(blocks)
+    expect(performance.now() - t0).toBeLessThan(1000)
+  })
+})
+
+describe('título com toggle', () => {
+  it('nasce com o texto escondido vazio, em qualquer tamanho, e o texto escondido conta para a busca', () => {
+    expect(makeBlock('heading', { level: 3, toggle: true })).toMatchObject({ type: 'heading', level: 3, toggle: true, body: '' })
+    expect(makeBlock('heading', { toggle: true })).toMatchObject({ toggle: true, body: '' })
+    expect('toggle' in makeBlock('heading', { level: 1 })).toBe(false)
+    expect(blockText({ id: 'a', type: 'heading', text: 'Seção', toggle: true, body: 'dentro' })).toBe('Seção dentro')
+    expect(blockText({ id: 'a', type: 'heading', text: 'Seção' })).toBe('Seção')
+  })
+})
+
+describe('link para página, vídeo, áudio e PDF', () => {
+  it('nascem vazios e válidos', () => {
+    expect(makeBlock('pagelink')).toMatchObject({ type: 'pagelink', pageId: '', title: '' })
+    for (const t of ['video', 'audio', 'pdf'] as const) expect(makeBlock(t)).toMatchObject({ type: t, url: '', title: '' })
+    expect(isUrlBlock(makeBlock('video')) && isUrlBlock(makeBlock('bookmark')) && !isUrlBlock(makeBlock('pagelink')) && !isUrlBlock(makeBlock('image'))).toBe(true)
+  })
+
+  it('o título deles entra no resumo e na busca, o endereço não', () => {
+    expect(blockText({ id: 'a', type: 'video', url: 'https://a.com/v.mp4', title: 'Aula' })).toBe('Aula')
+    expect(blockText({ id: 'a', type: 'pdf', url: 'https://a.com/x.pdf', title: '' })).toBe('')
+    expect(blockText({ id: 'a', type: 'pagelink', pageId: 'p1', title: 'Outra' })).toBe('Outra')
+  })
+
+  it('só um endereço direto para um arquivo toca; uma página de player (YouTube) não', () => {
+    expect(isDirectMedia('video', 'https://a.com/x/aula.MP4?token=1')).toBe(true)
+    expect(isDirectMedia('video', 'https://a.com/aula.webm')).toBe(true)
+    expect(isDirectMedia('video', 'https://www.youtube.com/watch?v=abc')).toBe(false)
+    expect(isDirectMedia('video', 'https://a.com/aula.mp3')).toBe(false)
+    expect(isDirectMedia('audio', 'https://a.com/som.mp3')).toBe(true)
+    expect(isDirectMedia('audio', 'https://a.com/som.flac')).toBe(true)
+    expect(isDirectMedia('audio', 'https://a.com/aula.mp4')).toBe(false)
+    expect(isDirectMedia('audio', 'não é endereço.mp3')).toBe(false)
+    expect(isDirectMedia('video', '')).toBe(false)
+  })
+})
+
