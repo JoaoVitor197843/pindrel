@@ -67,7 +67,7 @@ Future<FakeDiscovery> pumpApp(
           (_) async => tls ? const TlsOffer(port: 8443, serverId: 'srv') : null,
         ),
       ],
-      child: home == null ? const PindrelApp() : MaterialApp(home: home),
+      child: home == null ? const PindrelApp(home: AuthPage()) : MaterialApp(home: home),
     ),
   );
   await tester.pump(); // delivers the discovery's first list

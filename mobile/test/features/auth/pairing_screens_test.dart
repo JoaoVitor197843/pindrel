@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/app.dart';
+import 'package:mobile/features/auth/presentation/pages/auth_page.dart';
 import 'package:mobile/core/network/pairing.dart';
 import 'package:mobile/core/network/server_security.dart';
 import 'package:mobile/core/theme/app_theme.dart';
@@ -46,7 +47,7 @@ Future<ProviderContainer> pump(
           return tls ? const TlsOffer(port: 8443) : null;
         }),
       ],
-      child: const PindrelApp(),
+      child: const PindrelApp(home: AuthPage()),
     ),
   );
   for (var i = 0; i < 5; i++) {
