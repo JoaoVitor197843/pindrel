@@ -954,7 +954,11 @@ class _TagBarState extends State<TagBar> {
   }
 }
 
-/// The little tab on the edge of the screen that opens a side panel.
+enum DockKind { rail, edge }
+
+/// The arrow that opens or closes a side panel. `rail`: round, in the strip of a panel (or beside a drawer), in the middle
+/// of its height. `edge`: a tab stuck to the edge of the screen. It points toward the edge to close and toward the page
+/// to open.
 class DockToggle extends StatelessWidget {
   const DockToggle({
     super.key,
@@ -962,40 +966,73 @@ class DockToggle extends StatelessWidget {
     required this.open,
     required this.label,
     required this.onTap,
+    this.kind = DockKind.rail,
   });
   final bool left, open;
   final String label;
   final VoidCallback onTap;
+  final DockKind kind;
+
   @override
-  Widget build(BuildContext context) => Tooltip(
-    message: label,
-    child: Semantics(
-      button: true,
-      label: label,
-      child: RingInkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.horizontal(
-          left: left ? Radius.zero : const Radius.circular(fieldRadius),
-          right: left ? const Radius.circular(fieldRadius) : Radius.zero,
-        ),
-        child: Container(
-          width: 32,
-          height: 64,
-          decoration: BoxDecoration(
-            color: AppColors.surface.withValues(alpha: 0.85),
-            border: Border.all(color: AppColors.border),
-            borderRadius: BorderRadius.horizontal(
-              left: left ? Radius.zero : const Radius.circular(fieldRadius),
-              right: left ? const Radius.circular(fieldRadius) : Radius.zero,
+  Widget build(BuildContext context) {
+    final icon = left == open ? Icons.chevron_left : Icons.chevron_right;
+    final edge = kind == DockKind.edge;
+    final radius = edge
+        ? BorderRadius.horizontal(
+            left: left ? Radius.zero : const Radius.circular(16),
+            right: left ? const Radius.circular(16) : Radius.zero,
+          )
+        : BorderRadius.circular(99);
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        expanded: open,
+        label: label,
+        child: FocusRing(
+          radius: edge ? 16 : 22,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: radius,
+            child: Container(
+              width: edge ? 32 : 44,
+              height: edge ? 64 : 44,
+              decoration: BoxDecoration(
+                color: edge
+                    ? AppColors.surface.withValues(alpha: 0.9)
+                    : AppColors.surface,
+                borderRadius: radius,
+                border: edge
+                    ? Border(
+                        top: const BorderSide(color: AppColors.border),
+                        bottom: const BorderSide(color: AppColors.border),
+                        left: left
+                            ? BorderSide.none
+                            : const BorderSide(color: AppColors.border),
+                        right: left
+                            ? const BorderSide(color: AppColors.border)
+                            : BorderSide.none,
+                      )
+                    : Border.all(color: AppColors.border),
+                boxShadow: edge
+                    ? null
+                    : const [
+                        BoxShadow(
+                          color: Color(0x33000000),
+                          blurRadius: 2,
+                          offset: Offset(0, 1),
+                        ),
+                      ],
+              ),
+              child: Icon(
+                icon,
+                size: edge ? 20 : 22,
+                color: AppColors.textMuted,
+              ),
             ),
-          ),
-          child: Icon(
-            left == open ? Icons.chevron_left : Icons.chevron_right,
-            size: 18,
-            color: AppColors.textMuted,
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }

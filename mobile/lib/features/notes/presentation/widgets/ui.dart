@@ -154,12 +154,16 @@ class OutlineTextButton extends StatelessWidget {
     this.height = 40,
     this.danger = false,
     this.compact = false,
+    this.expand = false,
   });
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
   final double height;
   final bool danger, compact;
+
+  /// Fills the width it is given, with the icon and the text at the start (the panels' action buttons).
+  final bool expand;
   @override
   Widget build(BuildContext context) {
     final color = danger ? AppColors.offlineText : AppColors.text;
@@ -179,7 +183,7 @@ class OutlineTextButton extends StatelessWidget {
             ),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
             children: [
               if (icon != null) ...[
                 Icon(icon, size: 16, color: color),
@@ -512,9 +516,12 @@ abstract final class KeyboardMode {
 
 /// The ring around whatever has the keyboard focus (2 px, the accent colour, 2 px off its edge), only after a key press.
 class FocusRing extends StatefulWidget {
-  const FocusRing({super.key, required this.child, this.radius = fieldRadius});
+  const FocusRing({super.key, required this.child, this.radius = fieldRadius, this.always = false});
   final Widget child;
   final double radius;
+
+  /// A text field shows its ring however it was reached (a click too), as the browser does for a field; a button, only after a key.
+  final bool always;
   @override
   State<FocusRing> createState() => _FocusRingState();
 }
@@ -539,7 +546,7 @@ class _FocusRingState extends State<FocusRing> {
         clipBehavior: Clip.none,
         children: [
           child!,
-          if (_focused && keyboard)
+          if (_focused && (keyboard || widget.always))
             Positioned(
               left: -4,
               top: -4,

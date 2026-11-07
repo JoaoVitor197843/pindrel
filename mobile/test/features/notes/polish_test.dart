@@ -299,4 +299,149 @@ void main() {
       expect(tester.getSize(find.byKey(const Key('page-card'))).height, lessThan(200));
     });
   });
+
+  group('borda do foco nos blocos', () {
+    testWidgets('um clique num bloco de texto mostra a borda (campo de texto), sem precisar do teclado', (tester) async {
+      ws.page(pid)!.content = [Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')];
+      await pump(tester, EditorPage(ws: ws, pageId: pid));
+      expect(find.byKey(const Key('focus-ring')), findsNothing);
+      await tester.tap(find.widgetWithText(TextField, 'dois'));
+      await tester.pump();
+      expect(KeyboardMode.active.value, false);
+      expect(find.byKey(const Key('focus-ring')), findsAtLeastNWidgets(1));
+      final ring = tester.getRect(find.byKey(const Key('focus-ring')).first);
+      final field = tester.getRect(find.widgetWithText(TextField, 'dois'));
+      // 2 px of border drawn 2 px off the edge: the ring sits outside the field on every side
+      expect(ring.left, lessThan(field.left));
+      expect(ring.right, greaterThan(field.right));
+      expect(ring.top, lessThan(field.top));
+      expect(ring.bottom, greaterThan(field.bottom));
+    });
+    testWidgets('só o bloco com o foco tem a borda, e ela some quando o foco sai', (tester) async {
+      ws.page(pid)!.content = [Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')];
+      await pump(tester, EditorPage(ws: ws, pageId: pid));
+      await tester.tap(find.widgetWithText(TextField, 'um'));
+      await tester.pump();
+      final before = find.byKey(const Key('focus-ring')).evaluate().length;
+      await tester.tap(find.widgetWithText(TextField, 'dois'));
+      await tester.pump();
+      expect(find.byKey(const Key('focus-ring')).evaluate().length, before);
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pump();
+      expect(find.byKey(const Key('focus-ring')), findsNothing);
+    });
+    testWidgets('o título e os campos de uma tarefa também ganham a borda', (tester) async {
+      ws.page(pid)!.content = [makeBlock(BlockType.checklist)];
+      await pump(tester, EditorPage(ws: ws, pageId: pid));
+      await tester.tap(find.widgetWithText(TextField, 'Tarefa'));
+      await tester.pump();
+      expect(find.byKey(const Key('focus-ring')), findsAtLeastNWidgets(1));
+      await tester.tap(find.widgetWithText(TextField, 'Minha página'));
+      await tester.pump();
+      expect(find.byKey(const Key('focus-ring')), findsAtLeastNWidgets(1));
+    });
+    testWidgets('um botão clicado com o mouse continua sem borda', (tester) async {
+      await pump(tester, DashboardPage(ws: ws));
+      await tester.tap(find.byTooltip('Lista'));
+      await tester.pump();
+      expect(find.byKey(const Key('focus-ring')), findsNothing);
+    });
+  });
+
+  group('setas dos painéis', () {
+    testWidgets('encostados: setas redondas de 44 px na faixa de cada painel, no meio da área da página', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(1500, 900));
+      final close = find.byTooltip('Fechar painel');
+      expect(tester.getSize(close), const Size(44, 44));
+      // beside the panel, near the screen's edge: the right strip is the last 48 px
+      expect(tester.getCenter(close).dx, greaterThan(1500 - 48));
+      final area = tester.getRect(find.byType(CustomScrollView).evaluate().isEmpty ? find.byType(ReorderableListView) : find.byType(CustomScrollView));
+      expect(tester.getCenter(close).dy, closeTo(area.center.dy, 2));
+    });
+    testWidgets('as setas apontam para fora para fechar e para dentro para abrir', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(1500, 900));
+      IconData iconOf(String tooltip) => tester.widget<Icon>(find.descendant(of: find.byTooltip(tooltip), matching: find.byType(Icon))).icon!;
+      expect(iconOf('Fechar painel'), Icons.chevron_right);
+      expect(iconOf('Fechar propriedades'), Icons.chevron_left);
+      await tester.tap(find.byTooltip('Fechar painel'));
+      await tester.tap(find.byTooltip('Fechar propriedades'));
+      await tester.pumpAndSettle();
+      expect(iconOf('Abrir painel'), Icons.chevron_left);
+      expect(iconOf('Abrir propriedades'), Icons.chevron_right);
+    });
+    testWidgets('janela estreita: abas de 32x64 coladas nas bordas, no meio da JANELA (cabeçalho incluso)', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(900, 800));
+      final open = find.byTooltip('Abrir painel');
+      expect(tester.getSize(open), const Size(32, 64));
+      expect(tester.getTopRight(open).dx, 900);
+      expect(tester.getCenter(open).dy, closeTo(400, 1));
+      final left = find.byTooltip('Abrir propriedades');
+      expect(tester.getTopLeft(left).dx, 0);
+      expect(tester.getCenter(left).dy, closeTo(400, 1));
+    });
+    testWidgets('a gaveta abre com fundo escuro, a seta redonda ao lado dela, e fecha por qualquer um dos dois', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(900, 800));
+      await tester.tap(find.byTooltip('Abrir painel'));
+      await tester.pumpAndSettle();
+      expect(find.text('Painel'), findsOneWidget);
+      expect(find.byTooltip('Abrir painel'), findsNothing, reason: 'the edge tab goes away while a drawer is open');
+      final close = find.byTooltip('Fechar painel');
+      expect(tester.getSize(close), const Size(44, 44));
+      // the arrow stands in a 56 px strip on the page side of the drawer (352 px wide: the drawer is cut at 80% of narrow windows)
+      expect(tester.getCenter(close).dx, closeTo(900 - 352 - 28, 1));
+      await tester.tap(close);
+      await tester.pumpAndSettle();
+      expect(find.text('Painel'), findsNothing);
+      await tester.tap(find.byTooltip('Abrir propriedades'));
+      await tester.pumpAndSettle();
+      expect(find.text('Propriedades'), findsOneWidget);
+      await tester.tapAt(const Offset(700, 400));
+      await tester.pumpAndSettle();
+      expect(find.text('Propriedades'), findsNothing);
+    });
+    testWidgets('em tela de celular a gaveta ocupa no máximo 80% da largura', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(400, 800));
+      await tester.tap(find.byTooltip('Abrir propriedades'));
+      await tester.pumpAndSettle();
+      final title = tester.getTopLeft(find.text('Propriedades'));
+      expect(title.dx, lessThan(400 * 0.8));
+      final arrow = tester.getCenter(find.byTooltip('Fechar propriedades'));
+      expect(arrow.dx, closeTo(400 * 0.8 + 28, 1));
+    });
+    testWidgets('abrir uma gaveta e escolher um título do painel leva até ele e fecha a gaveta', (tester) async {
+      ws.page(pid)!.content = [Block('h', BlockType.heading, text: 'Capítulo um', level: 1), for (var i = 0; i < 20; i++) Block('p$i', BlockType.paragraph, text: 'linha $i')];
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(900, 800));
+      await tester.tap(find.byTooltip('Abrir painel'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Capítulo um').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Painel'), findsNothing);
+    });
+    testWidgets('no menu "⋯" do celular, Propriedades e Painel abrem as gavetas', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(400, 800));
+      await tester.tap(find.byTooltip('Mais opções da página'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Painel'));
+      await tester.pumpAndSettle();
+      expect(find.text('NESTA PÁGINA'), findsOneWidget);
+    });
+    testWidgets('em tela pequena demais para as abas, o menu "⋯" do cabeçalho abre as gavetas', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(340, 800));
+      expect(find.byTooltip('Abrir painel'), findsNothing);
+      await tester.tap(find.byTooltip('Mais opções da página'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Painel'));
+      await tester.pumpAndSettle();
+      expect(find.text('NESTA PÁGINA'), findsOneWidget);
+    });
+  });
+
+  group('botões de ação do painel', () {
+    testWidgets('ocupam a largura do painel, como na web', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(1500, 900));
+      final pin = find.ancestor(of: find.text('Fixar página'), matching: find.byType(Container)).first;
+      final panelInner = 240.0 - 32;
+      expect(tester.getRect(pin).width, closeTo(panelInner, 1));
+    });
+  });
 }
