@@ -40,6 +40,20 @@ const lazies = () => [...document.querySelectorAll<HTMLElement>('[data-lazy]')]
 const drawn = () => lazies().filter((l) => l.dataset.lazy === 'drawn')
 const show = (els: Element[], isIntersecting: boolean) => report(els.map((target) => ({ target, isIntersecting })))
 
+describe('seedLoad com todos os tipos de bloco (só para medir memória)', () => {
+  it('?kinds=mixed enche a página com um de cada tipo, todos válidos e sem repetir identidade', () => {
+    const ws = new Workspace()
+    seedLoad(ws, new URLSearchParams('blocks=400&kinds=mixed'))
+    const content = ws.page('p0')!.content!
+    const types = new Set(content.map((b) => b.type))
+    for (const t of ['heading', 'bullet', 'numbered', 'callout', 'toc', 'bookmark', 'pagelink', 'video', 'audio', 'pdf', 'quote', 'toggle', 'paragraph']) expect(types.has(t as never), t).toBe(true)
+    expect(new Set(content.map((b) => b.id)).size).toBe(content.length)
+    // the page links point at pages that exist
+    for (const b of content) if (b.type === 'pagelink') expect(ws.page(b.pageId)).toBeTruthy()
+    for (const b of content) if (b.type === 'heading') expect([1, 2, 3]).toContain(b.level ?? 2)
+  })
+})
+
 describe('seedLoad (só para medir memória)', () => {
   it('cria as páginas e os blocos pedidos, sem chaves repetidas', () => {
     const ws = new Workspace()

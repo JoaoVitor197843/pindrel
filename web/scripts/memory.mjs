@@ -34,6 +34,12 @@ const SCENARIOS = [
 
 // A focused block loads the rich-text editor (TipTap) and mounts it: the cost of editing, on top of the page itself
 const FOCUS = "document.querySelector('[data-view]')?.focus()"
+// every kind of block (titles, lists, callouts, toggles, links, media, page links), not only paragraphs
+SCENARIOS.push(
+  ['misto, 3000 blocos', '/notes/p0?tela=painel&blocks=3000&kinds=mixed', true],
+  ['misto, 6000 blocos', '/notes/p0?tela=painel&blocks=6000&kinds=mixed', true],
+  ['misto, 6000 blocos, em edição', '/notes/p0?tela=painel&blocks=6000&kinds=mixed', true, FOCUS],
+)
 SCENARIOS.push(
   ['exemplo, bloco em edição', '/notes/p0?tela=painel', true, FOCUS],
   ['3000 blocos, bloco em edição', '/notes/p0?tela=painel&blocks=3000', true, FOCUS],
