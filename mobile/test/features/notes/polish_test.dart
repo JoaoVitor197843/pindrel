@@ -444,4 +444,31 @@ void main() {
       expect(tester.getRect(pin).width, closeTo(panelInner, 1));
     });
   });
+
+  group('setas com o painel fechado, em janela grande (captura de tela do Linux)', () {
+    testWidgets('a seta do painel fechado fica colada na borda direita, e a das propriedades na esquerda', (tester) async {
+      for (final w in [1400.0, 1868.0, 2560.0]) {
+        // a fresh page each time: the same widget in the same place would keep the choice made before
+        await tester.pumpWidget(const SizedBox());
+        await pump(tester, EditorPage(ws: ws, pageId: pid), size: Size(w, 1000));
+        final rail = 48 * dockScale(w);
+        expect(find.byTooltip('Fechar painel'), findsOneWidget, reason: 'largura $w: painel aberto');
+        await tester.tap(find.byTooltip('Fechar painel'));
+        await tester.pumpAndSettle();
+        final right = tester.getCenter(find.byTooltip('Abrir painel')).dx;
+        expect(right, greaterThan(w - rail), reason: 'largura $w: a seta tem de estar na faixa da borda direita');
+        expect(find.byTooltip('Fechar propriedades'), findsOneWidget, reason: 'largura $w: propriedades abertas');
+        await tester.tap(find.byTooltip('Fechar propriedades'));
+        await tester.pumpAndSettle();
+        final left = tester.getCenter(find.byTooltip('Abrir propriedades')).dx;
+        expect(left, lessThan(rail), reason: 'largura $w: a seta tem de estar na faixa da borda esquerda');
+      }
+    });
+    testWidgets('com o painel aberto a seta continua na borda, ao lado dele', (tester) async {
+      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(1868, 1000));
+      final rail = 48 * dockScale(1868);
+      expect(tester.getCenter(find.byTooltip('Fechar painel')).dx, greaterThan(1868 - rail));
+      expect(tester.getCenter(find.byTooltip('Fechar propriedades')).dx, lessThan(rail));
+    });
+  });
 }
