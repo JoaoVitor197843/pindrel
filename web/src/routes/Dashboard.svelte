@@ -53,6 +53,11 @@
   const filtering = $derived(!!ws.query.trim() || !!ws.tagFilter)
   const email = $derived(`${userName.trim().split(/\s+/)[0]?.toLowerCase() || 'conta'}@${server}`)
 
+  // offline there is no "shared with me" list to stay on
+  $effect(() => {
+    if (ws.offline && ws.view === 'shared') ws.go('all')
+  })
+
   // a layout change must not leave the drawer or the rail stuck open
   $effect(() => {
     if (desktop.current) drawer = false
@@ -103,7 +108,7 @@
 
   function logout() {
     if (onlogout) onlogout()
-    else toast.show('Sair ainda não está ligado ao login')
+    else toast.show(ws.offline ? 'Entrar em uma conta ainda não está ligado ao login' : 'Sair ainda não está ligado ao login')
   }
 
   function exportAll(format: 'json' | 'md') {
@@ -148,6 +153,7 @@
     tagCounts: ws.tagCounts,
     tagFilter: ws.tagFilter,
     syncLabel: 'sync · há 2 min',
+    offline: ws.offline,
     onview: view,
     onnew: create,
     ontag: (id: string) => {
@@ -211,6 +217,7 @@
       onsettings={() => openSettings('general')}
       onexport={() => openSettings('data')}
       onlogout={logout}
+      logoutLabel={ws.offline ? 'Logar' : 'Sair'}
     />
 
     <main class="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8" bind:this={list}>

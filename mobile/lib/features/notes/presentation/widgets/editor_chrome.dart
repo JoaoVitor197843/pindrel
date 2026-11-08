@@ -414,8 +414,17 @@ class _CoverPickerState extends State<_CoverPicker> {
 
 /// The icon above the title (and the quiet "add icon / add cover" buttons).
 class PageIconRow extends StatelessWidget {
-  const PageIconRow({super.key, required this.ed});
+  const PageIconRow({super.key, required this.ed, this.overlay = false});
   final PageEditor ed;
+
+  /// With a cover the icon hangs over the cover's lower edge. A widget that draws outside its own box cannot be tapped
+  /// there, so the page draws the icon twice apart: here as an empty space in the flow ([overlay] false), and as the
+  /// real icon in a layer over the whole header ([overlay] true), where its full box is inside the layer.
+  final bool overlay;
+
+  /// The box, how far it rises over the cover, and the cover's height: shared with the page.
+  static (double box, double up, double cover) metricsFor(double width) =>
+      width >= 768 ? (96, 88, 208) : (80, 80, 160);
 
   @override
   Widget build(BuildContext context) {
@@ -426,8 +435,11 @@ class PageIconRow extends StatelessWidget {
     }
     final wide = MediaQuery.sizeOf(context).width >= 768;
     final straddle = p.cover.isNotEmpty && p.icon.isNotEmpty;
-    final box = wide ? 96.0 : 80.0;
-    final up = wide ? 88.0 : 80.0;
+    final (box, up, _) = metricsFor(MediaQuery.sizeOf(context).width);
+    // a page that cannot be edited has nothing to tap, so it keeps the icon in the flow
+    final layered = straddle && editable;
+    if (overlay && !layered) return const SizedBox.shrink();
+    if (layered && !overlay) return SizedBox(height: box - up + 12);
     final row = Wrap(
       spacing: 8,
       runSpacing: 4,
@@ -490,7 +502,8 @@ class PageIconRow extends StatelessWidget {
         child: row,
       );
     }
-    // with a cover the icon hangs over its lower edge like a badge: it takes only what is left below the edge
+    // Article centres what it holds: the icon belongs at the left edge of the text column
+    if (overlay) return Align(alignment: Alignment.centerLeft, child: SizedBox(height: box, child: row));
     return SizedBox(
       height: box - up + 12,
       child: Stack(

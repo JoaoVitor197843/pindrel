@@ -3,18 +3,20 @@ import 'package:flutter/services.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../data/ai_providers.dart';
 import '../../data/note_page.dart';
 import '../../data/transfer.dart';
 import '../../data/workspace.dart';
 import 'ui.dart';
 
-enum SettingsSection { general, account, trash, data }
+enum SettingsSection { general, account, trash, data, ai }
 
 const _nav = {
   SettingsSection.general: 'Geral',
   SettingsSection.account: 'Conta',
   SettingsSection.trash: 'Lixeira',
   SettingsSection.data: 'Importar/Exportar',
+  SettingsSection.ai: 'IA (opcional)',
 };
 
 /// The settings in sections: a list on the left on wide screens, two steps of one screen on a phone.
@@ -35,6 +37,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late bool _atList = false;
   late bool _useTrash = widget.ws.settings.useTrash;
   late double _days = widget.ws.settings.retention.toDouble();
+  var _provider = aiProviders.first;
 
   void _save() {
     widget.ws.saveSettings(Settings(useTrash: _useTrash, retention: _days.round()));
@@ -73,9 +76,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
             padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
             decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.border))),
             child: Row(children: [
-              if (stacked && !_atList) GhostIconButton(icon: Icons.arrow_back, tooltip: 'Voltar para as seções', iconSize: 20, onPressed: () => setState(() => _atList = true)),
+              if (stacked && !_atList) GhostIconButton(icon: Icons.chevron_left, tooltip: 'Voltar para as seções', iconSize: 18, onPressed: () => setState(() => _atList = true)),
               Expanded(child: Padding(padding: const EdgeInsets.only(left: 4), child: Text(title, style: AppText.serif(20)))),
-              GhostIconButton(icon: Icons.close, tooltip: 'Fechar configurações', iconSize: 20, onPressed: () => Navigator.pop(context)),
+              GhostIconButton(icon: Icons.close, tooltip: 'Fechar configurações', iconSize: 18, onPressed: () => Navigator.pop(context)),
             ]),
           ),
           Flexible(
@@ -211,6 +214,39 @@ class _SettingsDialogState extends State<SettingsDialog> {
             const Text('Importar', style: TextStyle(fontSize: 15)),
             const SizedBox(height: 4),
             const Text('Importar arquivos .md e .txt chega em breve.', style: TextStyle(fontSize: 13, color: AppColors.textMuted)),
+          ],
+        SettingsSection.ai => [
+            Text('IA (opcional)', style: AppText.serif(24)),
+            const SizedBox(height: 4),
+            Text('desligada por padrão', style: AppText.mono(12, letterSpacing: 0)),
+            const SizedBox(height: 20),
+            const Text('Provedor', style: TextStyle(fontSize: 14)),
+            const SizedBox(height: 8),
+            DropdownButtonFormField<AiProvider>(
+              key: const Key('ai-provider'),
+              initialValue: _provider,
+              isExpanded: true,
+              dropdownColor: AppColors.surface,
+              decoration: const InputDecoration(isDense: true),
+              items: [for (final p in aiProviders) DropdownMenuItem(value: p, child: Text(p.label, overflow: TextOverflow.ellipsis))],
+              onChanged: (p) => setState(() => _provider = p ?? _provider),
+            ),
+            const SizedBox(height: 20),
+            Text(_provider.local ? 'Endereço do servidor' : 'Chave de API', style: const TextStyle(fontSize: 14)),
+            const SizedBox(height: 8),
+            TextField(
+              key: ValueKey('ai-key-${_provider.id}'),
+              obscureText: !_provider.local,
+              autocorrect: false,
+              enableSuggestions: false,
+              keyboardType: _provider.local ? TextInputType.url : TextInputType.visiblePassword,
+              decoration: InputDecoration(isDense: true, hintText: _provider.placeholder),
+            ),
+            const SizedBox(height: 16),
+            const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Padding(padding: EdgeInsets.only(top: 1, right: 8), child: Icon(Icons.lock_outline, size: 16, color: AppColors.textMuted)),
+              Expanded(child: Text('A chave será guardada cifrada no aparelho e nunca aparecerá em logs ou exportações. Neste protótipo ela ainda não é salva.', style: TextStyle(fontSize: 12, color: AppColors.textMuted, height: 1.5))),
+            ]),
           ],
       });
 }

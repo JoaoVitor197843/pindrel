@@ -12,9 +12,11 @@
     onsettings: () => void
     onexport: () => void
     onlogout: () => void
+    /** What the last entry of the account menu says: "Sair", or "Logar" while offline. */
+    logoutLabel?: string
   }
 
-  let { query = $bindable(), compact, showMenuButton, userName, server, onmenu, onpalette, onsettings, onexport, onlogout }: Props = $props()
+  let { query = $bindable(), compact, showMenuButton, userName, server, onmenu, onpalette, onsettings, onexport, onlogout, logoutLabel = 'Sair' }: Props = $props()
 
   let userOpen = $state(false)
   let root: HTMLDivElement | undefined = $state()
@@ -97,7 +99,7 @@
         <button type="button" role="menuitem" class="w-full rounded-field px-3 py-2 text-left text-sm hover:bg-line/50" onclick={() => pick(onsettings)}>Configurações</button>
         <button type="button" role="menuitem" class="w-full rounded-field px-3 py-2 text-left text-sm hover:bg-line/50" onclick={() => pick(onexport)}>Importar / exportar</button>
         <div class="my-1 border-t border-line"></div>
-        <button type="button" role="menuitem" class="w-full rounded-field px-3 py-2 text-left text-sm hover:bg-line/50" onclick={() => pick(onlogout)}>Sair</button>
+        <button type="button" role="menuitem" class="w-full rounded-field px-3 py-2 text-left text-sm hover:bg-line/50" onclick={() => pick(onlogout)}>{logoutLabel}</button>
       </div>
     {/if}
   </div>

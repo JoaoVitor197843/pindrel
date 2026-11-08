@@ -433,11 +433,27 @@ describe('Dashboard — desktop', () => {
       await click(screen.getByRole('button', { name: 'Conta' }))
       expect(screen.getByText('marina@pindrel.local', { selector: 'p' })).toBeTruthy()
       await click(screen.getByRole('button', { name: 'IA (opcional)' }))
-      const key = screen.getByLabelText('Chave de API ou endpoint') as HTMLInputElement
+      const key = screen.getByLabelText('Chave de API') as HTMLInputElement
       expect(key.type).toBe('password')
       await fireEvent.change(key, { target: { value: 'sk-ant-segredo' } })
       expect(screen.getByText('alterações não salvas')).toBeTruthy()
       expect(document.body.textContent).not.toContain('sk-ant-segredo')
+    })
+
+    it('IA: oferece vários provedores e os locais pedem um endereço, não uma chave', async () => {
+      render(Dashboard)
+      await openSettings()
+      await click(screen.getByRole('button', { name: 'IA (opcional)' }))
+      const select = screen.getByLabelText('Provedor') as HTMLSelectElement
+      const labels = [...select.options].map((o) => o.textContent)
+      for (const n of ['Anthropic (Claude)', 'OpenAI', 'Google (Gemini)', 'Mistral', 'Groq', 'DeepSeek', 'xAI (Grok)', 'OpenRouter']) expect(labels).toContain(n)
+      expect(labels.length).toBeGreaterThanOrEqual(10)
+      await fireEvent.change(select, { target: { value: 'ollama' } })
+      const address = screen.getByLabelText('Endereço do servidor') as HTMLInputElement
+      expect(address.type).toBe('url')
+      expect(address.placeholder).toBe('http://localhost:11434')
+      await fireEvent.change(select, { target: { value: 'google' } })
+      expect((screen.getByLabelText('Chave de API') as HTMLInputElement).type).toBe('password')
     })
 
     it('Esc e o fundo fecham', async () => {

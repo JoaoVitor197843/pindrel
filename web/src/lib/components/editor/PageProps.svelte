@@ -23,10 +23,12 @@
       <dt class={label}>Tags</dt>
       <dd class="min-w-0"><TagBar {ed} /></dd>
     </div>
-    <div class="col-span-2">
-      <dt class={label}>Pessoas</dt>
-      <dd class="min-w-0"><ShareBar {ed} onopen={onshare} /></dd>
-    </div>
+    {#if !ed.ws.offline}
+      <div class="col-span-2">
+        <dt class={label}>Pessoas</dt>
+        <dd class="min-w-0"><ShareBar {ed} onopen={onshare} /></dd>
+      </div>
+    {/if}
     <div><dt class={label}>Dono</dt><dd>{page.sharedBy ?? 'Você'}</dd></div>
     <div><dt class={label}>Criada</dt><dd>{formatDate(page.created)}</dd></div>
     <div class="col-span-2"><dt class={label}>Conteúdo</dt><dd>{ed.blocks.length} {noun}{#if ed.progress.total > 0}<span class="text-muted"> · </span>{ed.progress.done} de {ed.progress.total} feitas{/if}</dd></div>

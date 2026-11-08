@@ -305,7 +305,7 @@ void main() {
       expect(body().map((b) => b.text), ['dois', 'dois', 'um']);
       await tester.tap(find.byTooltip('Opções do bloco 3'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Excluir'));
+      await tester.tap(find.descendant(of: find.byType(PopupMenuItem<VoidCallback>), matching: find.text('Excluir')));
       await tester.pumpAndSettle();
       expect(body().map((b) => b.text), ['dois', 'dois']);
     });
@@ -446,6 +446,25 @@ void main() {
       final icon = tester.getRect(find.byTooltip('Trocar ícone da página'));
       expect(icon.top, lessThan(cover.bottom));
       expect(icon.bottom, greaterThan(cover.bottom));
+    });
+    testWidgets('sem servidor não há campo de pessoas nas propriedades', (tester) async {
+      await pumpEditor(tester, size: const Size(1500, 1000));
+      expect(find.text('PESSOAS'), findsNothing);
+      expect(find.text('Compartilhar'), findsNothing);
+    });
+    testWidgets('com capa, tocar na parte do ícone que fica sobre a capa também o troca', (tester) async {
+      ws.page(pid)!.cover = 'musgo';
+      ws.page(pid)!.icon = '💡';
+      await pumpEditor(tester);
+      final cover = tester.getRect(find.byKey(const Key('cover')));
+      final icon = tester.getRect(find.byTooltip('Trocar ícone da página'));
+      // at the left edge of the title, not centred
+      final title = tester.getRect(find.byKey(const ValueKey('title')));
+      expect(icon.left, closeTo(title.left, 1));
+      // a point of the icon's box well above the cover's lower edge
+      await tester.tapAt(Offset(icon.center.dx, cover.bottom - 40));
+      await tester.pumpAndSettle();
+      expect(find.text('Remover ícone'), findsOneWidget);
     });
     testWidgets('etiquetas: criar, escolher uma existente e remover', (tester) async {
       ws.addTag('antiga');

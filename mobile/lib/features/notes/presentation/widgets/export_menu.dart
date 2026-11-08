@@ -18,6 +18,7 @@ class ExportMenu extends StatelessWidget {
         tooltip: 'Exportar página',
         color: AppColors.surface,
         offset: const Offset(0, 44),
+        constraints: const BoxConstraints(minWidth: 256),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(fieldRadius), side: const BorderSide(color: AppColors.border)),
         onSelected: (f) async {
           final page = ed.page;

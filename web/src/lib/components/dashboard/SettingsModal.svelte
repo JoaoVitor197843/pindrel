@@ -3,6 +3,7 @@
   import { modal } from '../../a11y/dialog'
   import { ms } from '../../motion'
   import type { Settings } from '../../stores/workspace.svelte'
+  import { AI_PROVIDERS } from '../../stores/aiProviders'
   import Icon from './Icon.svelte'
 
   export type SettingsSection = 'general' | 'account' | 'trash' | 'data' | 'ai'
@@ -40,6 +41,8 @@
   let retention = $state(settings.retention)
   let dirty = $state(false)
   let atList = $state(true)
+  let providerId = $state(AI_PROVIDERS[0].id)
+  const provider = $derived(AI_PROVIDERS.find((p) => p.id === providerId) ?? AI_PROVIDERS[0])
 
   const showList = $derived(!stacked || atList)
   const showPane = $derived(!stacked || !atList)
@@ -216,15 +219,17 @@
             <div class="flex flex-col gap-5">
               <label class="flex flex-col gap-2 text-sm">
                 Provedor
-                <select class={field} onchange={() => (dirty = true)}>
-                  <option>Anthropic</option>
-                  <option>OpenAI</option>
-                  <option>Endpoint local (Ollama)</option>
+                <select class={field} bind:value={providerId} onchange={() => (dirty = true)}>
+                  {#each AI_PROVIDERS as p (p.id)}
+                    <option value={p.id}>{p.label}</option>
+                  {/each}
                 </select>
               </label>
               <label class="flex flex-col gap-2 text-sm">
-                Chave de API ou endpoint
-                <input class={field} type="password" autocomplete="off" placeholder="sk-… ou http://localhost:11434" onchange={() => (dirty = true)} />
+                {provider.local ? 'Endereço do servidor' : 'Chave de API'}
+                {#key provider.id}
+                  <input class={field} type={provider.local ? 'url' : 'password'} autocomplete="off" placeholder={provider.placeholder} onchange={() => (dirty = true)} />
+                {/key}
               </label>
               <p class="flex items-start gap-2 text-xs text-muted">
                 <Icon name="lock" size={14} />

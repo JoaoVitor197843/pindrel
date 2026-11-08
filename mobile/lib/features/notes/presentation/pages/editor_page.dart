@@ -470,7 +470,9 @@ class _EditorPageState extends State<EditorPage> {
             color: Colors.transparent,
             child: Opacity(opacity: 0.6, child: child),
           ),
-          header: Column(
+          header: Stack(
+            children: [
+              Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (!_zen) PageCoverBand(ed: _ed),
@@ -512,7 +514,7 @@ class _EditorPageState extends State<EditorPage> {
                       hint: 'Sem título',
                       style: AppText.serif(
                         width >= 768 ? 41.6 : 36,
-                      ).copyWith(fontWeight: FontWeight.bold, height: 1.2),
+                      ).copyWith(fontWeight: FontWeight.bold, height: 1.25),
                       readOnly: _ed.readOnly,
                       maxLength: maxTitle,
                       onChanged: _ed.setTitle,
@@ -521,6 +523,16 @@ class _EditorPageState extends State<EditorPage> {
                   ],
                 ),
               ),
+            ],
+          ),
+              // the icon over the cover's edge, on a layer that holds its whole box so a tap on any part of it lands
+              if (!_zen && !_ed.readOnly && _ed.page!.cover.isNotEmpty && _ed.page!.icon.isNotEmpty)
+                Positioned(
+                  top: PageIconRow.metricsFor(width).$3 + 40 - PageIconRow.metricsFor(width).$2,
+                  left: 0,
+                  right: 0,
+                  child: Article(child: PageIconRow(ed: _ed, overlay: true)),
+                ),
             ],
           ),
           footer: Article(
@@ -677,7 +689,7 @@ class _EditorPageState extends State<EditorPage> {
                                       '←',
                                       style: TextStyle(
                                         color: AppColors.accentText,
-                                        fontSize: 15,
+                                        fontSize: 14,
                                       ),
                                     ),
                                     if (width >= 400) ...[
@@ -738,8 +750,7 @@ class _EditorPageState extends State<EditorPage> {
                                     ),
                                   ),
                                   const SizedBox(width: 12),
-                                  if (width >= 1000)
-                                    Flexible(
+                                  Flexible(
                                       child: Text(
                                         'editada ${ago(page.updated)}',
                                         key: const Key('crumb-edited'),
@@ -798,7 +809,7 @@ class _EditorPageState extends State<EditorPage> {
                         icon: Icons.fullscreen,
                         label: 'Zen',
                         tooltip: 'Modo zen',
-                        showLabel: width >= 1100,
+                        showLabel: width >= 768,
                         onTap: () => _setZen(true),
                       ),
                       if (!roomForArrows) ...[
@@ -821,7 +832,7 @@ class _EditorPageState extends State<EditorPage> {
                         padding: const EdgeInsets.only(left: 8),
                         child: ExportMenu(
                           ed: _ed,
-                          compact: width < 1100,
+                          compact: width < 768,
                           onDone: _toast,
                         ),
                       ),
@@ -831,7 +842,7 @@ class _EditorPageState extends State<EditorPage> {
                         tooltip: page.trashed
                             ? 'Excluir página definitivamente'
                             : 'Excluir página',
-                        showLabel: width >= 1100,
+                        showLabel: width >= 768,
                         danger: true,
                         onTap: _delete,
                       ),
@@ -841,6 +852,7 @@ class _EditorPageState extends State<EditorPage> {
                       liveRegion: true,
                       child: Row(
                         children: [
+                          // the web shows this from 640 px; its CSS shrinks, a Row does not, so here it waits for room
                           if (width >= 1000)
                             Text(
                               _ed.saving
