@@ -26,6 +26,8 @@ pub struct App {
     pub(crate) ws_slots: Arc<tokio::sync::Semaphore>,
     pub(crate) ws_per_ip: Arc<crate::limiter::ConnLimit>,
     pub ws_stop: tokio::sync::watch::Sender<bool>,
+    /// Room for request bodies held in memory, in KiB (see `Config::body_budget`).
+    pub(crate) body_budget: Arc<tokio::sync::Semaphore>,
     /// Public CA certificate (PEM) and its SHA-256 fingerprint, when the gateway keeps its own CA (`TLS_AUTO`).
     pub ca: RwLock<Option<(String, String)>>,
     /// The session of the pairing by six digits (see `pairing`).
@@ -36,6 +38,7 @@ pub struct App {
 impl App {
     pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
         let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
+        let budget_kib = cfg.body_budget / 1024;
         #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
         let max_pairings = cfg.max_pairings;
         let pool = Pool::new(cfg.upstreams.clone());
@@ -53,6 +56,7 @@ impl App {
             ws_slots: Arc::new(tokio::sync::Semaphore::new(cfg_ws)),
             ws_per_ip: crate::limiter::ConnLimit::new(cfg_ws_ip),
             ws_stop: tokio::sync::watch::channel(false).0,
+            body_budget: Arc::new(tokio::sync::Semaphore::new(budget_kib)),
             ca: RwLock::new(None),
             #[cfg(feature = "selfcert")]
             pairing: crate::pairing::Pairing::new(max_pairings),
@@ -113,6 +117,20 @@ pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response<B
     reply(status, "application/x-protobuf", proto::error_http(code, message))
 }
 
+/// Bodies up to this size do not count against the budget of bodies held in memory.
+const SMALL_BODY: u64 = 64 << 10;
+
+/// The gateway is holding as many request bodies as it is allowed to: try again in a moment.
+fn busy() -> Response<Body> {
+    let mut r = error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "server_busy",
+        "too many uploads at once, try again in a moment",
+    );
+    r.headers_mut().insert(header::RETRY_AFTER, header::HeaderValue::from_static("1"));
+    r
+}
+
 fn rate_limited(retry_after: Duration) -> Response<Body> {
     let mut r = error(StatusCode::TOO_MANY_REQUESTS, "rate_limited", "too many requests, try again later");
     // whole seconds, rounded up, at least 1: what the client has to wait before the bucket has a request again
@@ -131,7 +149,12 @@ where
     // the connection's peer, or the client a trusted proxy in front of us vouches for (never a header from anyone else)
     let ip = app.cfg.client_ip.resolve(peer.ip(), req.headers());
     if app.cfg.rate_limit {
-        if let Err(wait) = app.limiters.global.check(ip) {
+        let limiter = if req.uri().path().starts_with("/files/") {
+            &app.limiters.files
+        } else {
+            &app.limiters.global
+        };
+        if let Err(wait) = limiter.check(ip) {
             return Ok(rate_limited(wait));
         }
     }
@@ -205,9 +228,43 @@ where
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
     let (parts, body) = req.into_parts();
+    let path = parts.uri.path();
+    // A piece of a file may come over a slow line, and joining a large file takes the replica a while: those two get longer
+    // windows, everything else keeps the short ones.
+    let is_piece = parts.method == Method::PUT && path.starts_with("/files/uploads/");
+    let is_finish = parts.method == Method::POST && path.starts_with("/files/uploads/") && path.ends_with("/finish");
+    let body_timeout = if is_piece {
+        app.cfg.file_body_timeout
+    } else {
+        app.cfg.body_timeout
+    };
+    let upstream_timeout = if is_finish {
+        app.cfg.file_finish_timeout
+    } else {
+        app.cfg.upstream_timeout
+    };
+    // A body is held whole in memory before it is passed on, so the bytes held at once across all requests have a budget.
+    // Small bodies (a login, a note) skip it; a body of unknown length counts as a full one. The share is kept until the
+    // request is done.
+    let declared = parts
+        .headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<u64>().ok());
+    let _held = match declared {
+        Some(n) if n <= SMALL_BODY => None,
+        _ => {
+            let want = declared.unwrap_or(app.cfg.max_body as u64).min(app.cfg.max_body as u64);
+            let kib = u32::try_from(want.div_ceil(1024)).unwrap_or(u32::MAX);
+            match time::timeout(app.cfg.body_queue, app.body_budget.clone().acquire_many_owned(kib)).await {
+                Ok(Ok(share)) => Some(share),
+                _ => return busy(),
+            }
+        }
+    };
     // The body is buffered once so that a request can be replayed on another replica when the
     // first one refuses the connection (safe even for POST: nothing was sent yet).
-    let body = match time::timeout(app.cfg.body_timeout, Limited::new(body, app.cfg.max_body).collect()).await {
+    let body = match time::timeout(body_timeout, Limited::new(body, app.cfg.max_body).collect()).await {
         Err(_) => return error(StatusCode::REQUEST_TIMEOUT, "request_timeout", "request body took too long"),
         Ok(Err(e)) if e.downcast_ref::<LengthLimitError>().is_some() => {
             return error(StatusCode::PAYLOAD_TOO_LARGE, "payload_too_large", "request body too large")
@@ -247,7 +304,7 @@ where
             Ok(r) => r,
             Err(_) => return error(StatusCode::BAD_REQUEST, "bad_request", "invalid request"),
         };
-        match time::timeout(app.cfg.upstream_timeout, app.client.request(out)).await {
+        match time::timeout(upstream_timeout, app.client.request(out)).await {
             Err(_) => {
                 return error(
                     StatusCode::GATEWAY_TIMEOUT,

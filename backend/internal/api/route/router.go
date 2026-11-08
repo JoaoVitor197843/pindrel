@@ -10,6 +10,7 @@ import (
 	"pindrel/internal/clientip"
 	"pindrel/internal/config"
 	"pindrel/internal/database/db"
+	"pindrel/internal/files"
 	AuthMiddleware "pindrel/internal/middleware"
 	"pindrel/internal/server"
 	"strings"
@@ -19,9 +20,28 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httprate"
+	"github.com/google/uuid"
+	contextkeys "pindrel/pkg/context"
 )
 
-func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLimiter *AuthMiddleware.IPRateLimiter, registerLimiter *AuthMiddleware.IPRateLimiter) *chi.Mux {
+// Extras are the parts of the API that a deployment may leave out; SetupRouter takes none or one.
+type Extras struct {
+	// Files serves uploaded files (nil: no file routes). FileLimiters limit what the global per-IP limit does not cover.
+	Files        *files.Handler
+	FileLimiters *FileLimiters
+}
+
+// FileLimiters are per-person limits (nil entries: no limit, the gateway in front does it).
+type FileLimiters struct {
+	Chunks  *AuthMiddleware.IPRateLimiter // pieces of an upload
+	Control *AuthMiddleware.IPRateLimiter // the other authenticated file routes
+}
+
+func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLimiter *AuthMiddleware.IPRateLimiter, registerLimiter *AuthMiddleware.IPRateLimiter, extras ...Extras) *chi.Mux {
+	var ex Extras
+	if len(extras) > 0 {
+		ex = extras[0]
+	}
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -43,9 +63,21 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 		clientKey = clientip.PeerKey
 	}
 	if cfg.InAppRateLimit {
-		r.Use(httprate.LimitBy(100, 1*time.Minute, func(r *http.Request) (string, error) {
+		global := httprate.LimitBy(100, 1*time.Minute, func(r *http.Request) (string, error) {
 			return clientKey(r), nil
-		}))
+		})
+		// file routes carry their own limits: a download seeks with many Range requests and an upload sends many pieces,
+		// which 100 a minute would cut short
+		r.Use(func(next http.Handler) http.Handler {
+			limited := global(next)
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if strings.HasPrefix(req.URL.Path, "/files/") {
+					next.ServeHTTP(w, req)
+					return
+				}
+				limited.ServeHTTP(w, req)
+			})
+		})
 	}
 	// with InAppRateLimit off, the load balancer in front does the rate limiting (keeps the API stateless)
 	loginRL, registerRL := noMiddleware, noMiddleware
@@ -61,6 +93,9 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	r.Get("/auth/me/", h.Me)
 	if cfg.DebugMode {
 		mountSwagger(r)
+	}
+	if ex.Files != nil {
+		mountFiles(r, cfg, repo, ex, clientKey)
 	}
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo, cfg.DebugMode))
@@ -78,11 +113,57 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 
 func noMiddleware(next http.Handler) http.Handler { return next }
 
+// userKey says who a file request belongs to once the session is checked.
+func userKey(r *http.Request) string {
+	if id, ok := r.Context().Value(contextkeys.UserIDKey).(uuid.UUID); ok {
+		return id.String()
+	}
+	return clientip.PeerKey(r)
+}
+
+// mountFiles registers the file routes. Routes with a collection name end in a slash like the rest of the API; the ones
+// with an id do not, because a signed download address is a path and a query.
+func mountFiles(r chi.Router, cfg *config.Config, repo *db.Queries, ex Extras, clientKey func(*http.Request) string) {
+	fh := ex.Files
+	// a download is open to whoever holds a valid signed address; its own, higher limit by address of the client
+	download := noMiddleware
+	if cfg.InAppRateLimit {
+		download = httprate.LimitBy(600, time.Minute, func(r *http.Request) (string, error) { return clientKey(r), nil })
+	}
+	r.With(download).Get("/files/{id}", fh.Download)
+	r.With(download).Head("/files/{id}", fh.Download)
+
+	chunks, control := noMiddleware, noMiddleware
+	if cfg.InAppRateLimit && ex.FileLimiters != nil {
+		if ex.FileLimiters.Chunks != nil {
+			chunks = AuthMiddleware.RateLimitMiddleware(ex.FileLimiters.Chunks, userKey)
+		}
+		if ex.FileLimiters.Control != nil {
+			control = AuthMiddleware.RateLimitMiddleware(ex.FileLimiters.Control, userKey)
+		}
+	}
+	r.Group(func(r chi.Router) {
+		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo, cfg.DebugMode))
+		r.With(control).Get("/files/", fh.List)
+		r.With(control).Post("/files/uploads/", fh.CreateUpload)
+		r.With(control).Get("/files/uploads/{id}", fh.UploadStatus)
+		r.With(chunks).Put("/files/uploads/{id}/{n}", fh.PutChunk)
+		r.With(control).Post("/files/uploads/{id}/finish", fh.Finish)
+		r.With(control).Delete("/files/uploads/{id}", fh.CancelUpload)
+		r.With(control).Post("/files/{id}/link", fh.Link)
+		r.With(control).Put("/files/{id}/orphan", fh.SetOrphan(true))
+		r.With(control).Delete("/files/{id}/orphan", fh.SetOrphan(false))
+		r.With(control).Delete("/files/{id}", fh.Delete)
+	})
+}
+
 // webCSP is the Content-Security-Policy of the web page: scripts only from this server (plus WebAssembly, for libsodium),
 // styles may be inline (the build puts the stylesheet inside index.html), nothing can be framed or embedded, and the page
-// may talk to other Pindrel servers the person added (any http or https address, and WebSockets).
+// may talk to other Pindrel servers the person added (any http or https address, and WebSockets). Audio and video blocks
+// play a file that stays on its own server, so media may come from any http or https address; it is only asked for when
+// the person presses play (the blocks use preload="none"), and images, fonts, frames and scripts stay as closed as before.
 const webCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; " +
-	"img-src 'self' data: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; " +
+	"img-src 'self' data: blob:; media-src 'self' http: https: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; " +
 	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 // publicDir is where the Docker image places the web build.

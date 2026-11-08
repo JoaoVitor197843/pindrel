@@ -17,6 +17,12 @@
   --color-offline: #c4574a;
   /* offline as TEXT (4.5:1 on bg and surface); the dot and borders keep the fuller red above */
   --color-offline-text: #cd7065;
+  /* tag colors: text and dot on surface (>= 4.5:1, see contrast.test.ts); the chip fill is the same color at low alpha */
+  --color-tag-rust: #d98a6c;
+  --color-tag-blue: #8aa8c4;
+  --color-tag-teal: #6bb3a8;
+  --color-tag-gold: #d1ad5a;
+  --color-tag-plum: #c196ad;
   --color-cream: #f5f2eb;
   --color-on-cream: #141412;
 
@@ -30,6 +36,10 @@
 
 :root {
   color-scheme: dark;
+}
+
+* {
+  scrollbar-color: var(--color-field-line) transparent;
 }
 
 body {
@@ -63,6 +73,16 @@ body {
   outline-offset: 2px;
 }
 
+/* An outline follows the corners of the box it is drawn around. A text block is a plain box with square corners, so its
+   ring looked harsher than every other one: the fields that hold a block take the app's rounded corner too. */
+textarea:focus-visible,
+input:focus-visible,
+[data-nav]:focus-visible,
+[data-rich]:focus-visible,
+[contenteditable='true']:focus-visible {
+  border-radius: var(--radius-field);
+}
+
 /* "Reduce motion" is honoured by the components (`ms()`); this covers whatever animates through plain CSS. */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -72,4 +92,101 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* Zen mode: the block being written stays bright, the others step back. */
+.zen-dim:has([data-block-id]:focus-within) > [data-lazy] > [data-block-id]:not(:focus-within) {
+  opacity: 0.38;
+}
+.zen-dim > [data-lazy] > [data-block-id] {
+  transition: opacity 0.25s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .zen-dim > [data-lazy] > [data-block-id] {
+    transition: none;
+  }
+}
+
+/* Motion. Everything below is plain CSS, so "reduce motion" (above) switches it all off at once. */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+}
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+@keyframes icon-pop {
+  0% {
+    transform: scale(0.6) rotate(-8deg);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.12) rotate(3deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+@utility animate-pop {
+  animation: pop-in 0.16s ease-out backwards;
+  transform-origin: top left;
+}
+@utility animate-rise {
+  animation: rise-in 0.3s ease-out backwards;
+}
+@utility animate-fade {
+  animation: fade-in 0.45s ease-out backwards;
+}
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+}
+@utility animate-slide-left {
+  animation: slide-in-left 0.24s ease-out backwards;
+}
+@utility animate-slide-right {
+  animation: slide-in-right 0.24s ease-out backwards;
+}
+@utility animate-icon {
+  animation: icon-pop 0.38s cubic-bezier(0.3, 1.4, 0.5, 1) backwards;
+}
+
+/* Small things that should not snap. */
+button,
+a,
+[role='menuitem'] {
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    opacity 0.15s;
+}
+
+/* the placeholder that TipTap and the ProseMirror engine draw themselves on an empty block */
+[data-rich] p.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-muted);
+  opacity: 0.7;
+  float: left;
+  height: 0;
+  pointer-events: none;
 }

@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json"
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "memory": "node scripts/memory.mjs",
+    "rich:e2e": "node scripts/rich-e2e.mjs",
+    "files:e2e": "node scripts/files-e2e.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
@@ -28,6 +31,20 @@
   },
   "dependencies": {
     "@bufbuild/protobuf": "^2.16.0",
+    "@tiptap/core": "3.33.0",
+    "@tiptap/extension-bold": "3.33.0",
+    "@tiptap/extension-code": "3.33.0",
+    "@tiptap/extension-document": "3.33.0",
+    "@tiptap/extension-highlight": "3.33.0",
+    "@tiptap/extension-italic": "3.33.0",
+    "@tiptap/extension-link": "3.33.0",
+    "@tiptap/extension-paragraph": "3.33.0",
+    "@tiptap/extension-strike": "3.33.0",
+    "@tiptap/extension-text": "3.33.0",
+    "@tiptap/extension-typography": "3.33.0",
+    "@tiptap/extension-underline": "3.33.0",
+    "@tiptap/extensions": "3.33.0",
+    "@tiptap/pm": "3.33.0",
     "idb": "^8.0.4",
     "libsodium-wrappers": "^0.8.4"
   }
