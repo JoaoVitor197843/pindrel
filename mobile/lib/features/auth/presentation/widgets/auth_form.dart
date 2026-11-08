@@ -36,6 +36,9 @@ class _AuthFormState extends State<AuthForm> {
   void _continueOffline() {
     final callback = widget.onContinueOffline;
     if (callback != null) return callback();
+    // opened from the notes (the app's home), "continue offline" simply goes back to them
+    final nav = Navigator.of(context);
+    if (nav.canPop()) return nav.pop();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Notas locais chegam em breve.')),
     );

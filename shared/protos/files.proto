@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package sync;
+
+option go_package = "backend/internal/api/dto";
+
+// Files live on the server's disk; a client sends them in pieces (the gateway holds a whole request in memory, so a
+// piece is at most 512 KiB) and reads them back with plain HTTP Range requests through a signed address.
+
+// POST /files/uploads/ — opens an upload.
+message CreateUploadRequest {
+  // Total size of the file in bytes (1 to the server's limit).
+  int64 size = 1;
+  // The name to show (at most 255 bytes; the server never uses it as a path).
+  string name = 2;
+  // A vault file: bytes the device already encrypted. The server does not look inside and never opens it in a tab.
+  bool encrypted = 3;
+}
+
+message CreateUploadResponse {
+  string upload_id = 1;
+  // Size of every piece but the last, in bytes.
+  int32 chunk_size = 2;
+  int32 chunk_count = 3;
+}
+
+// GET /files/uploads/{id} — which pieces have arrived, to resume after a break.
+message UploadStatus {
+  string upload_id = 1;
+  int64 size = 2;
+  int32 chunk_size = 3;
+  int32 chunk_count = 4;
+  // One bit per piece, bit n of byte n/8 (least significant first): 1 = already stored.
+  bytes received = 5;
+}
+
+// How a file is handed out: 1 plays or shows inside the page, 2 and 3 only download. The server decides, by looking at
+// the bytes, never by what the client says.
+message FileInfo {
+  string id = 1;
+  int64 size = 2;
+  string mime = 3;
+  int32 level = 4;
+  string name = 5;
+  bool encrypted = 6;
+  int64 created_at = 7;
+}
+
+// POST /files/uploads/{id}/finish
+message FinishUploadResponse {
+  FileInfo file = 1;
+}
+
+// POST /files/{id}/link — a short-lived address that works in <video src>, <img src> and a plain link.
+message FileLinkResponse {
+  // Path and query, relative to the server (for example /files/<id>?exp=...&sig=...).
+  string url = 1;
+  // Unix time in milliseconds when the address stops working.
+  int64 expires_at = 2;
+}
+
+// GET /files/ — the caller's own files (newest first), paged by an opaque cursor.
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+  string next_cursor = 2;
+  // Bytes in use against the quota.
+  int64 used_bytes = 3;
+  int64 quota_bytes = 4;
+}
