@@ -934,6 +934,9 @@ class _EditorPageState extends State<EditorPage> {
                                       child: dock(
                                         left: true,
                                         child: Row(
+                                          // the strip hugs the edge of the window even when the panel is closed and the row is shorter than the dock
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.start,
                                           crossAxisAlignment:
                                               CrossAxisAlignment.stretch,
                                           children: [
@@ -971,6 +974,9 @@ class _EditorPageState extends State<EditorPage> {
                                       child: dock(
                                         left: false,
                                         child: Row(
+                                          // the strip hugs the edge of the window even when the panel is closed and the row is shorter than the dock
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.end,
                                           crossAxisAlignment:
                                               CrossAxisAlignment.stretch,
                                           children: [
