@@ -12,6 +12,8 @@
     tagCounts: Record<string, number>
     tagFilter: string | null
     syncLabel: string
+    /** No server: nobody to share with, so "Compartilhadas comigo" is not offered. The vault stays: it is the person's own. */
+    offline?: boolean
     onview: (view: View) => void
     onnew: () => void
     ontag: (id: string) => void
@@ -19,7 +21,7 @@
     onclose?: () => void
   }
 
-  let { mode, view, counts, tags, tagCounts, tagFilter, syncLabel, onview, onnew, ontag, onaddtag, onclose }: Props = $props()
+  let { mode, view, counts, tags, tagCounts, tagFilter, syncLabel, offline = false, onview, onnew, ontag, onaddtag, onclose }: Props = $props()
 
   const items: { id: View; label: string; icon: IconName }[] = [
     { id: 'all', label: 'Todas as páginas', icon: 'page' },
@@ -28,6 +30,7 @@
     { id: 'trash', label: 'Lixeira', icon: 'trash' },
   ]
 
+  const shownItems = $derived(offline ? items.filter((i) => i.id !== 'shared') : items)
   const rail = $derived(mode === 'rail')
   let adding = $state(false)
   let draft = $state('')
@@ -73,7 +76,7 @@
   </button>
 
   <ul class="mt-5 flex flex-col gap-1 {rail ? '' : 'w-full'}">
-    {#each items as item (item.id)}
+    {#each shownItems as item (item.id)}
       {@const current = view === item.id}
       <li>
         <button

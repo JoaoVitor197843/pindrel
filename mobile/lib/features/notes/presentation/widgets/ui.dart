@@ -79,7 +79,7 @@ class OutlineIconButton extends StatelessWidget {
               borderRadius: BorderRadius.circular(fieldRadius),
               border: Border.all(color: AppColors.fieldBorder),
             ),
-            child: Icon(icon, size: 20, color: color ?? AppColors.text),
+            child: Icon(icon, size: 18, color: color ?? AppColors.text),
           ),
         ),
       ),

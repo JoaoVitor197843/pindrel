@@ -291,6 +291,15 @@ void main() {
       expect(cards, greaterThan(4));
       expect(inFirstRow, 4);
     });
+    testWidgets('a lixeira fica no canto direito do cartão e o título longo desce uma linha', (tester) async {
+      ws.page(pid)!.title = 'Um título bem comprido que não cabe numa linha só do cartão de uma coluna estreita';
+      await pump(tester, DashboardPage(ws: ws), size: const Size(1500, 900));
+      final card = tester.getRect(find.byKey(const Key('page-card')).first);
+      final trash = tester.getRect(find.byTooltip(RegExp('para a lixeira')).first);
+      expect(card.right - trash.right, lessThan(24));
+      expect(trash.center.dy, greaterThan(card.bottom - 40));
+      expect(find.textContaining('Um título bem comprido', findRichText: true), findsWidgets);
+    });
     testWidgets('o cartão ficou compacto: menos de 200 px de altura com texto de um parágrafo', (tester) async {
       final p = ws.page(pid)!;
       p.excerpt = 'Passos: exportar volumes do Docker, escrever configuration.nix, testar em VM antes de tocar no bare metal. Backup do Postgres primeiro.';

@@ -47,4 +47,5 @@
   {#if ed.isOwner && ed.shares.length}
     <button type="button" class="inline-flex h-8 items-center rounded-full border border-field-line px-3 text-xs text-muted hover:bg-line/40 hover:text-fg" onclick={() => onopen('access')}>Retirar acesso…</button>
   {/if}
+
 </div>

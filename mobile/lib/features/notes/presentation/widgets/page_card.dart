@@ -161,11 +161,8 @@ class PageCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: Text.rich(
-                TextSpan(children: title),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+              // a long title goes down a line instead of being cut (the web's `wrap-anywhere`)
+              child: Text.rich(TextSpan(children: title)),
             ),
             Transform.translate(
               offset: const Offset(8, -6),
@@ -177,14 +174,18 @@ class PageCard extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        Text(
-          _excerpt,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 13,
-            height: 1.5,
-            color: AppColors.textMuted,
+        // two lines of room whatever the text, so the cards of a row keep one size (the web's `min-h-[3lh]`)
+        ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 13 * 1.5 * 2),
+          child: Text(
+            _excerpt,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 13,
+              height: 1.5,
+              color: AppColors.textMuted,
+            ),
           ),
         ),
         const SizedBox(height: 10),
@@ -210,7 +211,18 @@ class PageCard extends StatelessWidget {
               const Spacer(),
               Text(pageMeta(page), style: AppText.mono(12, letterSpacing: 0)),
               const SizedBox(width: 4),
-              _trash(),
+              // 36 px of button in a 20 px line, pulled into the corner like the web's `-my-2 -mr-2`
+              SizedBox(
+                width: page.trashed ? 0 : 36,
+                height: 20,
+                child: OverflowBox(
+                  maxHeight: 36,
+                  child: Transform.translate(
+                    offset: const Offset(8, 0),
+                    child: _trash(),
+                  ),
+                ),
+              ),
             ],
           ),
         ),

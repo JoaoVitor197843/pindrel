@@ -198,8 +198,8 @@ void main() {
 
     testWidgets('as quatro visões e seus vazios', (tester) async {
       await pumpDashboard(tester, size: const Size(1500, 900));
-      for (final (label, text) in [('Compartilhadas comigo', 'Nada compartilhado com você'), ('Cofre', 'Cofre em breve'), ('Lixeira', 'Lixeira vazia'), ('Todas as páginas', 'Nenhuma página ainda')]) {
-        await tester.tap(find.descendant(of: find.byKey(ValueKey('view-${{'Compartilhadas comigo': 'shared', 'Cofre': 'vault', 'Lixeira': 'trash', 'Todas as páginas': 'all'}[label]}')), matching: find.text(label)));
+      for (final (label, text) in [('Cofre', 'Cofre em breve'), ('Lixeira', 'Lixeira vazia'), ('Todas as páginas', 'Nenhuma página ainda')]) {
+        await tester.tap(find.descendant(of: find.byKey(ValueKey('view-${{'Cofre': 'vault', 'Lixeira': 'trash', 'Todas as páginas': 'all'}[label]}')), matching: find.text(label)));
         await tester.pumpAndSettle();
         expect(find.text(text), findsOneWidget, reason: label);
       }
@@ -267,6 +267,31 @@ void main() {
       await tester.tap(find.text('Lixeira').last);
       await tester.pumpAndSettle();
       expect(find.textContaining('mantidas por 30 dias'), findsOneWidget);
+    });
+
+    testWidgets('o menu lateral não oferece "Compartilhadas comigo"', (tester) async {
+      await pumpDashboard(tester, size: const Size(1500, 900));
+      expect(find.text('Compartilhadas comigo'), findsNothing);
+      expect(find.text('Lixeira'), findsWidgets);
+    });
+
+    testWidgets('configurações: a seção de IA troca de provedor e pede endereço nos locais', (tester) async {
+      await pumpDashboard(tester, size: const Size(1500, 900));
+      await tester.tap(find.byTooltip('Menu da conta de Você'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configurações'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('IA (opcional)'));
+      await tester.pumpAndSettle();
+      expect(find.text('desligada por padrão'), findsOneWidget);
+      expect(find.text('Chave de API'), findsOneWidget);
+      expect(find.text('sk-ant-…'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('ai-provider')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Endpoint local (Ollama)').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Endereço do servidor'), findsOneWidget);
+      expect(find.text('http://localhost:11434'), findsOneWidget);
     });
 
     testWidgets('configurações no celular: lista de seções e voltar', (tester) async {

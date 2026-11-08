@@ -190,12 +190,26 @@ export class Workspace {
   users = $state<User[]>(seedUsers())
   settings = $state<Settings>({ useTrash: true, retention: 30 })
   vaultUnlocked = $state(false)
+  /** The person chose "Continuar offline": there is no server, so nothing can be shared. */
+  offline = $state(false)
   view = $state<View>('all')
   sort = $state<Sort>('recent')
   layout = $state<Layout>('grid')
   query = $state('')
   tagFilter = $state<string | null>(null)
   #seq = 100
+
+  /** Offline: the person's own notes start empty. The demo pages, tags and people go (the vault stays, empty), and there is no sharing. */
+  goOffline() {
+    this.offline = true
+    this.pages = []
+    this.tags = []
+    this.users = []
+    this.tagFilter = null
+    this.query = ''
+    this.vaultUnlocked = false
+    if (this.view === 'shared') this.view = 'all'
+  }
 
   live = $derived(this.pages.filter((p) => !p.trashed))
   /** My own pages: "all pages" never lists what others shared with me. */

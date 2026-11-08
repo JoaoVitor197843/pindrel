@@ -65,7 +65,6 @@ class _NotesSidebarState extends State<NotesSidebar> {
 
   static const _items = <(NotesView, String, IconData)>[
     (NotesView.all, 'Todas as páginas', Icons.description_outlined),
-    (NotesView.shared, 'Compartilhadas comigo', Icons.person_outline),
     (NotesView.vault, 'Cofre', Icons.lock_outline),
     (NotesView.trash, 'Lixeira', Icons.delete_outline),
   ];
@@ -160,7 +159,7 @@ class _NotesSidebarState extends State<NotesSidebar> {
                     GhostIconButton(
                       icon: Icons.close,
                       tooltip: 'Fechar menu',
-                      iconSize: 20,
+                      iconSize: 18,
                       onPressed: widget.onClose,
                     ),
                 ],
@@ -182,7 +181,7 @@ class _NotesSidebarState extends State<NotesSidebar> {
                     child: const SizedBox(
                       width: 44,
                       height: 44,
-                      child: Icon(Icons.add, color: AppColors.onPrimaryButton),
+                      child: Icon(Icons.add, size: 18, color: AppColors.onPrimaryButton),
                     ),
                   ),
                 ),
@@ -209,7 +208,7 @@ class _NotesSidebarState extends State<NotesSidebar> {
                   label: label,
                   leading: Icon(
                     icon,
-                    size: 20,
+                    size: 18,
                     color: ws.view == view
                         ? AppColors.accentText
                         : AppColors.text,
