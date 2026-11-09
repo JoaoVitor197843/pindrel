@@ -238,6 +238,10 @@ const docTemplate = `{
                 },
                 "password": {
                     "type": "string"
+                },
+                "session_only": {
+                    "description": "true: the refresh cookie lasts until the browser closes instead of its full lifetime (\"Manter conectado\" unchecked).\nLeft out, it keeps the long-lived cookie, so clients that do not know the field behave as before.",
+                    "type": "boolean"
                 }
             }
         },

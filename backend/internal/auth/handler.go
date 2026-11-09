@@ -149,7 +149,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
+	cookie := &http.Cookie{
 		Name:     "refresh_token",
 		Value:    tokens.RefreshToken,
 		HttpOnly: true,
@@ -157,7 +157,13 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Path:     "/",
 		MaxAge:   int(h.refreshExpireIn.Seconds()),
-	})
+	}
+	// "do not keep me signed in": a cookie with no MaxAge lasts until the browser closes. The token inside keeps its own
+	// expiry, so a copy of the cookie taken before that does not live longer than it would have.
+	if input.GetSessionOnly() {
+		cookie.MaxAge = 0
+	}
+	http.SetCookie(w, cookie)
 	api.WriteResponse(w, http.StatusOK, &dto.LoginRefreshResponse{
 		AccessToken: tokens.AccessToken,
 		ExpiresIn:   int32(h.accessExpireIn.Seconds()),

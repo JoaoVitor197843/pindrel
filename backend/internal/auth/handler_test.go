@@ -282,6 +282,49 @@ func TestDB_Handler_Login_Success(t *testing.T) {
 	}
 }
 
+// The cookie lasts the refresh token's lifetime unless the client asks for a session cookie.
+func TestDB_Handler_Login_SessionOnlyCookieHasNoMaxAge(t *testing.T) {
+	handler, repo, cleanup := setupTest(t, true)
+	defer cleanup()
+	u := registerUser(t, handler, repo, "session-only")
+
+	for _, tc := range []struct {
+		name        string
+		sessionOnly bool
+		wantMaxAge  int
+	}{
+		{"default keeps the long-lived cookie", false, int((720 * time.Hour).Seconds())},
+		{"session_only drops the lifetime", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.Login(rec, protoRequest(t, http.MethodPost, "/auth/login", &dto.LoginInput{
+				Email: u.Email, Password: u.Password, SessionOnly: tc.sessionOnly,
+			}))
+			requireStatus(t, rec, http.StatusOK)
+			c := findCookie(rec, "refresh_token")
+			if c == nil || c.Value == "" {
+				t.Fatal("expected a refresh_token cookie")
+			}
+			if c.MaxAge != tc.wantMaxAge {
+				t.Fatalf("MaxAge = %d, want %d", c.MaxAge, tc.wantMaxAge)
+			}
+			if !c.Expires.IsZero() {
+				t.Fatalf("Expires must stay unset, got %v", c.Expires)
+			}
+			if !c.HttpOnly {
+				t.Fatal("the cookie must stay HttpOnly")
+			}
+			// either way the token works for a refresh
+			req := httptest.NewRecorder()
+			r := rawRequest(http.MethodPost, "/auth/refresh", nil)
+			r.AddCookie(c)
+			handler.Refresh(req, r)
+			requireStatus(t, req, http.StatusOK)
+		})
+	}
+}
+
 // The cookie is Secure exactly when the client came over TLS: directly, or through the gateway/tunnel that says so.
 func TestDB_Handler_Login_CookieIsSecureOnlyOverTLS(t *testing.T) {
 	handler, repo, cleanup := setupTest(t, true)

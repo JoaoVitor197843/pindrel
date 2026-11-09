@@ -48,6 +48,12 @@ export const LOCAL_DB = 'pindrel-local'
 /** What the local database was called before the modes were told apart. */
 const LEGACY_DB = 'pindrel-notes'
 const VERSION = 1
+/** One database per account, so two people on the same browser never see each other's notes. */
+export const cloudDbName = (accountId: string) => {
+  // the id comes from the server: it only ever becomes a database name when it looks like one
+  if (!/^[0-9a-fA-F-]{8,64}$/.test(accountId)) throw new Error('invalid account id')
+  return `pindrel-cloud-${accountId.toLowerCase()}`
+}
 const STORES = ['pages', 'bodies', 'secrets', 'media', 'meta'] as const
 const COPY_BATCH = 50
 
@@ -78,6 +84,11 @@ export class NotesStore {
       },
     })
     return new NotesStore(db)
+  }
+
+  /** The database of one account. */
+  static openAccount(accountId: string): Promise<NotesStore> {
+    return NotesStore.open(cloudDbName(accountId))
   }
 
   /** The local database; first brings in whatever the old name held, once. */

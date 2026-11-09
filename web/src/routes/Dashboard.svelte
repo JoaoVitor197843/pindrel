@@ -16,6 +16,8 @@
 
   interface Props {
     userName?: string
+    /** The account's e-mail; without it one is made up from the name and the server (the demo). */
+    email?: string
     server?: string
     onlogout?: () => void
     /** Shared with the editor, so what is edited there shows here. */
@@ -23,7 +25,7 @@
     onopen?: (id: string) => void
   }
 
-  let { userName = 'Marina Reis', server = 'pindrel.local', onlogout, ws: given, onopen }: Props = $props()
+  let { userName = 'Marina Reis', email: given_email, server = 'pindrel.local', onlogout, ws: given, onopen }: Props = $props()
 
   // svelte-ignore state_referenced_locally
   const ws = given ?? new Workspace()
@@ -51,7 +53,7 @@
   const total = $derived(ws.view === 'vault' ? ws.visibleVault.length : ws.visible.length)
   const noun = $derived(ws.view === 'vault' ? (total === 1 ? 'entrada' : 'entradas') : total === 1 ? 'página' : 'páginas')
   const filtering = $derived(!!ws.query.trim() || !!ws.tagFilter)
-  const email = $derived(`${userName.trim().split(/\s+/)[0]?.toLowerCase() || 'conta'}@${server}`)
+  const email = $derived(given_email ?? `${userName.trim().split(/\s+/)[0]?.toLowerCase() || 'conta'}@${server}`)
 
   // without a login there is no "shared with me" list to stay on
   $effect(() => {

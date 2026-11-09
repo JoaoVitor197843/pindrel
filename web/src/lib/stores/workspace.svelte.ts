@@ -245,6 +245,18 @@ export class Workspace {
     }
   }
 
+  /** Closes the account: writes what is left, stops saving and drops every note from memory. */
+  async close(): Promise<void> {
+    const done = this.detach()
+    this.pages = []
+    this.tags = []
+    this.users = []
+    this.tagFilter = null
+    this.query = ''
+    this.vaultUnlocked = false
+    await done
+  }
+
   /** Writes what is left and stops saving. */
   async detach(): Promise<void> {
     const p = this.persist
@@ -309,16 +321,25 @@ export class Workspace {
 
   /** Local mode (no login): the person's own notes start empty. The demo pages, tags and people go (the vault stays, empty), and there is no sharing. */
   goLocal() {
+    this.#startEmpty(true)
+  }
+
+  /** A signed-in account: its notes start empty too (they come from the account's own database), with the "shared with me" list kept. */
+  goAccount() {
+    this.#startEmpty(false)
+  }
+
+  #startEmpty(local: boolean) {
     // first: the pages are about to be emptied, and whatever was waiting to be saved must be copied before that
     void this.detach()
-    this.local = true
+    this.local = local
     this.pages = []
     this.tags = []
     this.users = []
     this.tagFilter = null
     this.query = ''
     this.vaultUnlocked = false
-    if (this.view === 'shared') this.view = 'all'
+    if (local && this.view === 'shared') this.view = 'all'
   }
 
   live = $derived(this.pages.filter((p) => !p.trashed))
