@@ -115,13 +115,14 @@ const LoginInput$json = {
   '2': [
     {'1': 'email', '3': 1, '4': 1, '5': 9, '10': 'email'},
     {'1': 'password', '3': 2, '4': 1, '5': 9, '10': 'password'},
+    {'1': 'session_only', '3': 3, '4': 1, '5': 8, '10': 'sessionOnly'},
   ],
 };
 
 /// Descriptor for `LoginInput`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List loginInputDescriptor = $convert.base64Decode(
     'CgpMb2dpbklucHV0EhQKBWVtYWlsGAEgASgJUgVlbWFpbBIaCghwYXNzd29yZBgCIAEoCVIIcG'
-    'Fzc3dvcmQ=');
+    'Fzc3dvcmQSIQoMc2Vzc2lvbl9vbmx5GAMgASgIUgtzZXNzaW9uT25seQ==');
 
 @$core.Deprecated('Use loginRefreshResponseDescriptor instead')
 const LoginRefreshResponse$json = {

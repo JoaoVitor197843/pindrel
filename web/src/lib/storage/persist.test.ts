@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Block } from '../stores/blocks'
 import { PageEditor } from '../stores/editor.svelte'
 import { Workspace } from '../stores/workspace.svelte'
-import { NotesStore, moveLegacy } from './notesStore'
+import { NotesStore, cloudDbName, moveLegacy } from './notesStore'
 
 let n = 0
 let name: string
@@ -419,5 +419,60 @@ describe('the database that used to be called pindrel-notes', () => {
     const copied = await NotesStore.open(name)
     expect((await copied.loadAll()).pages).toHaveLength(0)
     copied.close()
+  })
+})
+
+describe('one database per account', () => {
+  it('names it after the account and refuses an id that does not look like one', () => {
+    expect(cloudDbName('11111111-AAAA-bbbb-cccc-222222222222')).toBe('pindrel-cloud-11111111-aaaa-bbbb-cccc-222222222222')
+    for (const bad of ['', 'x', '../../etc', 'a b c d e f g h', 'id;drop', '1111111-'.repeat(20)]) expect(() => cloudDbName(bad)).toThrow()
+  })
+
+  it('two accounts keep separate notes, and the local ones are a third place', async () => {
+    const a = '11111111-1111-1111-1111-111111111111'
+    const b = '22222222-2222-2222-2222-222222222222'
+    const open = async (store: Promise<NotesStore>) => {
+      const ws = new Workspace()
+      ws.goAccount()
+      await ws.attach(await store)
+      opened.push(ws)
+      return ws
+    }
+    const wa = await open(NotesStore.openAccount(a))
+    wa.newPage('da Ana')
+    await wa.detach()
+    const wb = await open(NotesStore.openAccount(b))
+    expect(wb.pages).toHaveLength(0)
+    wb.newPage('da Bia')
+    await wb.detach()
+    const again = await open(NotesStore.openAccount(a))
+    expect(again.pages.map((p) => p.title)).toEqual(['da Ana'])
+  })
+
+  it('goAccount starts empty but keeps the shared list; close drops every note from memory', async () => {
+    const ws = new Workspace()
+    expect(ws.pages.length).toBeGreaterThan(0)
+    ws.view = 'shared'
+    ws.goAccount()
+    expect(ws.pages).toHaveLength(0)
+    expect(ws.local).toBe(false)
+    expect(ws.view).toBe('shared')
+    ws.goLocal()
+    expect(ws.local).toBe(true)
+    expect(ws.view).toBe('all')
+
+    ws.goAccount()
+    await ws.attach(await NotesStore.openAccount('44444444-4444-4444-4444-444444444444'))
+    opened.push(ws)
+    ws.newPage('secreta')
+    await ws.close()
+    expect(ws.pages).toHaveLength(0)
+    expect(ws.persist).toBeNull()
+    // and what was waiting to be saved still reached the disk
+    const back = new Workspace()
+    back.goAccount()
+    await back.attach(await NotesStore.openAccount('44444444-4444-4444-4444-444444444444'))
+    opened.push(back)
+    expect(back.pages.map((p) => p.title)).toEqual(['secreta'])
   })
 })

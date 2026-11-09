@@ -347,9 +347,12 @@ func (x *RegisterResponse) GetUser() *UserSummary {
 }
 
 type LoginInput struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Email         string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
-	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Email    string                 `protobuf:"bytes,1,opt,name=email,proto3" json:"email,omitempty"`
+	Password string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"`
+	// true: the refresh cookie lasts until the browser closes instead of its full lifetime ("Manter conectado" unchecked).
+	// Left out, it keeps the long-lived cookie, so clients that do not know the field behave as before.
+	SessionOnly   bool `protobuf:"varint,3,opt,name=session_only,json=sessionOnly,proto3" json:"session_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -396,6 +399,13 @@ func (x *LoginInput) GetPassword() string {
 		return x.Password
 	}
 	return ""
+}
+
+func (x *LoginInput) GetSessionOnly() bool {
+	if x != nil {
+		return x.SessionOnly
+	}
+	return false
 }
 
 type LoginRefreshResponse struct {
@@ -608,11 +618,12 @@ const file_shared_protos_auth_proto_rawDesc = "" +
 	"\busername\x18\x02 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x03 \x01(\tR\bpassword\"9\n" +
 	"\x10RegisterResponse\x12%\n" +
-	"\x04user\x18\x01 \x01(\v2\x11.sync.UserSummaryR\x04user\">\n" +
+	"\x04user\x18\x01 \x01(\v2\x11.sync.UserSummaryR\x04user\"a\n" +
 	"\n" +
 	"LoginInput\x12\x14\n" +
 	"\x05email\x18\x01 \x01(\tR\x05email\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"X\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12!\n" +
+	"\fsession_only\x18\x03 \x01(\bR\vsessionOnly\"X\n" +
 	"\x14LoginRefreshResponse\x12!\n" +
 	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\x12\x1d\n" +
 	"\n" +
