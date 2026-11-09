@@ -717,6 +717,22 @@ describe('PageEditor — arquivos no servidor', () => {
     }
   })
 
+  it('um arquivo que não é imagem enviado a um bloco de imagem avisa em que virou', async () => {
+    const b = ed.insert('image')!
+    toast.message = ''
+    ed.uploadInto(b.id, put('foto.heic'))
+    await until(() => block(b.id).type !== 'image')
+    expect(toast.message).toMatch(/foto\.heic não é uma imagem.*guardado como um arquivo/)
+    // a real picture and a file sent to a file block say nothing
+    const ok = ed.insert('image')!
+    const plain = ed.insert('file')!
+    toast.message = ''
+    ed.uploadInto(ok.id, put('foto.png'))
+    ed.uploadInto(plain.id, put('notas.txt'))
+    await until(() => block(ok.id).type === 'image' && !!(block(ok.id) as { fileId?: string }).fileId && !!(block(plain.id) as { fileId?: string }).fileId)
+    expect(toast.message).toBe('')
+  })
+
   it('o bloco de arquivo guarda nome, tamanho, tipo e nível', async () => {
     const b = ed.insert('file')!
     ed.uploadInto(b.id, put('relatorio.zip', 777))
