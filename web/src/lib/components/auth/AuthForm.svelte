@@ -8,10 +8,10 @@
   interface Props {
     /** Shows the supporting line under the title (wide layout). */
     showSubtitle?: boolean
-    oncontinueoffline?: () => void
+    oncontinuelocal?: () => void
   }
 
-  let { showSubtitle = false, oncontinueoffline }: Props = $props()
+  let { showSubtitle = false, oncontinuelocal }: Props = $props()
 
   let register = $state(false)
   let obscure = $state(true)
@@ -21,8 +21,8 @@
   const field =
     'w-full rounded-field border border-field-line bg-surface px-4 py-4 text-fg placeholder:text-muted transition-colors duration-200 focus:border-accent-line focus:outline-none'
 
-  function continueOffline() {
-    if (oncontinueoffline) return oncontinueoffline()
+  function continueLocal() {
+    if (oncontinuelocal) return oncontinuelocal()
     toast.show('Notas locais chegam em breve.')
   }
 
@@ -106,10 +106,10 @@
 
   <button
     type="button"
-    onclick={continueOffline}
+    onclick={continueLocal}
     class="h-13.5 rounded-field border border-field-line text-fg transition duration-150 hover:bg-surface active:scale-[0.98]"
   >
-    Continuar offline neste dispositivo
+    Continuar sem login
   </button>
 
   <p class="text-center text-muted">

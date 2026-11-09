@@ -158,6 +158,7 @@ export class PageEditor {
     if (!p?.content || i < 0 || !this.can('blocks')) return
     const [gone] = p.content.splice(i, 1)
     this.#changed()
+    if (gone.type === 'image' && gone.mediaId) this.#dropMedia(gone.mediaId)
     this.#release(fileIdsOf([gone]))
     this.#cancelUpload(id)
   }
@@ -290,7 +291,7 @@ export class PageEditor {
     if (!p?.content || i < 0 || !this.can('blocks') || p.content.length >= MAX_BLOCKS) return null
     const src = p.content[i]
     // an image picked in this session has a temporary address that belongs to the original; one kept on the server can be shared
-    if (src.type === 'image' && !src.fileId) return null
+    if (src.type === 'image' && !src.fileId) return null // a picture kept on this device belongs to one block
     const copy: Block = JSON.parse(JSON.stringify(src))
     copy.id = newId()
     if (copy.type === 'checklist') copy.items.forEach((item) => (item.id = newId('i')))
@@ -516,11 +517,52 @@ export class PageEditor {
     if (!b || !this.can('images')) return
     if (b.src && b.src !== src) URL.revokeObjectURL?.(b.src)
     const had = b.fileId
+    const stored = b.mediaId
     b.name = name
     b.src = src
     delete b.fileId
+    delete b.mediaId
     this.#changed()
     if (had) this.#release([had])
+    if (stored) this.#dropMedia(stored)
+  }
+
+  /** A picture picked on this device: kept in the browser's media store when there is one, otherwise only for this session. */
+  async setImageFile(id: string, file: File): Promise<boolean> {
+    const persist = this.ws.persist
+    if (!persist) {
+      this.setImage(id, file.name, URL.createObjectURL(file))
+      return true
+    }
+    if (!this.#block(id, 'image') || !this.can('images')) return false
+    let mediaId: string
+    try {
+      mediaId = await persist.store.putMedia(this.id, file)
+    } catch {
+      toast.show('Não foi possível guardar a imagem neste navegador')
+      return false
+    }
+    const b = this.#block(id, 'image')
+    if (!b || !this.can('images')) {
+      // the block (or the page) went away while the picture was being written
+      this.#dropMedia(mediaId)
+      return false
+    }
+    const had = b.fileId
+    const before = b.mediaId
+    if (b.src) URL.revokeObjectURL?.(b.src)
+    b.name = file.name
+    b.src = null
+    b.mediaId = mediaId
+    delete b.fileId
+    this.#changed()
+    if (had) this.#release([had])
+    if (before) this.#dropMedia(before)
+    return true
+  }
+
+  #dropMedia(mediaId: string) {
+    void this.ws.persist?.store.deleteMedia(mediaId).catch(() => {})
   }
 
   // spoiler / secure

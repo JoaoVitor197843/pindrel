@@ -15,10 +15,10 @@
   import { toast } from '../lib/stores/toast.svelte'
 
   interface Props {
-    oncontinueoffline?: () => void
+    oncontinuelocal?: () => void
   }
 
-  let { oncontinueoffline }: Props = $props()
+  let { oncontinuelocal }: Props = $props()
 
   // Same breakpoint (840) as the mobile AuthPage.
   const desktop = new MediaQuery('min-width: 840px')
@@ -57,7 +57,7 @@
       <div class="flex flex-col">
         <div class="flex flex-1 items-center justify-center px-12 py-8">
           <div id="entrar" class="w-full max-w-[480px] {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
-            <AuthForm showSubtitle {oncontinueoffline} />
+            <AuthForm showSubtitle {oncontinuelocal} />
           </div>
         </div>
         <p class="flex items-center justify-center gap-2.5 px-6 pb-8 font-mono text-xs tracking-[0.6px] text-muted">
@@ -77,7 +77,7 @@
   {:else}
     <AuthHeader onaddserver={addServer} />
     <div id="entrar" class="mx-auto max-w-[480px] px-6 pt-7 pb-6 {fade} {selection.connecting ? 'opacity-30' : ''}" inert={!!selection.connecting}>
-      <AuthForm {oncontinueoffline} />
+      <AuthForm {oncontinuelocal} />
     </div>
     <div class="px-6 pb-8"><SecureNotice /><PairingCode /></div>
   {/if}

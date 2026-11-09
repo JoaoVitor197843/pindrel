@@ -15,18 +15,18 @@ describe('App — painel e editor', () => {
     expect(screen.getByRole('heading', { name: 'Bem-vindo de volta' })).toBeTruthy()
   })
 
-  it('"Continuar offline" leva ao painel de notas', async () => {
+  it('"Continuar sem login" leva ao painel de notas', async () => {
     history.replaceState(null, '', '/')
     render(App)
-    await fireEvent.click(screen.getByRole('button', { name: /Continuar offline/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Continuar sem login/ }))
     expect(screen.getByRole('heading', { name: 'Minhas páginas' })).toBeTruthy()
-    expect(location.search).toBe('?tela=painel&modo=offline')
+    expect(location.search).toBe('?tela=painel&modo=local')
   })
 
   it('offline: o menu da conta mostra Você, o endereço do servidor e "Logar",', async () => {
     history.replaceState(null, '', '/')
     render(App)
-    await fireEvent.click(screen.getByRole('button', { name: /Continuar offline/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Continuar sem login/ }))
     await fireEvent.click(screen.getByRole('button', { name: /Menu da conta de Você/ }))
     expect(screen.getByRole('menu', { name: 'Conta' }).textContent).toContain('Você')
     expect(screen.getByRole('menuitem', { name: 'Logar' })).toBeTruthy()
@@ -39,7 +39,7 @@ describe('App — painel e editor', () => {
   it('offline: começa vazio, sem páginas de exemplo nem tags, com o cofre e sem "Compartilhadas comigo"', async () => {
     history.replaceState(null, '', '/')
     render(App)
-    await fireEvent.click(screen.getByRole('button', { name: /Continuar offline/ }))
+    await fireEvent.click(screen.getByRole('button', { name: /Continuar sem login/ }))
     expect(screen.getByRole('heading', { name: 'Nenhuma página ainda' })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Cofre/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Compartilhadas comigo/ })).toBeNull()
@@ -50,7 +50,7 @@ describe('App — painel e editor', () => {
   })
 
   it('offline: o cofre abre vazio, sem entradas de exemplo', async () => {
-    history.replaceState(null, '', '/?tela=painel&modo=offline')
+    history.replaceState(null, '', '/?tela=painel&modo=local')
     render(App)
     await fireEvent.click(screen.getByRole('button', { name: /Cofre/ }))
     expect(screen.getByRole('heading', { name: 'Cofre' })).toBeTruthy()
@@ -59,9 +59,9 @@ describe('App — painel e editor', () => {
   })
 
   it('offline: uma página nova não tem o campo Pessoas', async () => {
-    history.replaceState(null, '', '/?tela=painel&modo=offline')
+    history.replaceState(null, '', '/?tela=painel&modo=local')
     render(App)
-    await fireEvent.click(screen.getByRole('button', { name: 'Criar primeira página' }))
+    await fireEvent.click(await screen.findByRole('button', { name: 'Criar primeira página' }))
     await fireEvent.click(screen.getAllByTestId('page-card')[0].querySelector('button')!)
     expect(screen.queryByText('Pessoas')).toBeNull()
   })
