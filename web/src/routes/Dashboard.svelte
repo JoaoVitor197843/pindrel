@@ -16,6 +16,8 @@
 
   interface Props {
     userName?: string
+    /** The account's e-mail; without it one is made up from the name and the server (the demo). */
+    email?: string
     server?: string
     onlogout?: () => void
     /** Shared with the editor, so what is edited there shows here. */
@@ -23,7 +25,7 @@
     onopen?: (id: string) => void
   }
 
-  let { userName = 'Marina Reis', server = 'pindrel.local', onlogout, ws: given, onopen }: Props = $props()
+  let { userName = 'Você', email: given_email, server = location.host, onlogout, ws: given, onopen }: Props = $props()
 
   // svelte-ignore state_referenced_locally
   const ws = given ?? new Workspace()
@@ -51,11 +53,11 @@
   const total = $derived(ws.view === 'vault' ? ws.visibleVault.length : ws.visible.length)
   const noun = $derived(ws.view === 'vault' ? (total === 1 ? 'entrada' : 'entradas') : total === 1 ? 'página' : 'páginas')
   const filtering = $derived(!!ws.query.trim() || !!ws.tagFilter)
-  const email = $derived(`${userName.trim().split(/\s+/)[0]?.toLowerCase() || 'conta'}@${server}`)
+  const email = $derived(given_email ?? `${userName.trim().split(/\s+/)[0]?.toLowerCase() || 'conta'}@${server}`)
 
-  // offline there is no "shared with me" list to stay on
+  // without a login there is no "shared with me" list to stay on
   $effect(() => {
-    if (ws.offline && ws.view === 'shared') ws.go('all')
+    if (ws.local && ws.view === 'shared') ws.go('all')
   })
 
   // a layout change must not leave the drawer or the rail stuck open
@@ -108,14 +110,14 @@
 
   function logout() {
     if (onlogout) onlogout()
-    else toast.show(ws.offline ? 'Entrar em uma conta ainda não está ligado ao login' : 'Sair ainda não está ligado ao login')
+    else toast.show(ws.local ? 'Entrar em uma conta ainda não está ligado ao login' : 'Sair ainda não está ligado ao login')
   }
 
-  function exportAll(format: 'json' | 'md') {
-    const ok =
-      format === 'json'
-        ? download('pindrel.json', toJson(ws.pages, ws.tags), 'application/json')
-        : download('pindrel.md', toMarkdown(ws.pages, ws.tags), 'text/markdown')
+  async function exportAll(format: 'json' | 'md') {
+    // the list holds no bodies: they are read from the browser's storage for the time the file takes to build
+    const ok = await ws.withBodies(() =>
+      format === 'json' ? download('pindrel.json', toJson(ws.pages, ws.tags), 'application/json') : download('pindrel.md', toMarkdown(ws.pages, ws.tags), 'text/markdown'),
+    )
     toast.show(ok ? 'Exportação pronta' : 'Não foi possível exportar')
   }
 
@@ -153,7 +155,7 @@
     tagCounts: ws.tagCounts,
     tagFilter: ws.tagFilter,
     syncLabel: 'sync · há 2 min',
-    offline: ws.offline,
+    local: ws.local,
     onview: view,
     onnew: create,
     ontag: (id: string) => {
@@ -217,7 +219,7 @@
       onsettings={() => openSettings('general')}
       onexport={() => openSettings('data')}
       onlogout={logout}
-      logoutLabel={ws.offline ? 'Logar' : 'Sair'}
+      logoutLabel={ws.local ? 'Logar' : 'Sair'}
     />
 
     <main class="min-h-0 flex-1 overflow-y-auto px-4 py-6 md:px-8" bind:this={list}>
@@ -275,7 +277,7 @@
           </button>
         {/if}
 
-        {#if ws.visible.length === 0}
+        {#if ws.visible.length === 0 && !ws.loading}
           <div class="mt-8 flex flex-col items-center gap-2 rounded-field border border-dashed border-line p-10 text-center" data-testid="empty">
             <span class="text-muted"><Icon name={filtering ? 'search' : ws.view === 'trash' ? 'trash' : ws.view === 'shared' ? 'people' : 'page'} size={28} /></span>
             <h2 class="font-serif text-2xl">{empty.title}</h2>

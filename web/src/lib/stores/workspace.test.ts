@@ -1,4 +1,5 @@
 import { flushSync } from 'svelte'
+import { sampleWorkspace } from '../sample'
 import { describe, expect, it } from 'vitest'
 import type { Block } from './blocks'
 import { fold, formatDate, pageMeta, Workspace } from './workspace.svelte'
@@ -7,20 +8,20 @@ const titles = (w: Workspace) => w.visible.map((p) => p.title)
 
 describe('Workspace', () => {
   it('conta páginas por visão (as compartilhadas ficam fora de "todas") e por tag', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     expect(w.counts).toEqual({ all: 23, shared: 3, vault: 5, trash: 0 })
     expect(w.tagCounts).toMatchObject({ trabalho: 6, pessoal: 10, receitas: 3, servidor: 4 })
   })
 
   it('ordena por recentes e por A–Z', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     expect(w.visible[0].title).toBe('Reforma do apartamento — orçamento')
     w.sort = 'az'
     expect(titles(w)[0]).toBe('Anotações do curso de tipografia')
   })
 
   it('busca ignora acento e caixa, e olha o resumo também', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.query = 'MIGRACAO'
     expect(titles(w)).toEqual(['Migração do servidor para NixOS'])
     w.query = 'levain'
@@ -32,7 +33,7 @@ describe('Workspace', () => {
   })
 
   it('filtra por tag, e trocar de visão limpa o filtro', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.toggleTagFilter('receitas')
     expect(w.visible).toHaveLength(3)
     w.toggleTagFilter('receitas')
@@ -44,7 +45,7 @@ describe('Workspace', () => {
   })
 
   it('escolher uma tag estando nas compartilhadas volta para "todas"', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.go('shared')
     w.toggleTagFilter('trabalho')
     expect(w.view).toBe('all')
@@ -52,7 +53,7 @@ describe('Workspace', () => {
   })
 
   it('nova página entra no topo, limpa busca e herda a tag filtrada', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.query = 'xyz'
     w.go('trash')
     w.toggleTagFilter('pessoal')
@@ -66,13 +67,13 @@ describe('Workspace', () => {
   })
 
   it('ids de páginas novas nunca se repetem, mesmo com cliques repetidos', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     const ids = new Set(Array.from({ length: 200 }, () => w.newPage().id))
     expect(ids.size).toBe(200)
   })
 
   it('lixeira: mover, restaurar e esvaziar', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.trash('p1')
     w.trash('inexistente')
     expect(w.counts).toMatchObject({ all: 22, trash: 1 })
@@ -87,7 +88,7 @@ describe('Workspace', () => {
   })
 
   it('com a lixeira desligada, excluir apaga de vez', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.saveSettings({ useTrash: false, retention: 30 })
     w.trash('p1')
     expect(w.pages.some((p) => p.id === 'p1')).toBe(false)
@@ -95,7 +96,7 @@ describe('Workspace', () => {
   })
 
   it('configurações: retenção fica entre 7 e 90 dias, mesmo com valor absurdo', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.saveSettings({ useTrash: true, retention: 1000 })
     expect(w.settings.retention).toBe(90)
     w.saveSettings({ useTrash: true, retention: 3 })
@@ -105,7 +106,7 @@ describe('Workspace', () => {
   })
 
   it('tags: cria com cor, normaliza espaços, não duplica e ignora vazio', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     expect(w.addTag('   ')).toBeNull()
     const t = w.addTag('  Minha  tag ', 'gold')!
     expect(t).toMatchObject({ name: 'minha-tag', color: 'gold' })
@@ -117,7 +118,7 @@ describe('Workspace', () => {
   })
 
   it('cofre: senha curta não abre; só aceita entrada nova desbloqueado; bloqueado não busca no conteúdo', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     expect(w.unlockVault('abc')).toBe('short')
     expect(w.unlockVault('   ab  ')).toBe('short')
     expect(w.vaultUnlocked).toBe(false)
@@ -135,7 +136,7 @@ describe('Workspace', () => {
   })
 
   it('grupos: fixadas primeiro, depois por data; A–Z não agrupa por data; busca e lixeira ficam planas', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     expect(w.groups.map((g) => g.key)).toEqual(['pinned', 'today', 'week', 'month', 'older'])
     expect(w.groups[0].pages.map((p) => p.id).sort()).toEqual(['p2', 'p6'])
     expect(w.groups.flatMap((g) => g.pages)).toHaveLength(23) // every page exactly once
@@ -154,7 +155,7 @@ describe('Workspace', () => {
   })
 
   it('reveal leva até a página: a visão certa, sem filtro, com o título na busca', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.toggleTagFilter('pessoal')
     w.reveal('s1')
     expect(w.view).toBe('shared')
@@ -168,7 +169,7 @@ describe('Workspace', () => {
   })
 
   it('limpar filtros zera busca e tag', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     w.query = 'x'
     w.tagFilter = 'pessoal'
     w.clearFilters()
@@ -176,7 +177,7 @@ describe('Workspace', () => {
   })
 
   it('pageMeta, fold e formatDate', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     const by = (id: string) => w.pages.find((p) => p.id === id)!
     expect(pageMeta(by('p4'))).toBe('cofre')
     expect(pageMeta(by('s1'))).toBe('por Caio')
@@ -188,14 +189,14 @@ describe('Workspace', () => {
 
   describe('cofre com páginas', () => {
     it('as entradas do cofre são páginas protegidas, também listadas em "todas"', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       expect(w.visibleVault.map((p) => p.id).sort()).toEqual(['p4', 'v2', 'v3', 'v4', 'v5'])
       expect(w.visibleVault.every((p) => p.locked)).toBe(true)
       expect(w.visible.filter((p) => p.locked)).toHaveLength(5)
     })
 
     it('trancado, a busca só olha o título; destrancado, olha o conteúdo', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       w.query = 'passaporte'
       expect(titles(w)).toEqual(['Documentos — RG, CPF, passaporte']) // by title
       w.query = 'FG882301'
@@ -207,7 +208,7 @@ describe('Workspace', () => {
     })
 
     it('uma página do cofre nunca fica na lixeira: some de vez, mesmo com a lixeira ligada', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       w.trash('v2')
       expect(w.page('v2')).toBeUndefined()
       expect(w.counts.trash).toBe(0)
@@ -215,7 +216,7 @@ describe('Workspace', () => {
     })
 
     it('nova entrada segura é uma página protegida, só com o cofre aberto, e fica no cofre', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       expect(w.addVaultEntry()).toBeNull()
       w.unlockVault('abcd')
       const made = w.addVaultEntry()!
@@ -226,7 +227,7 @@ describe('Workspace', () => {
     })
 
     it('deleteForever apaga sem deixar rastro', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       w.deleteForever('p1')
       w.deleteForever('nao-existe')
       expect(w.page('p1')).toBeUndefined()
@@ -236,7 +237,7 @@ describe('Workspace', () => {
 
   describe('compartilhamento', () => {
     it('compartilha com quem existe, ignora você mesmo, repetidos e desconhecidos', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       expect(w.sharePage('p1', ['tiago', 'tiago', 'me', 'ninguem', 'bea'], ['text', 'x' as never])).toBe(2)
       expect(w.page('p1')!.shares).toEqual([
         { userId: 'tiago', perms: ['text'] },
@@ -247,12 +248,12 @@ describe('Workspace', () => {
     })
 
     it('uma página que recebi aceita convidados (a permissão de compartilhar é checada no editor)', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       expect(w.sharePage('s1', ['tiago'], [])).toBe(1)
     })
 
     it('muda a permissão, retira um e retira todos', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       w.setShare('p0', 'julia', ['tags', 'tags', 'text'])
       expect(w.page('p0')!.shares.find((s) => s.userId === 'julia')!.perms).toEqual(['text', 'tags'])
       w.setShare('p0', 'ninguem', ['text'])
@@ -263,14 +264,14 @@ describe('Workspace', () => {
     })
 
     it('cada compartilhamento guarda uma cópia: mudar um não muda os outros', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       w.sharePage('p1', ['tiago', 'bea'], ['text'])
       w.setShare('p1', 'tiago', ['tags'])
       expect(w.page('p1')!.shares.find((s) => s.userId === 'bea')!.perms).toEqual(['text'])
     })
 
     it('páginas que recebi trazem o que posso fazer com elas', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       expect(w.page('s1')!.myPerms).toHaveLength(10)
       expect(w.page('s2')!.myPerms).toEqual([])
       expect(w.page('s3')!.myPerms).not.toContain('share')
@@ -280,7 +281,7 @@ describe('Workspace', () => {
 
   describe('relacionadas e duplicar', () => {
     it('relacionadas: quem divide mais tags vem primeiro; sem a própria página nem páginas do cofre', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       const ids = w.related('p0').map((p) => p.id)
       expect(ids).not.toContain('p0')
       expect(w.related('p0').every((p) => !p.locked)).toBe(true)
@@ -293,21 +294,21 @@ describe('Workspace', () => {
     })
 
     it('sem tags ou página inexistente: nenhuma relacionada', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       expect(w.related('nao-existe')).toEqual([])
       const fresh = w.newPage()
       expect(w.related(fresh.id)).toEqual([])
     })
 
     it('uma página na lixeira não é sugerida', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       const first = w.related('p2')[0]
       w.trash(first.id)
       expect(w.related('p2').some((p) => p.id === first.id)).toBe(false)
     })
 
     it('duplicar cria uma cópia minha, sem compartilhamento, sem fixar, com ids novos', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       w.page('p0')!.pinned = true
       const made = w.duplicate('p0')!
       const copy = made.page
@@ -325,7 +326,7 @@ describe('Workspace', () => {
     })
 
     it('mexer na cópia não mexe no original (nada é compartilhado por referência)', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       const copy = w.duplicate('p0')!.page
       ;(copy.content![0] as { text: string }).text = 'só na cópia'
       copy.tags.push('leitura')
@@ -336,7 +337,7 @@ describe('Workspace', () => {
     })
 
     it('as imagens não vão para a cópia (o link temporário é do original) e a conta aparece', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       w.page('p0')!.content!.push({ id: 'im', type: 'image', name: 'a.png', src: 'blob:a' })
       const made = w.duplicate('p0')!
       expect(made.images).toBe(1)
@@ -345,7 +346,7 @@ describe('Workspace', () => {
     })
 
     it('copiar uma página que recebi cria uma página minha; um título enorme é cortado', () => {
-      const w = new Workspace()
+      const w = sampleWorkspace()
       const copy = w.duplicate('s1')!.page
       expect(copy.sharedBy).toBeNull()
       expect(copy.myPerms).toHaveLength(10)
@@ -359,7 +360,7 @@ describe('Workspace', () => {
 describe('Workspace — arquivos de páginas apagadas de vez', () => {
   const file = (fileId: string, id = fileId): Block => ({ id, type: 'file', fileId, name: fileId, size: 1, mime: '', level: 3 })
   const setup = () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     const gone: string[][] = []
     w.filesGone = (ids) => gone.push(ids)
     return { w, gone }

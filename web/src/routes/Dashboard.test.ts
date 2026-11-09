@@ -1,10 +1,13 @@
 import axe from 'axe-core'
-import { fireEvent, render, screen, within } from '@testing-library/svelte'
+import { fireEvent, render as mount, screen, within } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { sampleWorkspace } from '../lib/sample'
 import { toast } from '../lib/stores/toast.svelte'
 import { viewport } from '../test/setup'
 import Dashboard from './Dashboard.svelte'
 
+// the product starts empty: these tests run on the sample notes
+const render = (c: typeof Dashboard, props: Record<string, unknown> = {}) => mount(c, { ws: sampleWorkspace(), userName: 'Marina Reis', server: 'pindrel.local', ...props })
 const click = (el: HTMLElement) => fireEvent.click(el)
 const cards = () => screen.queryAllByTestId('page-card')
 const cardTitles = () => cards().map((c) => within(c).getByRole('heading').textContent)

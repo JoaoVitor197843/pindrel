@@ -78,18 +78,18 @@ describe('Login — layout mobile', () => {
   })
 
   it('botão offline chama o callback', async () => {
-    const oncontinueoffline = vi.fn()
-    render(Login, { oncontinueoffline })
+    const oncontinuelocal = vi.fn()
+    render(Login, { oncontinuelocal })
 
-    await click(screen.getByRole('button', { name: 'Continuar offline neste dispositivo' }))
+    await click(screen.getByRole('button', { name: 'Continuar sem login' }))
 
-    expect(oncontinueoffline).toHaveBeenCalledOnce()
+    expect(oncontinuelocal).toHaveBeenCalledOnce()
   })
 
   it('botão offline sem callback mostra aviso', async () => {
     render(Login)
 
-    await click(screen.getByRole('button', { name: 'Continuar offline neste dispositivo' }))
+    await click(screen.getByRole('button', { name: 'Continuar sem login' }))
 
     expect(screen.getByRole('status').textContent).toContain('Notas locais chegam em breve.')
   })
@@ -243,8 +243,8 @@ describe('Login — layout desktop', () => {
   })
 
   it('senha, registro e offline continuam funcionando', async () => {
-    const oncontinueoffline = vi.fn()
-    render(Login, { oncontinueoffline })
+    const oncontinuelocal = vi.fn()
+    render(Login, { oncontinuelocal })
 
     await click(screen.getByRole('button', { name: 'MOSTRAR' }))
     expect((screen.getByLabelText('Senha') as HTMLInputElement).type).toBe('text')
@@ -253,8 +253,8 @@ describe('Login — layout desktop', () => {
     expect(screen.getByText('Crie sua conta para começar a escrever.')).toBeTruthy()
     expect(screen.getByLabelText('Username')).toBeTruthy()
 
-    await click(screen.getByRole('button', { name: 'Continuar offline neste dispositivo' }))
-    expect(oncontinueoffline).toHaveBeenCalledOnce()
+    await click(screen.getByRole('button', { name: 'Continuar sem login' }))
+    expect(oncontinuelocal).toHaveBeenCalledOnce()
   })
 
   it('redimensionar alterna entre os layouts', async () => {

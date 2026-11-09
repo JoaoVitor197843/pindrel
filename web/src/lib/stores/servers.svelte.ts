@@ -1,5 +1,5 @@
 import { fetchDiscoveredServers } from '../api/servers'
-import type { DiscoveredServer } from '../../types/shared/protos/server'
+import { ServerInfo, type DiscoveredServer } from '../../types/shared/protos/server'
 import { inspect } from '../api/serverCheck'
 import { manual } from './manual.svelte'
 import { parsePort } from '../api/serverCheck'
@@ -160,6 +160,20 @@ export const navigation = {
 }
 
 const PROBE_TIMEOUT_MS = 3000
+/** Whether the answer of `/server/info/` says registration is open; null when it is not a `ServerInfo` (a 404, an empty body). */
+async function registrationOf(res: Response): Promise<boolean | null> {
+  try {
+    if (!res.ok) return null
+    const body = new Uint8Array(await res.arrayBuffer())
+    if (body.length === 0 || body.length > 4096) return null
+    const info = ServerInfo.decode(body)
+    // a real answer always names the server: an empty name is a body that is not ours
+    return info.name.trim() ? info.registrationEnabled : null
+  } catch {
+    return null
+  }
+}
+
 const HEALTH_TIMEOUT_MS = 3000
 const HEALTH_POLL_MS = 10_000
 const HEALTH_RETRY_MS = 3000
@@ -217,6 +231,8 @@ class ServerSelection {
   address = $state<string | null>(null)
   /** Whether this page's server has a secure (HTTPS) side (`x-pindrel-tls` on `/server/info/`). */
   tlsOffered = $state(false)
+  /** Whether new accounts can be created here (`ServerInfo.registration_enabled`); null until the server has said. */
+  registrationEnabled = $state<boolean | null>(null)
 
   /** What to print for the address: a placeholder while it is not known yet. */
   get shownAddress(): string {
@@ -246,6 +262,8 @@ class ServerSelection {
       if (up) {
         this.address = lanAddress(res.headers.get(ADDRESS_HEADER)) ?? embedded.address
         this.tlsOffered = parsePort(res.headers.get(TLS_HEADER)) !== undefined
+        const open = await registrationOf(res)
+        if (open !== null) this.registrationEnabled = open
       }
     } catch {
       up = false

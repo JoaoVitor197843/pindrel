@@ -395,10 +395,12 @@ class LoginInput extends $pb.GeneratedMessage {
   factory LoginInput({
     $core.String? email,
     $core.String? password,
+    $core.bool? sessionOnly,
   }) {
     final result = LoginInput._();
     if (email != null) result.email = email;
     if (password != null) result.password = password;
+    if (sessionOnly != null) result.sessionOnly = sessionOnly;
     return result;
   }
 
@@ -417,6 +419,7 @@ class LoginInput extends $pb.GeneratedMessage {
       createEmptyInstance: LoginInput.$_createMessage)
     ..aOS(1, _omitFieldNames ? '' : 'email')
     ..aOS(2, _omitFieldNames ? '' : 'password')
+    ..aOB(3, _omitFieldNames ? '' : 'sessionOnly')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -456,6 +459,17 @@ class LoginInput extends $pb.GeneratedMessage {
   $core.bool hasPassword() => $_has(1);
   @$pb.TagNumber(2)
   void clearPassword() => $_clearField(2);
+
+  /// true: the refresh cookie lasts until the browser closes instead of its full lifetime ("Manter conectado" unchecked).
+  /// Left out, it keeps the long-lived cookie, so clients that do not know the field behave as before.
+  @$pb.TagNumber(3)
+  $core.bool get sessionOnly => $_getBF(2);
+  @$pb.TagNumber(3)
+  set sessionOnly($core.bool value) => $_setBool(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSessionOnly() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSessionOnly() => $_clearField(3);
 }
 
 class LoginRefreshResponse extends $pb.GeneratedMessage {

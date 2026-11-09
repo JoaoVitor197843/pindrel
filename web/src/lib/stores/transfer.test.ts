@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { sampleWorkspace } from '../sample'
 import { download, escapeHtml, exportPage, fileNameFor, pageToHtml, pageToJson, pageToMarkdown, pageToText, parseImported, readImports, toJson, toMarkdown } from './transfer'
 import { Workspace } from './workspace.svelte'
 import type { NotePage } from './workspace.svelte'
@@ -11,7 +12,7 @@ const file = (name: string, text: string, size = text.length) => {
 }
 
 describe('exportar', () => {
-  const w = new Workspace()
+  const w = sampleWorkspace()
 
   it('JSON e Markdown deixam de fora o que é do cofre e o que está na lixeira', () => {
     w.trash('p1')
@@ -83,7 +84,7 @@ describe('importar', () => {
 })
 
 describe('exportar uma página', () => {
-  const w = new Workspace()
+  const w = sampleWorkspace()
   const page = w.page('p0')!
   const md = pageToMarkdown(page, w.tags)
 
@@ -129,7 +130,7 @@ describe('exportar uma página', () => {
   })
 
   it('nada do que a pessoa escreveu vira marcação no HTML exportado', () => {
-    const w2 = new Workspace()
+    const w2 = sampleWorkspace()
     const p = w2.newPage('<img src=x onerror=alert(1)> & "aspas"')
     p.content = [
       { id: 'a', type: 'paragraph', text: '<script>alert(1)</script>\nsegunda linha' },
@@ -147,7 +148,7 @@ describe('exportar uma página', () => {
   })
 
   it('o Markdown aguenta crases, barras e quebras dentro do conteúdo', () => {
-    const w2 = new Workspace()
+    const w2 = sampleWorkspace()
     const p = w2.newPage('Título\ncom quebra')
     p.content = [
       { id: 'a', type: 'code', lang: 'texto', text: 'texto com ``` dentro\n```' },
@@ -191,7 +192,7 @@ describe('exportar uma página', () => {
 
 describe('exportação dos blocos novos', () => {
   const page = (): NotePage => ({
-    ...new Workspace().page('p0')!,
+    ...sampleWorkspace().page('p0')!,
     title: 'T',
     tags: [],
     content: [
@@ -235,7 +236,7 @@ describe('exportação dos blocos novos', () => {
 
 describe('sublinhado na exportação', () => {
   const page = (): NotePage => ({
-    ...new Workspace().page('p0')!,
+    ...sampleWorkspace().page('p0')!,
     title: 'T',
     tags: [],
     content: [
@@ -264,7 +265,7 @@ describe('sublinhado na exportação', () => {
 
 describe('exportação: títulos, listas, sumário, link e destaques', () => {
   const page = (): NotePage => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     const p = w.page('p5')!
     p.title = 'Teste'
     p.content = [
@@ -327,7 +328,7 @@ describe('exportação: títulos, listas, sumário, link e destaques', () => {
   })
 
   it('um link ainda sem endereço e um sumário sem títulos não deixam rastro nem quebram', () => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     const p = w.page('p5')!
     p.content = [{ id: 'a', type: 'bookmark', url: '', title: '' }, { id: 'b', type: 'toc' }, { id: 'c', type: 'paragraph', text: 'fim' }]
     expect(pageToMarkdown(p, [])).toContain('fim')
@@ -338,7 +339,7 @@ describe('exportação: títulos, listas, sumário, link e destaques', () => {
 
 describe('exportação: vídeo, áudio, PDF e link para página', () => {
   const page = (): NotePage => {
-    const w = new Workspace()
+    const w = sampleWorkspace()
     const p = w.page('p5')!
     p.title = 'Teste'
     p.content = [

@@ -20,13 +20,36 @@
   let retried = $state(false)
 
   const link = fileLink(() => ed, () => block.fileId)
-  const shown = $derived(block.fileId ? link.url : block.src)
+  // a picture kept in this browser comes out of its own store as a Blob, shown through a temporary address
+  let stored = $state<string | null>(null)
+  let missing = $state(false)
+  $effect(() => {
+    const id = block.mediaId
+    stored = null
+    missing = false
+    if (!id) return
+    let url: string | undefined
+    let gone = false
+    ed.ws.persist?.store
+      .getMedia(id)
+      .then((blob) => {
+        if (gone) return
+        if (blob) stored = url = URL.createObjectURL(blob)
+        else missing = true
+      })
+      .catch(() => !gone && (missing = true))
+    return () => {
+      gone = true
+      if (url) URL.revokeObjectURL(url)
+    }
+  })
+  const shown = $derived(block.fileId ? link.url : block.mediaId ? stored : block.src)
 
   function take(file: File | undefined) {
     if (!file) return
     if (!TYPES.includes(file.type)) return void toast.show('Use uma imagem PNG, JPEG, WebP ou GIF')
     if (file.size > MAX_BYTES) return void toast.show('A imagem passa de 8 MB')
-    ed.setImage(block.id, file.name, URL.createObjectURL(file))
+    void ed.setImageFile(block.id, file)
   }
 
   // the address of a picture on the server stops working after a while: one new try, then the error
@@ -37,12 +60,12 @@
   }
 </script>
 
-{#if block.fileId || block.src}
+{#if block.fileId || block.src || block.mediaId}
   <figure class="flex flex-col gap-2">
     {#if shown}
       <img src={shown} alt={block.name ?? 'Imagem'} class="max-h-[28rem] max-w-full rounded-field border border-line object-contain" onerror={failed} />
-    {:else if link.error}
-      <p class="rounded-field border border-line px-4 py-6 text-sm text-muted">{link.error}</p>
+    {:else if link.error || missing}
+      <p class="rounded-field border border-line px-4 py-6 text-sm text-muted">{link.error ?? 'Esta imagem não está mais guardada neste navegador.'}</p>
     {:else}
       <div class="h-40 animate-pulse rounded-field border border-line bg-line/30 motion-reduce:animate-none" aria-label="Carregando imagem" role="img"></div>
     {/if}

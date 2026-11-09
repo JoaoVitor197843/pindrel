@@ -59,8 +59,8 @@ describe('AuthForm — uso descuidado', () => {
 
   it('o callback offline é chamado uma vez por toque (sem duplicar)', async () => {
     const cb = vi.fn()
-    render(AuthForm, { oncontinueoffline: cb })
-    const btn = screen.getByRole('button', { name: 'Continuar offline neste dispositivo' })
+    render(AuthForm, { oncontinuelocal: cb })
+    const btn = screen.getByRole('button', { name: 'Continuar sem login' })
     await click(btn)
     await click(btn)
     expect(cb).toHaveBeenCalledTimes(2)
