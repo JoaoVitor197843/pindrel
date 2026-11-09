@@ -10,7 +10,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
     "memory": "node scripts/memory.mjs",
     "rich:e2e": "node scripts/rich-e2e.mjs",
-    "files:e2e": "node scripts/files-e2e.mjs"
+    "files:e2e": "node scripts/files-e2e.mjs",
+    "auth:e2e": "node scripts/auth-e2e.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.2.0",

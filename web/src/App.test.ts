@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { instances } from './lib/components/editor/rich/engine'
 import App from './App.svelte'
 import { viewport } from './test/setup'
@@ -8,11 +8,24 @@ const settle = () => new Promise((r) => setTimeout(r, 30))
 
 describe('App — painel e editor', () => {
   beforeEach(() => viewport.set(1400))
+  afterEach(() => vi.unstubAllEnvs())
+  // the sample panel exists only in the build made for the memory measurements
+  const demo = (path: string) => {
+    vi.stubEnv('MODE', 'loadtest')
+    history.replaceState(null, '', path)
+  }
 
   it('sem ?tela=painel continua abrindo o login', () => {
     history.replaceState(null, '', '/')
     render(App)
     expect(screen.getByRole('heading', { name: 'Bem-vindo de volta' })).toBeTruthy()
+  })
+
+  it('?tela=painel sem modo não abre o painel de exemplo: mostra o login', () => {
+    history.replaceState(null, '', '/?tela=painel')
+    render(App)
+    expect(screen.getByRole('heading', { name: 'Bem-vindo de volta' })).toBeTruthy()
+    expect(screen.queryByText('Pão de fermentação natural')).toBeNull()
   })
 
   it('"Continuar sem login" leva ao painel de notas', async () => {
@@ -67,7 +80,7 @@ describe('App — painel e editor', () => {
   })
 
   it('online (sem o modo offline) o menu e o campo de pessoas continuam', async () => {
-    history.replaceState(null, '', '/?tela=painel')
+    demo('/?tela=painel')
     render(App)
     expect(screen.getByRole('button', { name: /Compartilhadas comigo/ })).toBeTruthy()
     await fireEvent.click(screen.getByRole('button', { name: 'Pão de fermentação natural' }))
@@ -75,7 +88,7 @@ describe('App — painel e editor', () => {
   })
 
   it('abrir um cartão mostra o editor, e voltar traz o painel com a edição refletida', async () => {
-    history.replaceState(null, '', '/?tela=painel')
+    demo('/?tela=painel')
     render(App)
     await fireEvent.click(screen.getByRole('button', { name: 'Pão de fermentação natural' }))
     expect(location.pathname).toBe('/notes/p5')
@@ -98,7 +111,7 @@ describe('App — painel e editor', () => {
   })
 
   it('o botão voltar do navegador sai do editor', async () => {
-    history.replaceState(null, '', '/?tela=painel')
+    demo('/?tela=painel')
     render(App)
     await fireEvent.click(screen.getByRole('button', { name: 'Notas da reunião de produto' }))
     expect(screen.getByLabelText('Título da página')).toBeTruthy()
@@ -108,13 +121,13 @@ describe('App — painel e editor', () => {
   })
 
   it('abrir o endereço de uma página direto já mostra o editor', () => {
-    history.replaceState(null, '', '/notes/p0?tela=painel')
+    demo('/notes/p0?tela=painel')
     render(App)
     expect((screen.getByLabelText('Título da página') as HTMLTextAreaElement).value).toBe('Rotina de encerramento do trimestre')
   })
 
   it('um endereço de página que não existe mostra o aviso e deixa voltar', async () => {
-    history.replaceState(null, '', '/notes/nada?tela=painel')
+    demo('/notes/nada?tela=painel')
     render(App)
     expect(screen.getByRole('heading', { name: 'Página não encontrada' })).toBeTruthy()
     await fireEvent.click(screen.getByRole('button', { name: 'Voltar ao dashboard' }))

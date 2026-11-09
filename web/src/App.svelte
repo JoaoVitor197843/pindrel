@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import type { Account } from './lib/api/auth'
   import { seedLoad, signInFromAddress } from './lib/loadtest'
+  import { fillSample } from './lib/sample'
   import { selection } from './lib/stores/servers.svelte'
   import { auth } from './lib/stores/auth.svelte'
   import { Nav } from './lib/stores/nav.svelte'
@@ -12,13 +13,16 @@
   import Editor from './routes/Editor.svelte'
   import Login from './routes/Login.svelte'
 
-  // Three ways to be in the panel, kept in the address so a reload or the back button keeps the person where they were:
-  // `?tela=painel&modo=local` ("Continuar sem login": notes in this browser, no server involved), `&modo=conta` (a signed-in
-  // account, with its own database) and `?tela=painel` alone (the demo with sample pages, used by the memory measurements).
+  // Two ways to be in the panel, kept in the address so a reload or the back button keeps the person where they were:
+  // `?tela=painel&modo=local` ("Continuar sem login": notes in this browser, no server involved) and `&modo=conta` (a
+  // signed-in account, with its own database). Without a mode the address opens the login; only the loadtest build treats
+  // `?tela=painel` alone as a panel with sample pages (the memory measurements).
   const params = () => new URLSearchParams(location.search)
-  const inPanel = () => params().get('tela') === 'painel'
   const isLocal = () => params().get('modo') === 'local'
   const isAccount = () => params().get('modo') === 'conta'
+  /** The sample panel exists only in the build made for the memory measurements. */
+  const isDemo = () => import.meta.env.MODE === 'loadtest' && params().get('modo') === null
+  const inPanel = () => params().get('tela') === 'painel' && (isLocal() || isAccount() || isDemo())
   let preview = $state(inPanel())
   /** The account whose database is open, or null. */
   let openAccountId = $state<string | null>(null)
@@ -55,12 +59,14 @@
   function goLocal() {
     openAccountId = null
     ws.goLocal()
+    ws.ownerName = 'Você'
     void openStorage(() => NotesStore.openLocal())
   }
 
   function enterAccount(user: Account) {
     openAccountId = user.id
     ws.goAccount()
+    ws.ownerName = user.username
     void openStorage(() => NotesStore.openAccount(user.id))
   }
 
@@ -125,6 +131,7 @@
   $effect(() => (preview && auth.status === 'in' && openAccountId ? selection.watchHealth() : undefined))
   // memory measurements only (a build with --mode loadtest); this branch is removed from every other build
   if (import.meta.env.MODE === 'loadtest') {
+    if (isDemo() && inPanel()) fillSample(ws)
     seedLoad(ws, new URLSearchParams(location.search))
     signInFromAddress(new URLSearchParams(location.search))
   }

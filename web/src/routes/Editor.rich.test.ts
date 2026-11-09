@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { sampleWorkspace } from '../lib/sample'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { instances, type RichInstance } from '../lib/components/editor/rich/engine'
 import { resetNearView } from '../lib/components/editor/nearView'
@@ -10,7 +11,7 @@ import Editor from './Editor.svelte'
 beforeEach(() => {
   viewport.set(1400)
   toast.message = ''
-  ws = new Workspace()
+  ws = sampleWorkspace()
 })
 afterEach(() => {
   cleanup()

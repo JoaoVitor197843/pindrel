@@ -25,7 +25,7 @@
     onopen?: (id: string) => void
   }
 
-  let { userName = 'Marina Reis', email: given_email, server = 'pindrel.local', onlogout, ws: given, onopen }: Props = $props()
+  let { userName = 'Você', email: given_email, server = location.host, onlogout, ws: given, onopen }: Props = $props()
 
   // svelte-ignore state_referenced_locally
   const ws = given ?? new Workspace()
