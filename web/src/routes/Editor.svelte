@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { onDestroy, tick } from 'svelte'
+  import { onDestroy, onMount, tick } from 'svelte'
+  import { canVault } from '../lib/capabilities'
+  import { prefetchEngine } from '../lib/components/editor/rich/engine'
   import { MediaQuery } from 'svelte/reactivity'
   import Icon from '../lib/components/dashboard/Icon.svelte'
   import Lazy from '../lib/components/dashboard/Lazy.svelte'
@@ -52,6 +54,10 @@
 
   // svelte-ignore state_referenced_locally
   const ed = new PageEditor(ws, id)
+  // bring the text editor in while the connection is up, so a page opened later without one can still be edited
+  onMount(() => {
+    if (ed.can('text')) prefetchEngine()
+  })
   onDestroy(() => ed.destroy())
 
   let root: HTMLElement | undefined = $state()
@@ -497,8 +503,12 @@
       <div class="mx-auto flex max-w-xl flex-col items-center gap-3 px-4 py-24 text-center">
         <span class="text-muted"><Icon name="lock" size={32} /></span>
         <h1 class="font-serif text-3xl">{page.title}</h1>
-        <p class="text-sm text-muted">Esta página está no cofre: o conteúdo só abre com a senha mestra.</p>
-        <button type="button" class="mt-3 h-11 rounded-field bg-cream px-4 text-sm font-medium text-on-cream" onclick={() => (unlocking = true)}>Desbloquear</button>
+        {#if canVault()}
+          <p class="text-sm text-muted">Esta página está no cofre: o conteúdo só abre com a senha mestra.</p>
+          <button type="button" class="mt-3 h-11 rounded-field bg-cream px-4 text-sm font-medium text-on-cream" onclick={() => (unlocking = true)}>Desbloquear</button>
+        {:else}
+          <p class="text-sm text-muted">Esta página está no cofre, que só abre em HTTPS ou em localhost. Acesse o servidor por um endereço seguro.</p>
+        {/if}
       </div>
     {:else}
       {#if wide.current && !zen}

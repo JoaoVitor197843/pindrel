@@ -49,6 +49,18 @@ export function loadEngine(): Promise<RichEngine> {
   return loaded
 }
 
+/**
+ * Brings the editor in while the connection is still there: the first focus would otherwise need the network at the
+ * moment the person starts to write, and a page opened offline could not be edited. Runs when the browser is idle and
+ * is a no-op when the editor is already loaded or cannot load.
+ */
+export function prefetchEngine() {
+  if (loaded || typeof window === 'undefined') return
+  const run = () => void loadEngine().catch(() => {})
+  if ('requestIdleCallback' in window) window.requestIdleCallback(run, { timeout: 4000 })
+  else setTimeout(run, 1500)
+}
+
 /** The live editor instance of an editable element, so the selection toolbar can reach it. */
 export const instances = new WeakMap<Element, RichInstance>()
 

@@ -64,7 +64,8 @@ const ws = new WebSocket(target.webSocketDebuggerUrl)
 await new Promise((r) => (ws.onopen = r))
 let id = 0
 const pending = new Map()
-ws.onmessage = (m) => { const d = JSON.parse(m.data); pending.get(d.id)?.(d.result ?? d.error) }
+const requested = []
+ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.method === 'Network.requestWillBeSent') requested.push(d.params.request.url); pending.get(d.id)?.(d.result ?? d.error) }
 const send = (method, params = {}) => new Promise((r) => { const i = ++id; pending.set(i, r); ws.send(JSON.stringify({ id: i, method, params })) })
 const ev = async (expression) => (await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })).result?.value
 const until = async (expression, ms = 10_000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await ev(expression)) return true; await sleep(100) } return false }
@@ -125,6 +126,28 @@ try {
   if (!(await ev(`!!document.querySelector('[data-testid=meta]')`))) await click('Abrir propriedades')
   await sleep(500)
   check('"Dono" mostra o username da conta', await until(`/dono\\s*e2euser/i.test(document.querySelector('[data-testid=meta]')?.innerText ?? '')`, 4000), await ev(`document.querySelector('[data-testid=meta]')?.innerText ?? 'sem painel: ' + [...document.querySelectorAll('button')].map((b)=>b.getAttribute('aria-label')).filter(Boolean).join(' | ')`))
+  // the text editor is a lazy chunk: it must arrive on its own while the connection is up
+  check('abrir uma página traz o editor de texto sozinho, sem focar nada', await (async () => { for (let i = 0; i < 80; i++) { if (requested.some((u) => /tiptap/.test(u))) return true; await sleep(100) } return false })(), requested.slice(-6).join(' '))
+  // and when it cannot arrive, the block is still editable
+  // the worker would hand the chunk out of its cache: this part is about a page that has none
+  await send('Network.setBypassServiceWorker', { bypass: true })
+  await send('Network.setBlockedURLs', { urls: ['*tiptap*'] })
+  await send('Network.setCacheDisabled', { cacheDisabled: true })
+  await go('/?tela=painel&modo=conta')
+  await until(`/Minhas páginas/.test(document.body.innerText)`)
+  await ev(`document.querySelector('[data-testid=page-card] button')?.click()`)
+  await until(`!!document.querySelector('textarea[data-draft]')`)
+  await ev(`document.querySelector('textarea[data-draft]').focus()`)
+  await send('Input.insertText', { text: 'o' }) // the first letter makes a paragraph and moves the caret into it
+  check('sem o editor completo o bloco abre em texto simples', await until(`!!document.querySelector('textarea[data-plain]')`, 6000), await text())
+  await send('Input.insertText', { text: 'k sem o editor' })
+  check('e dá para escrever nele', await until(`document.querySelector('textarea[data-plain]')?.value.includes('ok sem o editor')`, 3000))
+  await sleep(700) // the write to the browser's storage is debounced
+  await send('Network.setBlockedURLs', { urls: [] })
+  await send('Network.setBypassServiceWorker', { bypass: false })
+  await go('/?tela=painel&modo=conta')
+  await until(`/ok sem o editor/g.test(document.body.innerText)`, 8000)
+  check('o que foi escrito sem o editor completo foi guardado', /ok sem o editor/g.test(await text()), (await text()).slice(0, 120))
   await go('/?tela=painel&modo=conta')
   check('o painel da conta começa vazio', !/Pão de fermentação|Reforma do apartamento/.test(await text()))
   const c = (await cookies()).find((k) => k.name === 'refresh_token')
@@ -169,6 +192,32 @@ try {
   await until(`location.search === '?tela=painel&modo=conta'`, 15_000)
   const s = (await cookies()).find((k) => k.name === 'refresh_token')
   check('o cookie sai sem validade (some ao fechar o navegador)', !!s && s.session === true, JSON.stringify(s))
+
+  console.log('\nservice worker: o app abre e edita com o servidor fora do ar')
+  await go('/')
+  const ready = await ev(`navigator.serviceWorker.ready.then(() => true)`)
+  check('o service worker foi registrado e ficou ativo', ready === true)
+  const kept = await until(`caches.keys().then((k) => k.some((n) => n.startsWith('pindrel-')))`, 15_000)
+  check('a página e os arquivos ficaram guardados', kept)
+  check('o editor de texto (chunk preguiçoso) também foi guardado', await until(`caches.keys().then(async (ks) => { for (const k of ks) { const c = await caches.open(k); if ((await c.keys()).some((r) => /tiptap/.test(r.url))) return true } return false })`, 15_000))
+  web.closeAllConnections()
+  await new Promise((r) => web.close(r))
+  api.kill()
+  await go('/')
+  check('com o servidor parado a tela de login ainda abre', await until(`/Bem-vindo de volta/.test(document.body.innerText)`, 10_000), await text())
+  await go('/?tela=painel&modo=local')
+  check('e o painel sem login também', await until(`/Minhas páginas/.test(document.body.innerText)`, 10_000), await text())
+  await click('Criar primeira página')
+  await sleep(500)
+  await ev(`document.querySelector('[data-testid=page-card] button')?.click()`)
+  await until(`!!document.querySelector('textarea[data-draft]')`, 5000)
+  await ev(`document.querySelector('textarea[data-draft]').focus()`)
+  await send('Input.insertText', { text: 'o' })
+  check('o editor completo abre offline (sem cair no texto simples)', await until(`!!document.querySelector('[data-rich] [contenteditable]')`, 8000) && !(await ev(`!!document.querySelector('textarea[data-plain]')`)), await text())
+  await send('Input.insertText', { text: 'ffline funciona' })
+  await sleep(700)
+  await go('/?tela=painel&modo=local')
+  check('e o que foi escrito offline fica guardado', await until(`/offline funciona/.test(document.body.innerText)`, 8000), (await text()).slice(0, 120))
 } finally {
   chrome.kill()
   api.kill()
