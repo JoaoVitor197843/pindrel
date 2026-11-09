@@ -34,6 +34,9 @@ message RegisterResponse {
 message LoginInput {
   string email = 1;
   string password = 2;
+  // true: the refresh cookie lasts until the browser closes instead of its full lifetime ("Manter conectado" unchecked).
+  // Left out, it keeps the long-lived cookie, so clients that do not know the field behave as before.
+  bool session_only = 3;
 }
 
 message LoginRefreshResponse {

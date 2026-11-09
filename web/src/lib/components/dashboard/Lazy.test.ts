@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/svelte'
 import { tick } from 'svelte'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { resetNearView } from '../editor/nearView'
-import { Workspace } from '../../stores/workspace.svelte'
+import { sampleWorkspace } from '../../sample'
 import { seedLoad, signInFromAddress } from '../../loadtest'
 import { session } from '../../stores/files.svelte'
 import Dashboard from '../../../routes/Dashboard.svelte'
@@ -43,7 +43,7 @@ const show = (els: Element[], isIntersecting: boolean) => report(els.map((target
 
 describe('seedLoad com todos os tipos de bloco (só para medir memória)', () => {
   it('?kinds=mixed enche a página com um de cada tipo, todos válidos e sem repetir identidade', () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('blocks=400&kinds=mixed'))
     const content = ws.page('p0')!.content!
     const types = new Set(content.map((b) => b.type))
@@ -57,7 +57,7 @@ describe('seedLoad com todos os tipos de bloco (só para medir memória)', () =>
 
 describe('seedLoad (só para medir memória)', () => {
   it('cria as páginas e os blocos pedidos, sem chaves repetidas', () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('pages=300&blocks=50'))
     expect(ws.pages.length).toBe(300)
     expect(new Set(ws.pages.map((p) => p.id)).size).toBe(300)
@@ -66,7 +66,7 @@ describe('seedLoad (só para medir memória)', () => {
   })
 
   it('pedidos absurdos ou inválidos são ignorados', () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     const before = ws.pages.length
     seedLoad(ws, new URLSearchParams('pages=abc&blocks=-5'))
     seedLoad(ws, new URLSearchParams('pages=1.5&blocks=2.5'))
@@ -77,7 +77,7 @@ describe('seedLoad (só para medir memória)', () => {
 
 describe('dashboard: só os cards perto da tela são desenhados', () => {
   it('com 1000 páginas só os primeiros são desenhados de início, o resto são caixas vazias', () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('pages=1000'))
     render(Dashboard, { ws })
     expect(screen.queryAllByTestId('page-card').length).toBeLessThan(60)
@@ -87,7 +87,7 @@ describe('dashboard: só os cards perto da tela são desenhados', () => {
   })
 
   it('o card chega perto da tela e é desenhado; se afasta e volta a ser uma caixa com a mesma altura', async () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('pages=200'))
     render(Dashboard, { ws })
     const empty = lazies().find((l) => l.dataset.lazy === 'empty')!
@@ -106,7 +106,7 @@ describe('dashboard: só os cards perto da tela são desenhados', () => {
   })
 
   it('a lista continua certa: contagem por grupo, busca e troca de lista para grade', async () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('pages=300'))
     render(Dashboard, { ws })
     expect(lazies().length).toBe(ws.visible.length)
@@ -122,7 +122,7 @@ describe('dashboard: só os cards perto da tela são desenhados', () => {
   it('sem IntersectionObserver todos os cards são desenhados, como antes', () => {
     delete (globalThis as Record<string, unknown>).IntersectionObserver
     resetNearView()
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('pages=80'))
     render(Dashboard, { ws })
     expect(screen.getAllByTestId('page-card').length).toBe(ws.visible.length)
@@ -130,7 +130,7 @@ describe('dashboard: só os cards perto da tela são desenhados', () => {
   })
 
   it('sair da tela solta os observadores', () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('pages=100'))
     const { unmount } = render(Dashboard, { ws })
     expect(watched.size).toBeGreaterThan(90)
@@ -141,7 +141,7 @@ describe('dashboard: só os cards perto da tela são desenhados', () => {
 
 describe('editor: só os blocos perto da tela são desenhados', () => {
   const open = (blocks = 400) => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams(`blocks=${blocks}`))
     return { ws, ...render(Editor, { ws, id: 'p0', onback: () => {} }) }
   }
@@ -172,7 +172,7 @@ describe('editor: só os blocos perto da tela são desenhados', () => {
   })
 
   it('o sumário leva a um bloco distante e ajusta o pouso quando ele é desenhado', async () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     seedLoad(ws, new URLSearchParams('blocks=300'))
     ws.contentOf('p0')
     ws.page('p0')!.content!.splice(250, 0, { id: 'alvo', type: 'heading', text: 'Seção lá longe' })

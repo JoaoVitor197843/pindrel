@@ -13,7 +13,7 @@
     tagFilter: string | null
     syncLabel: string
     /** No server: nobody to share with, so "Compartilhadas comigo" is not offered. The vault stays: it is the person's own. */
-    offline?: boolean
+    local?: boolean
     onview: (view: View) => void
     onnew: () => void
     ontag: (id: string) => void
@@ -21,7 +21,7 @@
     onclose?: () => void
   }
 
-  let { mode, view, counts, tags, tagCounts, tagFilter, syncLabel, offline = false, onview, onnew, ontag, onaddtag, onclose }: Props = $props()
+  let { mode, view, counts, tags, tagCounts, tagFilter, syncLabel, local = false, onview, onnew, ontag, onaddtag, onclose }: Props = $props()
 
   const items: { id: View; label: string; icon: IconName }[] = [
     { id: 'all', label: 'Todas as páginas', icon: 'page' },
@@ -30,7 +30,7 @@
     { id: 'trash', label: 'Lixeira', icon: 'trash' },
   ]
 
-  const shownItems = $derived(offline ? items.filter((i) => i.id !== 'shared') : items)
+  const shownItems = $derived(local ? items.filter((i) => i.id !== 'shared') : items)
   const rail = $derived(mode === 'rail')
   let adding = $state(false)
   let draft = $state('')

@@ -1,4 +1,5 @@
 import axe from 'axe-core'
+import { sampleWorkspace } from '../lib/sample'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -53,7 +54,7 @@ async function violations(): Promise<string[]> {
 }
 
 beforeEach(() => {
-  ws = new Workspace()
+  ws = sampleWorkspace()
   toast.message = ''
   viewport.set(1400)
 })

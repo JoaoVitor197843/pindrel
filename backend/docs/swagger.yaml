@@ -13,6 +13,11 @@ definitions:
         type: string
       password:
         type: string
+      session_only:
+        description: |-
+          true: the refresh cookie lasts until the browser closes instead of its full lifetime ("Manter conectado" unchecked).
+          Left out, it keeps the long-lived cookie, so clients that do not know the field behave as before.
+        type: boolean
     type: object
   dto.LoginRefreshResponse:
     properties:

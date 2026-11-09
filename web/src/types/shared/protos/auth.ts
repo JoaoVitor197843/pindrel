@@ -78,6 +78,11 @@ export interface RegisterResponse {
 export interface LoginInput {
   email: string;
   password: string;
+  /**
+   * true: the refresh cookie lasts until the browser closes instead of its full lifetime ("Manter conectado" unchecked).
+   * Left out, it keeps the long-lived cookie, so clients that do not know the field behave as before.
+   */
+  sessionOnly: boolean;
 }
 
 export interface LoginRefreshResponse {
@@ -561,7 +566,7 @@ export const RegisterResponse: MessageFns<RegisterResponse> = {
 };
 
 function createBaseLoginInput(): LoginInput {
-  return { email: "", password: "" };
+  return { email: "", password: "", sessionOnly: false };
 }
 
 export const LoginInput: MessageFns<LoginInput> = {
@@ -571,6 +576,9 @@ export const LoginInput: MessageFns<LoginInput> = {
     }
     if (message.password !== "") {
       writer.uint32(18).string(message.password);
+    }
+    if (message.sessionOnly !== false) {
+      writer.uint32(24).bool(message.sessionOnly);
     }
     return writer;
   },
@@ -604,6 +612,14 @@ export const LoginInput: MessageFns<LoginInput> = {
             message.password = reader.string();
             continue;
           }
+          case 3: {
+            if (tag !== 24) {
+              break;
+            }
+
+            message.sessionOnly = reader.bool();
+            continue;
+          }
         }
         if ((tag & 7) === 4 || tag === 0) {
           break;
@@ -620,6 +636,11 @@ export const LoginInput: MessageFns<LoginInput> = {
     return {
       email: isSet(object.email) ? globalThis.String(object.email) : "",
       password: isSet(object.password) ? globalThis.String(object.password) : "",
+      sessionOnly: isSet(object.sessionOnly)
+        ? globalThis.Boolean(object.sessionOnly)
+        : isSet(object.session_only)
+        ? globalThis.Boolean(object.session_only)
+        : false,
     };
   },
 
@@ -631,6 +652,9 @@ export const LoginInput: MessageFns<LoginInput> = {
     if (message.password !== "") {
       obj.password = message.password;
     }
+    if (message.sessionOnly !== false) {
+      obj.sessionOnly = message.sessionOnly;
+    }
     return obj;
   },
 
@@ -641,6 +665,7 @@ export const LoginInput: MessageFns<LoginInput> = {
     const message = createBaseLoginInput();
     message.email = object.email ?? "";
     message.password = object.password ?? "";
+    message.sessionOnly = object.sessionOnly ?? false;
     return message;
   },
 };
