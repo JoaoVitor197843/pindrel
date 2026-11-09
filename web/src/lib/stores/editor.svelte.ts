@@ -216,7 +216,13 @@ export class PageEditor {
       return
     }
     const before = fileIdsOf([page.content[i]])
+    const wasImage = page.content[i].type === 'image'
     const type = blockTypeForFile(info.mime, info.level)
+    // sent to a picture block but not a picture the browser can show (HEIC, AVIF, SVG...): say what it became
+    if (wasImage && type !== 'image') {
+      const became = { file: 'um arquivo', video: 'um vídeo', audio: 'um áudio', pdf: 'um PDF' }[type] ?? 'um arquivo'
+      toast.show(`${info.name || 'Este arquivo'} não é uma imagem que o navegador mostra (PNG, JPEG, WebP ou GIF): foi guardado como ${became}`)
+    }
     const level = (info.level === 1 || info.level === 2 ? info.level : 3) as 1 | 2 | 3
     page.content[i] =
       type === 'image'

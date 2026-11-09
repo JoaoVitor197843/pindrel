@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { canVault } from '../../capabilities'
   import Icon, { type IconName } from './Icon.svelte'
   import { COLOR_LABEL, TAG_STYLE } from './tags'
   import { TAG_COLORS, type Tag, type TagColor, type View } from '../../stores/workspace.svelte'
@@ -30,7 +31,8 @@
     { id: 'trash', label: 'Lixeira', icon: 'trash' },
   ]
 
-  const shownItems = $derived(local ? items.filter((i) => i.id !== 'shared') : items)
+  // no vault on a page without crypto.subtle (plain HTTP), and no sharing without a server
+  const shownItems = $derived(items.filter((i) => (i.id !== 'shared' || !local) && (i.id !== 'vault' || canVault())))
   const rail = $derived(mode === 'rail')
   let adding = $state(false)
   let draft = $state('')

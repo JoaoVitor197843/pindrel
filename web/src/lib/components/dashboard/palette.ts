@@ -1,4 +1,5 @@
 import { fold, formatDate, type Workspace } from '../../stores/workspace.svelte'
+import { canVault } from '../../capabilities'
 import type { IconName } from './Icon.svelte'
 
 export interface PaletteItem {
@@ -48,15 +49,19 @@ export function buildPalette(ws: Workspace, query: string, act: PaletteActions):
   const actions: PaletteItem[] = [
     { label: 'Criar nova página', meta: 'n', icon: 'plus', run: act.newPage },
     { label: 'Abrir configurações', meta: 'conf', icon: 'gear', run: act.openSettings },
-    {
-      label: 'Ir para o cofre',
-      meta: 'cofre',
-      icon: 'lock',
-      run: () => {
-        ws.go('vault')
-        act.close()
-      },
-    },
+    ...(canVault()
+      ? [
+          {
+            label: 'Ir para o cofre',
+            meta: 'cofre',
+            icon: 'lock' as const,
+            run: () => {
+              ws.go('vault')
+              act.close()
+            },
+          },
+        ]
+      : []),
     {
       label: 'Ver lixeira',
       meta: 'lixeira',

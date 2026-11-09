@@ -2,6 +2,7 @@ import { excerptOf, fileIdsOf, newId, type Block } from './blocks'
 import { files } from './files.svelte'
 import type { NotesStore } from '../storage/notesStore'
 import { Persistence } from '../storage/persistence'
+import { canVault } from '../capabilities'
 import { ALL_PERMS, normalizePerms, type PermKey } from './permissions'
 import { fold } from './text'
 import { toast } from './toast.svelte'
@@ -312,6 +313,8 @@ export class Workspace {
   }
 
   go(view: View) {
+    // the vault does not exist on a page without crypto.subtle (plain HTTP)
+    if (view === 'vault' && !canVault()) return
     this.view = view
     this.tagFilter = null
   }
@@ -497,7 +500,8 @@ export class Workspace {
   }
 
   /** Prototype: any password of at least MIN_VAULT_PASSWORD characters opens it; nothing is decrypted yet. */
-  unlockVault(password: string): 'ok' | 'short' {
+  unlockVault(password: string): 'ok' | 'short' | 'unavailable' {
+    if (!canVault()) return 'unavailable'
     if (password.trim().length < MIN_VAULT_PASSWORD) return 'short'
     this.vaultUnlocked = true
     // the text of vault pages is not kept in the list on disk: bring the excerpts back now that they may be read

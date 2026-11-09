@@ -8,6 +8,7 @@
   import SettingsModal, { type SettingsSection } from '../lib/components/dashboard/SettingsModal.svelte'
   import Sidebar from '../lib/components/dashboard/Sidebar.svelte'
   import TopBar from '../lib/components/dashboard/TopBar.svelte'
+  import { canVault } from '../lib/capabilities'
   import VaultPrompt from '../lib/components/dashboard/VaultPrompt.svelte'
   import VaultView from '../lib/components/dashboard/VaultView.svelte'
   import { toast } from '../lib/stores/toast.svelte'
@@ -89,6 +90,10 @@
   /** Opens a page in the editor; one in the vault asks for the master password first. */
   function openPage(id: string) {
     if (!onopen) return
+    if (ws.page(id)?.locked && !canVault()) {
+      toast.show('O Cofre só abre em HTTPS ou em localhost')
+      return
+    }
     if (ws.page(id)?.locked && !ws.vaultUnlocked) vaultPrompt = { target: ws.page(id)!.title, open: id }
     else onopen(id)
   }

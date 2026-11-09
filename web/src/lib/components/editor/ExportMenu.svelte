@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { canCopy } from '../../capabilities'
   import type { PageEditor } from '../../stores/editor.svelte'
   import { toast } from '../../stores/toast.svelte'
   import { FORMATS, download, exportPage, fileNameFor, type ExportFormat } from '../../stores/transfer'
@@ -64,7 +65,9 @@
           {f.label}<span class="font-mono text-xs text-muted">.{f.ext}</span>
         </button>
       {/each}
-      <button type="button" role="menuitem" class="w-full rounded-[7px] px-2.5 py-2 text-left text-sm hover:bg-line/50" onclick={copy}>Copiar como Markdown</button>
+      {#if canCopy()}
+        <button type="button" role="menuitem" class="w-full rounded-[7px] px-2.5 py-2 text-left text-sm hover:bg-line/50" onclick={copy}>Copiar como Markdown</button>
+      {/if}
       {#if secureCount > 0}
         <div class="mt-1 border-t border-line px-2.5 pt-2 pb-1">
           {#if mayIncludeSecure}
