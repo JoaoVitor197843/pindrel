@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { sampleWorkspace } from '../sample'
 import { MAX_BLOCKS, MAX_COLS, MAX_COL_WIDTH, MAX_ITEMS, MAX_ROWS, MAX_TEXT, MIN_COL_WIDTH, type Block } from './blocks'
 import { FakeFiles, patterned } from '../../test/fakeFiles'
 import { FilesApi } from '../api/files'
@@ -15,7 +16,7 @@ const checklist = () => ed.blocks.find((b) => b.type === 'checklist') as Extract
 
 beforeEach(() => {
   vi.useFakeTimers()
-  ws = new Workspace()
+  ws = sampleWorkspace()
   ed = new PageEditor(ws, 'p0')
 })
 afterEach(() => {

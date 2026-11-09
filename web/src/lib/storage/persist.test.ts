@@ -1,4 +1,5 @@
 import 'fake-indexeddb/auto'
+import { sampleWorkspace } from '../sample'
 import { openDB } from 'idb'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Block } from '../stores/blocks'
@@ -20,7 +21,7 @@ afterEach(async () => {
 
 /** A workspace that starts as the offline one does: empty, then filled from the browser's storage. */
 async function start(): Promise<Workspace> {
-  const ws = new Workspace()
+  const ws = sampleWorkspace()
   ws.goLocal()
   await ws.attach(await NotesStore.open(name))
   opened.push(ws)
@@ -173,7 +174,7 @@ describe('notes in IndexedDB', () => {
     await first.persist!.flush()
     const store = await NotesStore.open(name)
     await first.detach()
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     ws.goLocal()
     const loading = ws.attach(store)
     ws.newPage('nova durante a carga')
@@ -222,7 +223,7 @@ describe('notes in IndexedDB', () => {
   })
 
   it('a browser without IndexedDB leaves the notes working in memory', async () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     ws.goLocal()
     const page = ws.newPage('sem disco')
     expect(ws.persist).toBeNull()
@@ -432,7 +433,7 @@ describe('one database per account', () => {
     const a = '11111111-1111-1111-1111-111111111111'
     const b = '22222222-2222-2222-2222-222222222222'
     const open = async (store: Promise<NotesStore>) => {
-      const ws = new Workspace()
+      const ws = sampleWorkspace()
       ws.goAccount()
       await ws.attach(await store)
       opened.push(ws)
@@ -450,7 +451,7 @@ describe('one database per account', () => {
   })
 
   it('goAccount starts empty but keeps the shared list; close drops every note from memory', async () => {
-    const ws = new Workspace()
+    const ws = sampleWorkspace()
     expect(ws.pages.length).toBeGreaterThan(0)
     ws.view = 'shared'
     ws.goAccount()
@@ -469,7 +470,7 @@ describe('one database per account', () => {
     expect(ws.pages).toHaveLength(0)
     expect(ws.persist).toBeNull()
     // and what was waiting to be saved still reached the disk
-    const back = new Workspace()
+    const back = sampleWorkspace()
     back.goAccount()
     await back.attach(await NotesStore.openAccount('44444444-4444-4444-4444-444444444444'))
     opened.push(back)

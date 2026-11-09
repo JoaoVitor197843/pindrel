@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { ME, initialsOf, searchUsers, seedUsers } from './users'
+import { seedUsers } from '../sample'
+import { ME, initialsOf, searchUsers } from './users'
 
 const users = seedUsers()
 const ids = (q: string) => searchUsers(users, q).map((u) => u.id)
