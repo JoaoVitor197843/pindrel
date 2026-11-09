@@ -1,7 +1,10 @@
 import { excerptOf, fileIdsOf, newId, type Block } from './blocks'
 import { files } from './files.svelte'
+import type { NotesStore } from '../storage/notesStore'
+import { Persistence } from '../storage/persistence'
 import { ALL_PERMS, normalizePerms, type PermKey } from './permissions'
 import { fold } from './text'
+import { toast } from './toast.svelte'
 import { ME, seedUsers, type User } from './users'
 
 export type View = 'all' | 'shared' | 'vault' | 'trash'
@@ -190,18 +193,125 @@ export class Workspace {
   users = $state<User[]>(seedUsers())
   settings = $state<Settings>({ useTrash: true, retention: 30 })
   vaultUnlocked = $state(false)
-  /** The person chose "Continuar offline": there is no server, so nothing can be shared. */
-  offline = $state(false)
+  /** The person chose "Continuar sem login": there is no server, so nothing can be shared. */
+  local = $state(false)
   view = $state<View>('all')
   sort = $state<Sort>('recent')
   layout = $state<Layout>('grid')
   query = $state('')
   tagFilter = $state<string | null>(null)
   #seq = 100
+  /** Where the pages are kept between visits; null when nothing is saved (the demo, or a browser without storage). */
+  persist: Persistence | null = null
+  /** The saved pages are being read. */
+  loading = $state(false)
+  /** Pages whose body is on disk, so `content === null` means "not read yet" and not "empty". */
+  #stored = new Set<string>()
+  /** How many screens have each page's body open; it goes back to disk when the last one leaves. */
+  #open = new Map<string, number>()
 
-  /** Offline: the person's own notes start empty. The demo pages, tags and people go (the vault stays, empty), and there is no sharing. */
-  goOffline() {
-    this.offline = true
+  /**
+   * Starts saving into `store` and replaces the pages with what it holds. Only the list is read: bodies come with
+   * `load`, so a workspace of thousands of pages costs what its cards cost.
+   */
+  async attach(store: NotesStore): Promise<void> {
+    await this.detach()
+    this.loading = true
+    try {
+      const saved = await store.loadAll()
+      const made = this.pages
+      const taken = new Set(saved.pages.map((p) => p.id))
+      for (const id of taken) {
+        const n = /^n(\d+)$/.exec(id)
+        if (n) this.#seq = Math.max(this.#seq, Number(n[1]))
+      }
+      // a page made while the list was loading may have been given an id the saved ones already use
+      for (const p of made) if (taken.has(p.id)) p.id = `n${++this.#seq}`
+      if (saved.tags) this.tags = saved.tags
+      if (saved.settings) this.settings = saved.settings
+      this.pages = [...made, ...saved.pages.map((p): NotePage => ({ ...p, content: null }))]
+      for (const id of taken) this.#stored.add(id)
+      this.persist = new Persistence(store, this)
+      this.persist.onerror = () => toast.show('Não foi possível guardar neste navegador; as mudanças podem se perder')
+      // whatever was made while the list was loading still has to be saved
+      for (const p of made) this.persist.mark(p.id)
+      void navigator.storage?.persist?.()
+    } catch (e) {
+      store.close()
+      toast.show('Este navegador não deixou guardar as notas; elas valem só até fechar a aba')
+      console.error(e)
+    } finally {
+      this.loading = false
+    }
+  }
+
+  /** Writes what is left and stops saving. */
+  async detach(): Promise<void> {
+    const p = this.persist
+    this.persist = null
+    this.#stored.clear()
+    this.#open.clear()
+    await p?.close()
+  }
+
+  /** Whether a screen may show this page now: its body is in memory, or there is nothing to read (or no such page). */
+  bodyIn(id: string): boolean {
+    const p = this.page(id)
+    return !p || !!p.content || !this.persist || !this.#stored.has(id)
+  }
+
+  /** Brings the body of a page into memory (call it before a screen shows the page). False when the disk could not be read. */
+  async load(id: string): Promise<boolean> {
+    const p = this.page(id)
+    if (!p) return true
+    this.#open.set(id, (this.#open.get(id) ?? 0) + 1)
+    if (p.content || !this.persist || !this.#stored.has(id)) return true
+    try {
+      const blocks = await this.persist.store.loadBody(id)
+      // the page may have been opened and changed by someone else while this was reading
+      if (!p.content) p.content = blocks ?? []
+      return true
+    } catch (e) {
+      console.error(e)
+      toast.show('Não foi possível abrir a página')
+      this.#open.set(id, Math.max(0, (this.#open.get(id) ?? 1) - 1))
+      return false
+    }
+  }
+
+  /** The screen is done with the page: once it is written, the body leaves memory. */
+  release(id: string) {
+    const left = (this.#open.get(id) ?? 1) - 1
+    if (left > 0) return void this.#open.set(id, left)
+    this.#open.delete(id)
+    const persist = this.persist
+    if (!persist) return
+    // only what was edited is written back (edits mark the page themselves): looking at a page must cost no write
+    void persist.flush().then(() => {
+      const p = this.page(id)
+      if (p?.content && !persist.pending(id) && this.persist === persist && !this.#open.has(id)) {
+        p.content = null
+        this.#stored.add(id)
+      }
+    })
+  }
+
+  /** Runs `fn` with every body in memory (an export needs them all), then lets the ones nobody had open go again. */
+  async withBodies<T>(fn: () => T): Promise<T> {
+    const ids = this.pages.filter((p) => !p.content && this.#stored.has(p.id)).map((p) => p.id)
+    const ok = await Promise.all(ids.map((id) => this.load(id)))
+    try {
+      return fn()
+    } finally {
+      ids.forEach((id, i) => ok[i] && this.release(id))
+    }
+  }
+
+  /** Local mode (no login): the person's own notes start empty. The demo pages, tags and people go (the vault stays, empty), and there is no sharing. */
+  goLocal() {
+    // first: the pages are about to be emptied, and whatever was waiting to be saved must be copied before that
+    void this.detach()
+    this.local = true
     this.pages = []
     this.tags = []
     this.users = []
@@ -337,6 +447,7 @@ export class Workspace {
       cover: '',
     }
     this.pages.unshift(page)
+    this.persist?.mark(page.id)
     this.view = 'all'
     this.query = ''
     this.sort = 'recent'
@@ -351,6 +462,8 @@ export class Workspace {
   contentOf(id: string): Block[] | null {
     const p = this.page(id)
     if (!p) return null
+    // saved but not read yet: inventing a body here would overwrite the real one on the next save
+    if (!p.content && this.persist && this.#stored.has(id)) return null
     if (!p.content) p.content = p.excerpt ? [{ id: `${p.id}-b0`, type: 'paragraph', text: p.excerpt }] : []
     return p.content
   }
@@ -364,6 +477,7 @@ export class Workspace {
       p.blocks = p.content.length
       p.excerpt = excerptOf(p.content)
     }
+    this.persist?.mark(id)
   }
 
   /** Other pages that share tags with this one, the ones sharing the most first. Vault pages are never suggested. */
@@ -388,10 +502,11 @@ export class Workspace {
     let images = 0
     for (const b of body) {
       b.id = newId()
-      if (b.type === 'image' && b.src) {
+      if (b.type === 'image' && (b.src || b.mediaId)) {
         images++
         b.src = null
         b.name = null
+        delete b.mediaId
       }
     }
     const now = Date.now()
@@ -410,12 +525,14 @@ export class Workspace {
       trashed: false,
     }
     this.pages.unshift(copy)
+    this.persist?.mark(copy.id)
     return { page: this.page(copy.id)!, images }
   }
 
   togglePin(id: string) {
     const p = this.pages.find((x) => x.id === id)
     if (p) p.pinned = !p.pinned
+    this.persist?.mark(id)
   }
 
   /** Moves a page to the trash, or deletes it for good when the trash is turned off in the settings. */
@@ -423,20 +540,24 @@ export class Workspace {
     // vault pages never wait in the trash; a trash that is turned off deletes at once too
     if (!this.settings.useTrash || this.page(id)?.locked) {
       this.pages = this.pages.filter((p) => p.id !== id)
+      this.persist?.mark(id)
       return
     }
     const p = this.pages.find((x) => x.id === id)
     if (p) p.trashed = true
+    this.persist?.mark(id)
   }
 
   restore(id: string) {
     const p = this.pages.find((x) => x.id === id)
     if (p) p.trashed = false
+    this.persist?.mark(id)
   }
 
   emptyTrash() {
     const gone = this.pages.filter((p) => p.trashed)
     this.pages = this.pages.filter((p) => !p.trashed)
+    gone.forEach((p) => this.persist?.mark(p.id))
     this.#dropFiles(gone)
   }
 
@@ -461,6 +582,7 @@ export class Workspace {
     if (existing) return existing
     const tag: Tag = { id, name: clean.toLowerCase(), color: TAG_COLORS.includes(color) ? color : 'accent' }
     this.tags.push(tag)
+    this.persist?.markMeta()
     return tag
   }
 
@@ -468,6 +590,10 @@ export class Workspace {
   unlockVault(password: string): 'ok' | 'short' {
     if (password.trim().length < MIN_VAULT_PASSWORD) return 'short'
     this.vaultUnlocked = true
+    // the text of vault pages is not kept in the list on disk: bring the excerpts back now that they may be read
+    void this.persist?.store.loadVaultExcerpts().then((excerpts) => {
+      for (const p of this.pages) if (p.locked && !p.excerpt) p.excerpt = excerpts.get(p.id) ?? ''
+    })
     return 'ok'
   }
 
@@ -478,6 +604,7 @@ export class Workspace {
   deleteForever(id: string) {
     const gone = this.pages.filter((p) => p.id === id)
     this.pages = this.pages.filter((p) => p.id !== id)
+    this.persist?.mark(id)
     this.#dropFiles(gone)
   }
 
@@ -506,26 +633,31 @@ export class Workspace {
       p.shares.push({ userId, perms: [...clean] })
       added++
     }
+    if (added) this.persist?.mark(id)
     return added
   }
 
   setShare(id: string, userId: string, perms: PermKey[]) {
     const share = this.page(id)?.shares.find((s) => s.userId === userId)
     if (share) share.perms = normalizePerms(perms)
+    this.persist?.mark(id)
   }
 
   unshare(id: string, userId: string) {
     const p = this.page(id)
     if (p) p.shares = p.shares.filter((s) => s.userId !== userId)
+    this.persist?.mark(id)
   }
 
   unshareAll(id: string) {
     const p = this.page(id)
     if (p) p.shares = []
+    this.persist?.mark(id)
   }
 
   saveSettings(next: Settings) {
     this.settings = { useTrash: next.useTrash, retention: Math.min(90, Math.max(7, Math.round(next.retention) || 30)) }
+    this.persist?.markMeta()
   }
 }
 

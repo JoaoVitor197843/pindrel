@@ -23,7 +23,7 @@
       <dt class={label}>Tags</dt>
       <dd class="min-w-0"><TagBar {ed} /></dd>
     </div>
-    {#if !ed.ws.offline}
+    {#if !ed.ws.local}
       <div class="col-span-2">
         <dt class={label}>Pessoas</dt>
         <dd class="min-w-0"><ShareBar {ed} onopen={onshare} /></dd>

@@ -1207,6 +1207,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"fake-indexeddb@npm:^6.2.7":
+  version: 6.2.7
+  resolution: "fake-indexeddb@npm:6.2.7"
+  checksum: 10c0/634bf90ba77ffd834a347661a6f7a6dc00d97b18ae49d49e437d454a42b9250dfe92144799605255b25428df577349b9195d0c150df3507edc003e26120f81ae
+  languageName: node
+  linkType: hard
+
 "fdir@npm:^6.2.0, fdir@npm:^6.5.0":
   version: 6.5.0
   resolution: "fdir@npm:6.5.0"
@@ -1246,6 +1253,7 @@ __metadata:
     "@types/libsodium-wrappers": "npm:^0.8.2"
     "@types/node": "npm:^24.13.3"
     axe-core: "npm:^4.14.0"
+    fake-indexeddb: "npm:^6.2.7"
     idb: "npm:^8.0.4"
     jsdom: "npm:^30.1.3"
     libsodium-wrappers: "npm:^0.8.4"

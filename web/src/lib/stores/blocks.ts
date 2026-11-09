@@ -62,8 +62,8 @@ export type Block =
   | { id: string; type: 'video' | 'audio' | 'pdf'; url: string; title: string; fileId?: string }
   /** A file kept on this server (sent in pieces, see api/files.ts). `level`: 1 plays or shows in the page, 2 and 3 only download. */
   | { id: string; type: 'file'; fileId: string; name: string; size: number; mime: string; level: 1 | 2 | 3 }
-  /** `src` is an object URL of a file picked in this session (not persisted yet). */
-  | { id: string; type: 'image'; name: string | null; src: string | null; fileId?: string }
+  /** `src` is an object URL of a file picked in this session without storage; `mediaId` is a picture kept in this browser's media store; `fileId` one on the server. */
+  | { id: string; type: 'image'; name: string | null; src: string | null; fileId?: string; mediaId?: string }
 
 export const LANGUAGES = ['texto', 'python', 'javascript', 'typescript', 'go', 'rust', 'sql', 'bash', 'json', 'html', 'css'] as const
 
