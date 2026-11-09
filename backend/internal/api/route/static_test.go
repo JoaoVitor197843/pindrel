@@ -297,6 +297,25 @@ func TestSPAHandler_AssetsAreImmutableAndTheIndexIsNot(t *testing.T) {
 	}
 }
 
+func TestSPAHandler_ServiceWorkerIsAlwaysRevalidated(t *testing.T) {
+	dir := newPublicDir(t)
+	if err := os.WriteFile(filepath.Join(dir, "sw.js"), []byte("self.addEventListener('fetch',()=>{})"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := spaHandler(dir)
+	rec := get(h, "/sw.js")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sw.js: status %d", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("the worker keeps its name, so it must revalidate, got %q", cc)
+	}
+	// nothing else is served from a file that is not there
+	if got := get(h, "/sw.js/x").Code; got != http.StatusNotFound {
+		t.Errorf("/sw.js/x: status %d, want 404", got)
+	}
+}
+
 func TestSPAHandler_RangeRequestsGetThePlainFile(t *testing.T) {
 	dir := newPublicDir(t)
 	withCompressed(t, dir)

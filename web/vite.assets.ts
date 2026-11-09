@@ -1,6 +1,7 @@
 import { brotliCompressSync, constants, gzipSync } from 'node:zlib'
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { join, relative } from 'node:path'
 import type { Plugin } from 'vite'
 
 /**
@@ -39,6 +40,7 @@ export function inlineCssAndPrecompress(): Plugin {
           const full = join(dir, name)
           return statSync(full).isDirectory() ? walk(full) : [full]
         })
+      writeServiceWorker(outDir, walk)
       for (const file of walk(outDir)) {
         if (!/\.(html|js|css|svg|json|txt|map)$/.test(file)) continue
         const raw = readFileSync(file)
@@ -48,4 +50,18 @@ export function inlineCssAndPrecompress(): Plugin {
       }
     },
   }
+}
+
+/**
+ * Writes dist/sw.js from sw.template.js: the files under /assets/ are listed so the worker can keep them all at install
+ * (the editor's lazy chunks included), and the version is a hash of that list, so a new build is a new worker.
+ */
+function writeServiceWorker(outDir: string, walk: (dir: string) => string[]) {
+  const assets = walk(join(outDir, 'assets'))
+    .map((f) => '/' + relative(outDir, f).split('\\').join('/'))
+    .filter((f) => !/\.(br|gz|map)$/.test(f))
+    .sort()
+  const version = createHash('sha256').update(assets.join('\n')).digest('hex').slice(0, 12)
+  const template = readFileSync(new URL('./sw.template.js', import.meta.url), 'utf8')
+  writeFileSync(join(outDir, 'sw.js'), template.replace('__VERSION__', version).replace('__ASSETS__', JSON.stringify(assets)))
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { canVault } from '../../capabilities'
   import { onMount } from 'svelte'
   import type { BlockType, HeadingLevel } from '../../stores/blocks'
 
@@ -60,7 +61,7 @@
         { type: 'toc', label: 'Sumário', glyph: '☰' },
         { type: 'divider', label: 'Divisor', glyph: '—' },
         { type: 'spoiler', label: 'Spoiler', glyph: '◐' },
-        { type: 'secure', label: 'Bloco seguro', glyph: '🔒' },
+        ...(canVault() ? [{ type: 'secure' as const, label: 'Bloco seguro', glyph: '🔒' }] : []),
       ],
     },
   ]
