@@ -301,8 +301,10 @@ export async function uploadFile(api: FilesApi, source: ByteSource, opts: Upload
     throw abortError()
   }
   if (failure) {
-    // a final error will not get better, so the half upload is dropped; a tired connection leaves it to resume later
-    if (!(failure instanceof FileApiError) || FINAL.has(failure.code) || failure.code === 'source_changed') void api.cancel(uploadId)
+    // A half upload holds one of the person's few open slots for a day. Only a caller that asked for the id (`onOpen`) can
+    // resume it later, so for anyone else every failure drops it; with `onOpen`, a tired connection keeps it and a final
+    // error (which will not get better) still drops it.
+    if (!opts.onOpen || !(failure instanceof FileApiError) || FINAL.has(failure.code) || failure.code === 'source_changed') void api.cancel(uploadId)
     throw failure
   }
 

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FakeFiles, patterned } from '../../test/fakeFiles'
 import { CHUNK_SIZE, FileApiError, FilesApi, sourceOf, uploadFile, type ByteSource } from './files'
 
@@ -150,6 +150,33 @@ describe('uploadFile', { timeout: 30_000 }, () => {
     abort.abort()
     await expect(uploadFile(api, sourceOf(new Blob([patterned(10)])), { signal: abort.signal })).rejects.toMatchObject({ name: 'AbortError' })
     expect(server.seen).toHaveLength(0)
+  })
+
+  it('um envio que falha por rede, sem quem retome, solta a vaga no servidor (nada fica aberto por 24 h)', async () => {
+    const { server, api } = rig()
+    // every piece times out, as when a slow line makes the gateway give up (408)
+    server.hook = (r) => (r.method === 'PUT' ? server.err(408, 'request_timeout') : undefined)
+    await expect(uploadFile(api, sourceOf(new Blob([patterned(1000)])), { sleep: noSleep, attempts: 2 })).rejects.toMatchObject({ status: 408 })
+    await vi.waitFor(() => expect(server.uploads.size).toBe(0))
+    expect(server.seen.some((r) => r.method === 'DELETE')).toBe(true)
+  })
+
+  it('várias tentativas que falham seguidas não enchem o limite de envios abertos', async () => {
+    const { server, api } = rig()
+    server.hook = (r) => (r.method === 'PUT' ? server.err(408, 'request_timeout') : undefined)
+    for (let i = 0; i < 8; i++) await uploadFile(api, sourceOf(new Blob([patterned(500)])), { sleep: noSleep, attempts: 1 }).catch(() => {})
+    await vi.waitFor(() => expect(server.uploads.size).toBe(0))
+  })
+
+  it('com quem pediu o id para retomar, a falha de rede mantém o envio, mas um erro final o solta', async () => {
+    const { server, api } = rig()
+    let opened = ''
+    server.hook = (r) => (r.method === 'PUT' ? server.err(503, 'server_busy') : undefined)
+    await expect(uploadFile(api, sourceOf(new Blob([patterned(500)])), { sleep: noSleep, attempts: 1, onOpen: (id) => (opened = id) })).rejects.toMatchObject({ status: 503 })
+    expect(server.uploads.has(opened)).toBe(true)
+    server.hook = (r) => (r.method === 'PUT' ? server.err(413, 'quota_exceeded') : undefined)
+    await expect(uploadFile(api, sourceOf(new Blob([patterned(500)])), { sleep: noSleep, attempts: 1, onOpen: (id) => (opened = id) })).rejects.toMatchObject({ code: 'quota_exceeded' })
+    await vi.waitFor(() => expect(server.uploads.has(opened)).toBe(false))
   })
 
   it('retoma um envio parado: só manda o que falta', async () => {
