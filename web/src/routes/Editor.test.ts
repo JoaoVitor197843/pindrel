@@ -904,6 +904,8 @@ describe('Editor — excluir a página', () => {
 
 describe('Editor — exportar a página', () => {
   it('o menu oferece Markdown, HTML, texto, JSON e copiar', async () => {
+    // copying is offered only where the browser has a clipboard (a secure page)
+    Object.assign(navigator, { clipboard: { writeText: vi.fn() } })
     open()
     await click(screen.getByRole('button', { name: 'Exportar página' }))
     const menu = within(screen.getByRole('menu', { name: 'Exportar página' }))

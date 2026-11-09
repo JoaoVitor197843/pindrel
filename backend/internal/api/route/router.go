@@ -203,6 +203,10 @@ func spaHandler(dir string) http.HandlerFunc {
 			if strings.HasPrefix(clean, "/assets/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 			}
+			// the service worker keeps its name between builds, so it is looked at again at every visit
+			if clean == "/sw.js" {
+				w.Header().Set("Cache-Control", "no-cache")
+			}
 			if servePrecompressed(w, r, filepath.Join(dir, filepath.FromSlash(clean)), info.ModTime()) {
 				return
 			}

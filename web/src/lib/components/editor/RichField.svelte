@@ -1,13 +1,19 @@
+<script lang="ts" module>
+  // told once per page load, not at every focus
+  let warned = false
+</script>
+
 <script lang="ts">
   // The focused text block: the rich-text editor sits where the plain field used to, and every change
   // goes back to the page as text with markers, so nothing else about the block changes.
-  import { onDestroy, onMount } from 'svelte'
+  import { onDestroy, onMount, tick } from 'svelte'
   import type { Block } from '../../stores/blocks'
   import type { PageEditor } from '../../stores/editor.svelte'
   import { barLock, instances, loadEngine, type RichInstance } from './rich/engine'
   import { autoMark, parseRuns, plainText, serializeRuns, sliceRuns } from './rich/runs'
   import { MAX_TEXT, type HeadingLevel } from '../../stores/blocks'
   import { place } from './autosize'
+  import { toast } from '../../stores/toast.svelte'
 
   interface Props {
     ed: PageEditor
@@ -31,6 +37,9 @@
   let empty = $state(false)
   let gone = false
   let native = $state(false)
+  // the rich editor could not be loaded (no connection and not cached yet): the text is edited as plain text, markers shown
+  let plain = $state(false)
+  let area: HTMLTextAreaElement | undefined = $state()
   // an undo must not trigger the symbol shortcuts again, or `**x**` could never be undone
   let skipAuto = false
 
@@ -39,7 +48,14 @@
   })
 
   async function start() {
-    const make = await loadEngine()
+    let make
+    try {
+      make = await loadEngine()
+    } catch {
+      if (gone || !host) return
+      await fallback()
+      return
+    }
     if (gone || !host) return
     inst = make(host, {
       runs: parseRuns(block.text),
@@ -59,6 +75,33 @@
     const end = plainText(inst.runs()).length
     const at = caret === 'start' ? 0 : end
     inst.setSelection(at, at)
+  }
+
+  async function fallback() {
+    plain = true
+    if (!warned) {
+      warned = true
+      toast.show('Sem conexão: o editor completo não carregou. Você pode editar como texto simples.')
+    }
+    await tick()
+    if (!area) return
+    area.focus()
+    const at = caret === 'start' ? 0 : area.value.length
+    area.setSelectionRange(at, at)
+  }
+
+  function plainKey(e: KeyboardEvent) {
+    if (!area || e.isComposing || !ed.can('text')) return
+    if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+      e.preventDefault()
+      e.stopPropagation()
+      const made = ed.splitText(block.id, area.value.slice(0, area.selectionStart), area.value.slice(area.selectionEnd))
+      if (made) onsplit(made.id)
+    } else if (e.key === 'Backspace' && area.value === '' && (block.type === 'paragraph' || block.type === 'quote' || block.type === 'callout')) {
+      e.preventDefault()
+      e.stopPropagation()
+      onremove(block.id)
+    }
   }
 
   onDestroy(() => {
@@ -176,8 +219,24 @@
 
 <!-- The engine builds its editable element inside this one, which wears the block's look so nothing moves when the
      field swaps in. Key presses are read on the way down so the page's rules win. -->
-<div bind:this={host} class="relative [&_a]:text-accent-text [&_a]:underline [&_code]:rounded [&_code]:bg-line/60 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.9em] [&_u]:underline-offset-4 [&_mark]:rounded-sm [&_mark]:bg-accent/45 [&_mark]:text-fg {className}" data-rich data-nav tabindex="-1" onfocus={() => inst?.focus()} onkeydowncapture={keydown} role="presentation">
-  {#if empty && !native}
+<div bind:this={host} class="relative [&_a]:text-accent-text [&_a]:underline [&_code]:rounded [&_code]:bg-line/60 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.9em] [&_u]:underline-offset-4 [&_mark]:rounded-sm [&_mark]:bg-accent/45 [&_mark]:text-fg {className}" data-rich data-nav tabindex="-1" onfocus={() => inst?.focus()} onkeydowncapture={plain ? plainKey : keydown} role="presentation">
+  {#if plain}
+    <textarea
+      bind:this={area}
+      aria-label={label}
+      {placeholder}
+      value={block.text}
+      readonly={!ed.can('text')}
+      maxlength={MAX_TEXT}
+      rows="1"
+      data-nav
+      data-plain
+      class="block w-full resize-none overflow-hidden bg-transparent p-0 text-inherit outline-none [field-sizing:content] placeholder:text-muted/70"
+      oninput={(e) => ed.setText(block.id, e.currentTarget.value)}
+      onblur={blur}
+    ></textarea>
+  {/if}
+  {#if empty && !native && !plain}
     <span class="pointer-events-none absolute text-muted/70" aria-hidden="true">{placeholder}</span>
   {/if}
 </div>

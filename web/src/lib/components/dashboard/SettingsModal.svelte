@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { canVault } from '../../capabilities'
   import { fade, fly } from 'svelte/transition'
   import { modal } from '../../a11y/dialog'
   import { ms } from '../../motion'
@@ -193,7 +194,7 @@
             </button>
           {:else if section === 'data'}
             <h3 class="font-serif text-2xl">Importar / exportar</h3>
-            <p class="mb-5 font-mono text-xs text-muted">{summary.pages} páginas · {summary.shared} compartilhadas · {summary.vault} no cofre</p>
+            <p class="mb-5 font-mono text-xs text-muted">{summary.pages} páginas · {summary.shared} compartilhadas{canVault() ? ` · ${summary.vault} no cofre` : ''}</p>
             <div class="flex flex-col gap-6">
               <div>
                 <p class="mb-2 text-sm">Exportar tudo</p>
@@ -201,7 +202,9 @@
                   <button type="button" class="h-10 rounded-field border border-field-line px-3 text-sm hover:bg-line/40" onclick={() => onexport('md')}>Markdown</button>
                   <button type="button" class="h-10 rounded-field border border-field-line px-3 text-sm hover:bg-line/40" onclick={() => onexport('json')}>JSON</button>
                 </div>
+                {#if canVault()}
                 <p class="mt-2 font-mono text-xs text-muted">o cofre fica de fora: só sai cifrado</p>
+                {/if}
               </div>
               <div>
                 <p class="mb-2 text-sm">Importar</p>

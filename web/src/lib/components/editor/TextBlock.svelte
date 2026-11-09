@@ -50,7 +50,7 @@
       try {
         await loadEngine()
       } catch {
-        return
+        // no connection and the editor was never cached: the field opens anyway and falls back to plain text
       }
       if (document.activeElement !== view) return
       editing = true
