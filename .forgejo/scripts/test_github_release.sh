@@ -84,6 +84,18 @@ tag_on_github v1.2.0
 check "a Forgejo release without files is copied as notes only" quiet $S v1.2.0
 check "and has no files on GitHub" test "$(rel v1.2.0 'len(r["assets"])')" = 0
 
+# the log must say which call failed and what GitHub answered (a bare "curl: (22) 403" cost an afternoon)
+# a secondary rate limit is waited out and tried again; one that never ends fails with its message
+curl -s -X POST -d '{"n": 2}' "$G/_limit" >/dev/null
+check "a rate limit is retried and the copy goes on" quiet env RETRY_SECS=0 PAUSE_SECS=0 $S v1.0.0
+curl -s -X POST -d '{"n": 50}' "$G/_limit" >/dev/null
+err=$(env RETRY_SECS=0 PAUSE_SECS=0 RETRIES=2 $S v1.0.0 2>&1 >/dev/null); rc=$?
+check "a rate limit that never ends fails" test "$rc" -ne 0
+check "and says why" sh -c "printf '%s' \"\$1\" | grep -q 'secondary rate limit'" sh "$err"
+check "an error names the call" sh -c "printf '%s' \"\$1\" | grep -q 'HTTP 403 on PATCH'" sh "$err"
+check "the token never reaches the log" sh -c "! printf '%s' \"\$1\" | grep -q gh-token" sh "$err"
+curl -s -X POST -d '{"n": 0}' "$G/_limit" >/dev/null
+
 check "no Forgejo release for the tag fails" fails_with $S v9.9.9
 check "a wrong Forgejo token fails" fails_with env TOKEN=wrong $S v1.0.0
 check "a wrong GitHub token fails" fails_with env GH_TOKEN=wrong $S v1.0.0
