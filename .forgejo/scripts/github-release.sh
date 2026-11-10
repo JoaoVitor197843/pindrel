@@ -26,7 +26,8 @@ trap 'rm -rf "$work"' EXIT
 
 # http <auth header> <method> <url> [curl args...]: prints the body on success. On an HTTP error it prints the call and
 # the answer's body to stderr (the log used to show only "curl: (22) ... 403", with no way to tell which call it was) and
-# fails. A 403/429 that GitHub gives as a rate limit is waited out (Retry-After, else RETRY_SECS) and tried again
+# fails. A 403/429 whose BODY says rate limit (the Retry-After name also sits in every answer's
+# Access-Control-Expose-Headers, so the headers prove nothing) is waited out (Retry-After, else RETRY_SECS) and tried again
 # RETRIES times; the Authorization header is never printed.
 http() {
   hdr=$1 method=$2 url=$3
@@ -36,7 +37,7 @@ http() {
     code=$(curl -sS -o "$work/body" -D "$work/headers" -w '%{http_code}' -X "$method" -H "$hdr" "$@" "$url") || code=000
     case $code in 2?? | 3??) cat "$work/body"; return 0 ;; esac
     if { [ "$code" = 403 ] || [ "$code" = 429 ]; } && [ "$tries" -lt "${RETRIES:-3}" ] \
-      && grep -qiE 'rate limit|abuse|retry-after' "$work/body" "$work/headers" 2>/dev/null; then
+      && grep -qiE 'rate limit|abuse' "$work/body" 2>/dev/null; then
       wait=$(sed -n 's/^[Rr]etry-[Aa]fter: *\([0-9]*\).*/\1/p' "$work/headers" | tail -n 1)
       wait=${wait:-${RETRY_SECS:-60}}
       echo "rate limited ($code) on $method $url: waiting ${wait}s" >&2
