@@ -24,13 +24,41 @@ gh_up=${GITHUB_UPLOADS:-https://uploads.github.com}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
+# http <auth header> <method> <url> [curl args...]: prints the body on success. On an HTTP error it prints the call and
+# the answer's body to stderr (the log used to show only "curl: (22) ... 403", with no way to tell which call it was) and
+# fails. A 403/429 that GitHub gives as a rate limit is waited out (Retry-After, else RETRY_SECS) and tried again
+# RETRIES times; the Authorization header is never printed.
+http() {
+  hdr=$1 method=$2 url=$3
+  shift 3
+  tries=0
+  while :; do
+    code=$(curl -sS -o "$work/body" -D "$work/headers" -w '%{http_code}' -X "$method" -H "$hdr" "$@" "$url") || code=000
+    case $code in 2?? | 3??) cat "$work/body"; return 0 ;; esac
+    if { [ "$code" = 403 ] || [ "$code" = 429 ]; } && [ "$tries" -lt "${RETRIES:-3}" ] \
+      && grep -qiE 'rate limit|abuse|retry-after' "$work/body" "$work/headers" 2>/dev/null; then
+      wait=$(sed -n 's/^[Rr]etry-[Aa]fter: *\([0-9]*\).*/\1/p' "$work/headers" | tail -n 1)
+      wait=${wait:-${RETRY_SECS:-60}}
+      echo "rate limited ($code) on $method $url: waiting ${wait}s" >&2
+      sleep "$wait"
+      tries=$((tries + 1))
+      continue
+    fi
+    echo "HTTP $code on $method $url" >&2
+    head -c 1000 "$work/body" >&2; echo >&2
+    return 1
+  done
+}
 # forgejo <path>: GET with the Forgejo token
-forgejo() { curl -sS --fail-with-body -H "Authorization: token $TOKEN" "$@"; }
+forgejo() { http "Authorization: token $TOKEN" GET "$@"; }
 # github <method> <url> [curl args...]: prints the body, fails on an HTTP error
-github() {
-  method=$1 url=$2
-  shift 2
-  curl -sS --fail-with-body -X "$method" -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@" "$url"
+github() { http "Authorization: Bearer $GH_TOKEN" "$@"; }
+# download <url> <file>: a Forgejo attachment (follows the redirect to the storage)
+download() {
+  code=$(curl -sS -L -o "$2" -w '%{http_code}' -H "Authorization: token $TOKEN" "$1") || code=000
+  case $code in 2??) return 0 ;; esac
+  echo "HTTP $code on GET $1 (download)" >&2
+  return 1
 }
 json() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 
@@ -70,7 +98,7 @@ PY
 
 while read -r url name; do
   case $name in *_windows_* | *_macos_*) echo "skipped $name (built on GitHub)"; continue ;; esac
-  forgejo -L -o "$work/file" "$url"
+  download "$url" "$work/file"
   # a re-run replaces a file of the same name instead of failing on the duplicate
   old=$(github GET "$gh_api/repos/$GH_REPO/releases/$id/assets?per_page=100" | python3 -c '
 import json, sys
@@ -81,4 +109,5 @@ for a in json.load(sys.stdin):
   for oid in $old; do github DELETE "$gh_api/repos/$GH_REPO/releases/assets/$oid" >/dev/null; done
   github POST "$gh_up/repos/$GH_REPO/releases/$id/assets?name=$name" -H 'Content-Type: application/octet-stream' --data-binary @"$work/file" >/dev/null
   echo "uploaded $name"
+  sleep "${PAUSE_SECS:-1}" # GitHub's secondary rate limit punishes bursts of writes
 done <"$work/assets.txt"
