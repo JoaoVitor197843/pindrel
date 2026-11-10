@@ -44,11 +44,10 @@ void main() {
     expect(find.text('Minhas páginas'), findsWidgets);
     expect(find.text('Nenhuma página ainda'), findsOneWidget);
 
-    // the way to the account screen: the drawer on a phone, the side column on a wide window
-    if (find.text('Conta e servidor').evaluate().isEmpty) {
-      await tester.tap(find.byTooltip('Menu'));
-      await frames(tester, 3);
-    }
+    // the way to the account screen: "Conta e servidor" lives in the account chip's popup menu (tooltip
+    // "Menu da conta de ..."), on every window size; the sidebar button 'Abrir menu' is not involved
+    await tester.tap(find.byTooltip(RegExp('^Menu da conta')));
+    await frames(tester, 3);
     await tester.tap(find.text('Conta e servidor'));
     await frames(tester);
 
