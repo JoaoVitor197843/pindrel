@@ -96,6 +96,13 @@ check "an error names the call" sh -c "printf '%s' \"\$1\" | grep -q 'HTTP 403 o
 check "the token never reaches the log" sh -c "! printf '%s' \"\$1\" | grep -q gh-token" sh "$err"
 curl -s -X POST -d '{"n": 0}' "$G/_limit" >/dev/null
 
+# a token without permission is not a rate limit: it fails at once, saying so, without waiting
+curl -s -X POST -d '{"on": true}' "$G/_deny" >/dev/null
+err=$(env RETRY_SECS=30 PAUSE_SECS=0 $S v1.0.0 2>&1 >/dev/null); rc=$?
+curl -s -X POST -d '{"on": false}' "$G/_deny" >/dev/null
+check "a token without permission fails" test "$rc" -ne 0
+check "and says so, without waiting as for a rate limit" sh -c "printf '%s' \"\$1\" | grep -q 'not accessible by personal access token' && ! printf '%s' \"\$1\" | grep -q 'rate limited'" sh "$err"
+
 check "no Forgejo release for the tag fails" fails_with $S v9.9.9
 check "a wrong Forgejo token fails" fails_with env TOKEN=wrong $S v1.0.0
 check "a wrong GitHub token fails" fails_with env GH_TOKEN=wrong $S v1.0.0
