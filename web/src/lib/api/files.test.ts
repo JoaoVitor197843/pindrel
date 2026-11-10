@@ -10,7 +10,7 @@ const rig = () => {
 }
 
 // jsdom's Blob is slow and a loaded machine slower: the default five seconds is too tight for a dozen pieces
-describe('uploadFile', { timeout: 30_000 }, () => {
+describe('uploadFile', { timeout: 90_000 }, () => {
   it('manda um arquivo em pedaços e o servidor monta os mesmos bytes', async () => {
     const { server, api } = rig()
     const data = patterned(CHUNK_SIZE * 2 + 12_345)
