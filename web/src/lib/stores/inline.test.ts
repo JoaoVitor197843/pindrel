@@ -178,7 +178,8 @@ describe('marcas e links', () => {
     inlineHtml(escapeHtml('*a '.repeat(8000)))
     inlineHtml(escapeHtml('~~a '.repeat(8000)))
     inlineHtml(escapeHtml('__a '.repeat(8000)))
-    expect(performance.now() - t0).toBeLessThan(1500)
+    // a quadratic reader needs minutes here; the margin is for a CI runner shared by four jobs
+    expect(performance.now() - t0).toBeLessThan(6000)
   })
 })
 
