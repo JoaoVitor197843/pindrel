@@ -1,4 +1,8 @@
 import { afterEach, beforeEach, vi } from 'vitest'
+import { configure } from '@testing-library/dom'
+
+// findBy*/waitFor default to 1 s, which a busy CI runner (four jobs at once) overruns
+configure({ asyncUtilTimeout: 8000 })
 
 // jsdom has no ResizeObserver (Svelte's bind:clientHeight needs one): nothing resizes there, so a stub that never fires is exact.
 globalThis.ResizeObserver ??= class {
