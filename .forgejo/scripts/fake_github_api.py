@@ -12,6 +12,7 @@ port_file, token = sys.argv[1], sys.argv[2]
 releases = {}
 tags = set()
 next_id = [1]
+limited = [0]  # how many more authorized writes answer with a secondary rate limit
 R = "/repos/o/r"
 
 
@@ -37,8 +38,14 @@ class H(BaseHTTPRequestHandler):
         if path == "/_tags" and method == "POST":
             tags.update(json.loads(self.body())["tags"])
             return self.send(200, {})
+        if path == "/_limit" and method == "POST":
+            limited[0] = json.loads(self.body())["n"]
+            return self.send(200, {})
         if self.headers.get("Authorization") != "Bearer " + token:
             return self.send(401, {"message": "Bad credentials"})
+        if limited[0] > 0 and method != "GET":  # GitHub's secondary limit is about writes
+            limited[0] -= 1
+            return self.send(403, {"message": "You have exceeded a secondary rate limit."})
         uploads = path.startswith("/uploads")
         if uploads:
             path = path[len("/uploads"):]
