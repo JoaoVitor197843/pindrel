@@ -99,44 +99,49 @@ class CreamButton extends StatelessWidget {
     this.buttonKey,
   });
   final String label;
-  final VoidCallback onPressed;
+
+  /// Null turns the button off: dimmed and deaf to taps.
+  final VoidCallback? onPressed;
   final IconData? icon;
   final double height;
   final bool expand;
   final Key? buttonKey;
   @override
-  Widget build(BuildContext context) => FocusRing(
-    child: Material(
-      color: AppColors.primaryButton,
-      borderRadius: BorderRadius.circular(fieldRadius),
-      child: InkWell(
-        key: buttonKey,
+  Widget build(BuildContext context) => Opacity(
+    opacity: onPressed == null ? 0.4 : 1,
+    child: FocusRing(
+      child: Material(
+        color: AppColors.primaryButton,
         borderRadius: BorderRadius.circular(fieldRadius),
-        onTap: onPressed,
-        child: Container(
-          height: height,
-          width: expand ? double.infinity : null,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon != null) ...[
-                Icon(icon, size: 18, color: AppColors.onPrimaryButton),
-                const SizedBox(width: 8),
-              ],
-              Flexible(
-                child: Text(
-                  label,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.onPrimaryButton,
-                    fontWeight: FontWeight.w500,
-                    fontSize: 15,
+        child: InkWell(
+          key: buttonKey,
+          borderRadius: BorderRadius.circular(fieldRadius),
+          onTap: onPressed,
+          child: Container(
+            height: height,
+            width: expand ? double.infinity : null,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (icon != null) ...[
+                  Icon(icon, size: 18, color: AppColors.onPrimaryButton),
+                  const SizedBox(width: 8),
+                ],
+                Flexible(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.onPrimaryButton,
+                      fontWeight: FontWeight.w500,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -516,7 +521,12 @@ abstract final class KeyboardMode {
 
 /// The ring around whatever has the keyboard focus (2 px, the accent colour, 2 px off its edge), only after a key press.
 class FocusRing extends StatefulWidget {
-  const FocusRing({super.key, required this.child, this.radius = fieldRadius, this.always = false});
+  const FocusRing({
+    super.key,
+    required this.child,
+    this.radius = fieldRadius,
+    this.always = false,
+  });
   final Widget child;
   final double radius;
 

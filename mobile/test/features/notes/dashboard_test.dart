@@ -326,6 +326,98 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Esvaziar lixeira (0)'), findsOneWidget);
     });
+    Future<void> openSettings(WidgetTester tester) async {
+      await pumpDashboard(tester, size: const Size(1000, 800));
+      await tester.tap(find.byTooltip('Menu da conta de Você'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configurações'));
+      await tester.pumpAndSettle();
+    }
+
+    bool saveEnabled(WidgetTester tester) => tester.widget<CreamButton>(find.byKey(const Key('settings-save'))).onPressed != null;
+
+    testWidgets('configurações: Salvar fica desligado até algo mudar e volta a desligar se a mudança é desfeita', (tester) async {
+      await openSettings(tester);
+      expect(find.byKey(const Key('settings-save')), findsOneWidget);
+      expect(saveEnabled(tester), false);
+      await tester.tap(find.byKey(const Key('trash-switch')));
+      await tester.pumpAndSettle();
+      expect(saveEnabled(tester), true);
+      await tester.tap(find.byKey(const Key('trash-switch')));
+      await tester.pumpAndSettle();
+      expect(saveEnabled(tester), false);
+      // a disabled button does nothing, even tapped, and the dialog stays
+      await tester.tap(find.byKey(const Key('settings-save')), warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(find.text('Configurações salvas'), findsNothing);
+      expect(find.text('Dias de retenção da lixeira'), findsOneWidget);
+      // the other sections have nothing to save either
+      await tester.tap(find.text('Conta'));
+      await tester.pumpAndSettle();
+      expect(saveEnabled(tester), false);
+    });
+    testWidgets('configurações: fechar sem mudança não pergunta nada', (tester) async {
+      await openSettings(tester);
+      await tester.tap(find.byTooltip('Fechar configurações'));
+      await tester.pumpAndSettle();
+      expect(find.text('Há alterações não salvas'), findsNothing);
+      expect(find.text('Dias de retenção da lixeira'), findsNothing);
+    });
+    testWidgets('configurações: fechar com mudança pergunta; continuar editando mantém tudo', (tester) async {
+      await openSettings(tester);
+      await tester.tap(find.byKey(const Key('trash-switch')));
+      await tester.pumpAndSettle();
+      for (final close in [() => tester.tap(find.byTooltip('Fechar configurações')), () => tester.tap(find.text('Cancelar')), () => tester.binding.handlePopRoute()]) {
+        await close();
+        await tester.pumpAndSettle();
+        expect(find.text('Há alterações não salvas'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('unsaved-keep')));
+        await tester.pumpAndSettle();
+        expect(find.text('Há alterações não salvas'), findsNothing);
+        expect(find.text('Dias de retenção da lixeira'), findsOneWidget);
+        expect(saveEnabled(tester), true);
+      }
+      expect(ws.settings.useTrash, true);
+    });
+    testWidgets('configurações: descartar fecha sem gravar', (tester) async {
+      await openSettings(tester);
+      await tester.tap(find.byKey(const Key('trash-switch')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Fechar configurações'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('unsaved-discard')));
+      await tester.pumpAndSettle();
+      expect(find.text('Dias de retenção da lixeira'), findsNothing);
+      expect(find.text('Configurações salvas'), findsNothing);
+      expect(ws.settings.useTrash, true);
+    });
+    testWidgets('configurações: salvar pelo aviso grava e fecha', (tester) async {
+      await openSettings(tester);
+      await tester.tap(find.byKey(const Key('trash-switch')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancelar'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('unsaved-save')));
+      await tester.pumpAndSettle();
+      expect(ws.settings.useTrash, false);
+      expect(find.text('Configurações salvas'), findsOneWidget);
+      expect(find.text('Dias de retenção da lixeira'), findsNothing);
+    });
+    testWidgets('configurações: o prazo de retenção também conta como mudança, e salvar volta a desligar', (tester) async {
+      await openSettings(tester);
+      await tester.drag(find.byType(Slider), const Offset(120, 0));
+      await tester.pumpAndSettle();
+      expect(saveEnabled(tester), true);
+      await tester.tap(find.byKey(const Key('settings-save')));
+      await tester.pumpAndSettle();
+      expect(ws.settings.retention, isNot(30));
+      // reopen: nothing differs from what is saved
+      await tester.tap(find.byTooltip('Menu da conta de Você'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configurações'));
+      await tester.pumpAndSettle();
+      expect(saveEnabled(tester), false);
+    });
     testWidgets('configurações no celular: lista de seções e voltar', (tester) async {
       await pumpDashboard(tester, size: const Size(400, 800));
       await tester.tap(find.byTooltip('Menu da conta de Você'));
