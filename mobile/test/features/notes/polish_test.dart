@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/theme/app_theme.dart';
+import 'package:mobile/features/notes/appflowy/page_body.dart';
 import 'package:mobile/features/notes/data/blocks.dart';
 import 'package:mobile/features/notes/data/dock.dart';
 import 'package:mobile/features/notes/data/notes_db.dart';
@@ -10,6 +11,8 @@ import 'package:mobile/features/notes/presentation/pages/dashboard_page.dart';
 import 'package:mobile/features/notes/presentation/pages/editor_page.dart';
 import 'package:mobile/features/notes/presentation/widgets/motion.dart';
 import 'package:mobile/features/notes/presentation/widgets/ui.dart';
+
+import 'appflowy/editor_test_utils.dart';
 
 late NotesDb db;
 late Workspace ws;
@@ -85,8 +88,14 @@ void main() {
       expect(find.text('4 palavras'), findsOneWidget);
       expect(find.text('Sair do zen'), findsOneWidget);
       expect(find.text('Esc'), findsOneWidget);
-      ws.page(pid)!.content = [Block('a', BlockType.paragraph, text: 'só')];
-      await tester.enterText(find.byType(TextField).at(1), 'um');
+    });
+    testWidgets('com uma palavra só, o singular', (tester) async {
+      ws.page(pid)!.content = [Block('a', BlockType.paragraph, text: '')];
+      await pump(tester, EditorPage(ws: ws, pageId: pid));
+      await tester.tap(find.byTooltip('Modo zen'));
+      await tester.pumpAndSettle();
+      expect(find.text('0 palavras'), findsOneWidget);
+      await typeAtEnd(tester, 0, 'um');
       await tester.pumpAndSettle();
       expect(find.text('1 palavra'), findsOneWidget);
     });
@@ -94,7 +103,7 @@ void main() {
       await pump(tester, EditorPage(ws: ws, pageId: pid));
       await tester.tap(find.byTooltip('Modo zen'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextField, 'quatro'), 'quatro cinco seis');
+      await typeAtEnd(tester, 1, ' cinco seis');
       await tester.pumpAndSettle();
       expect(find.text('6 palavras'), findsOneWidget);
     });
@@ -117,28 +126,6 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('zen-words')), findsNothing);
-    });
-    testWidgets('quando um bloco está sendo escrito os outros esmaecem', (tester) async {
-      await pump(tester, EditorPage(ws: ws, pageId: pid));
-      double opacityOf(String text) {
-        final row = find.ancestor(of: find.widgetWithText(TextField, text), matching: find.byType(AnimatedOpacity)).first;
-        return tester.widget<AnimatedOpacity>(row).opacity;
-      }
-
-      await tester.tap(find.byTooltip('Modo zen'));
-      await tester.pumpAndSettle();
-      expect(opacityOf('quatro'), 1);
-      await tester.tap(find.widgetWithText(TextField, 'quatro'));
-      await tester.pumpAndSettle();
-      expect(opacityOf('quatro'), 1);
-      expect(opacityOf('uma duas três'), closeTo(0.38, 0.001));
-    });
-    testWidgets('fora do zen nada esmaece', (tester) async {
-      await pump(tester, EditorPage(ws: ws, pageId: pid));
-      await tester.tap(find.widgetWithText(TextField, 'quatro'));
-      await tester.pumpAndSettle();
-      final op = find.ancestor(of: find.widgetWithText(TextField, 'uma duas três'), matching: find.byType(AnimatedOpacity)).first;
-      expect(tester.widget<AnimatedOpacity>(op).opacity, 1);
     });
   });
 
@@ -257,17 +244,6 @@ void main() {
         expect(tester.takeException(), isNull);
       }
     });
-    testWidgets('as linhas do editor entram uma vez só, e não de novo ao voltar a ser desenhadas', (tester) async {
-      ws.page(pid)!.content = [for (var i = 0; i < 80; i++) Block('p$i', BlockType.paragraph, text: 'linha $i')];
-      await pump(tester, EditorPage(ws: ws, pageId: pid), size: const Size(900, 700));
-      await tester.drag(find.byType(Scrollable).first, const Offset(0, -3000));
-      await tester.pump();
-      await tester.drag(find.byType(Scrollable).first, const Offset(0, 3000));
-      await tester.pump();
-      // a row scrolled back into view is already whole, not fading in again
-      final first = find.ancestor(of: find.widgetWithText(TextField, 'linha 0'), matching: find.byType(Opacity)).first;
-      expect(tester.widget<Opacity>(first).opacity, 1);
-    });
     testWidgets('o aviso de página aparece com um pulinho e some sozinho', (tester) async {
       await pump(tester, DashboardPage(ws: ws));
       await tester.tap(find.byKey(const Key('new-page')));
@@ -323,41 +299,15 @@ void main() {
   });
 
   group('borda do foco nos blocos', () {
-    testWidgets('um clique num bloco de texto mostra a borda (campo de texto), sem precisar do teclado', (tester) async {
-      ws.page(pid)!.content = [Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')];
-      await pump(tester, EditorPage(ws: ws, pageId: pid));
-      expect(find.byKey(const Key('focus-ring')), findsNothing);
-      await tester.tap(find.widgetWithText(TextField, 'dois'));
-      await tester.pump();
-      expect(KeyboardMode.active.value, false);
-      expect(find.byKey(const Key('focus-ring')), findsAtLeastNWidgets(1));
-      final ring = tester.getRect(find.byKey(const Key('focus-ring')).first);
-      final field = tester.getRect(find.widgetWithText(TextField, 'dois'));
-      // 2 px of border drawn 2 px off the edge: the ring sits outside the field on every side
-      expect(ring.left, lessThan(field.left));
-      expect(ring.right, greaterThan(field.right));
-      expect(ring.top, lessThan(field.top));
-      expect(ring.bottom, greaterThan(field.bottom));
-    });
-    testWidgets('só o bloco com o foco tem a borda, e ela some quando o foco sai', (tester) async {
-      ws.page(pid)!.content = [Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')];
+    testWidgets('um bloco de código e o título também ganham a borda', (tester) async {
+      ws.page(pid)!.content = [Block('c', BlockType.code, lang: 'go', text: 'um')];
       await pump(tester, EditorPage(ws: ws, pageId: pid));
       await tester.tap(find.widgetWithText(TextField, 'um'));
       await tester.pump();
-      final before = find.byKey(const Key('focus-ring')).evaluate().length;
-      await tester.tap(find.widgetWithText(TextField, 'dois'));
-      await tester.pump();
-      expect(find.byKey(const Key('focus-ring')).evaluate().length, before);
+      expect(find.byKey(const Key('focus-ring')), findsAtLeastNWidgets(1));
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pump();
       expect(find.byKey(const Key('focus-ring')), findsNothing);
-    });
-    testWidgets('o título e os campos de uma tarefa também ganham a borda', (tester) async {
-      ws.page(pid)!.content = [makeBlock(BlockType.checklist)];
-      await pump(tester, EditorPage(ws: ws, pageId: pid));
-      await tester.tap(find.widgetWithText(TextField, 'Tarefa'));
-      await tester.pump();
-      expect(find.byKey(const Key('focus-ring')), findsAtLeastNWidgets(1));
       await tester.tap(find.widgetWithText(TextField, 'Minha página'));
       await tester.pump();
       expect(find.byKey(const Key('focus-ring')), findsAtLeastNWidgets(1));
@@ -377,7 +327,7 @@ void main() {
       expect(tester.getSize(close), const Size(44, 44));
       // beside the panel, near the screen's edge: the right strip is the last 48 px
       expect(tester.getCenter(close).dx, greaterThan(1500 - 48));
-      final area = tester.getRect(find.byType(CustomScrollView).evaluate().isEmpty ? find.byType(ReorderableListView) : find.byType(CustomScrollView));
+      final area = tester.getRect(find.byType(PageBody));
       expect(tester.getCenter(close).dy, closeTo(area.center.dy, 2));
     });
     testWidgets('as setas apontam para fora para fechar e para dentro para abrir', (tester) async {

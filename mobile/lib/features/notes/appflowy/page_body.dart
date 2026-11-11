@@ -1,0 +1,358 @@
+// The body of a page, edited by appflowy_editor.
+//
+// The page's `List<Block>` stays the source of truth (it is what is stored and
+// synced). The editor gets a `Document` made from it (`doc_codec.dart`) and
+// every edit is turned back into blocks right away, so the rest of the app
+// (outline, word count, export, search) never sees the editor's tree.
+// Changes made from outside the editor (the insert menu, a block's own menu, an
+// opaque block's editing) come back the other way: when the structure of the
+// blocks no longer matches what was last synced, the document is replaced.
+
+import 'dart:async';
+
+import 'package:appflowy_editor/appflowy_editor.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+
+import '../../../../core/theme/app_colors.dart';
+import '../data/blocks.dart';
+import '../data/page_editor.dart';
+import 'doc_codec.dart';
+import 'format_bar.dart';
+import '../presentation/widgets/editor_chrome.dart' show Article;
+import 'pindrel_block_component.dart';
+
+/// Lets the page ask the body to move the caret or the view to a block.
+class PageBodyController {
+  _PageBodyState? _state;
+
+  /// The editor's state, for tests that drive it through its own API.
+  @visibleForTesting
+  EditorState? get editorState => _state?._es;
+
+  /// Brings the blocks up to date with the editor right now (edits are otherwise copied at the end of the turn).
+  @visibleForTesting
+  void flush() => _state?._sync();
+
+  void focusBlock(String id) => _state?._focus(id);
+
+  /// The shortcut behind "/" and the others, for tests (the IME that would fire them is not there in a widget test).
+  @visibleForTesting
+  List<CharacterShortcutEvent> get characterShortcuts => _state?._characters ?? const [];
+  void scrollTo(String id) => _state?._scrollTo(id);
+}
+
+class PageBody extends StatefulWidget {
+  const PageBody({
+    super.key,
+    required this.ed,
+    required this.header,
+    required this.footer,
+    required this.renderOpaque,
+    required this.onSlash,
+    required this.onInsertAfter,
+    required this.controller,
+    this.leftGutter = 0,
+    this.zen = false,
+  });
+
+  final PageEditor ed;
+
+  /// Drawn above the first block and below the last one, inside the scrolling area.
+  final Widget header, footer;
+
+  /// Draws a block the editor does not edit (code, table, media...).
+  final OpaqueRender renderOpaque;
+
+  /// "/" typed in an empty paragraph: the page opens its insert menu for that block.
+  final void Function(String blockId) onSlash;
+
+  /// "+" in the formatting bar: the page opens its insert menu below that block.
+  final void Function(String blockId) onInsertAfter;
+  final PageBodyController controller;
+
+  /// Room the page keeps on the left of each block for its controls (opaque blocks draw them there);
+  /// the text of the blocks the editor owns is moved in by the same amount, so everything lines up.
+  final double leftGutter;
+  final bool zen;
+
+  @override
+  State<PageBody> createState() => _PageBodyState();
+}
+
+/// A cheap fingerprint of everything the editor shows, to tell an outside change from our own sync.
+int blocksFingerprint(List<Block> blocks) => Object.hashAll([
+  for (final b in blocks)
+    Object.hash(b.id, b.type, b.level, b.indent, b.toggle, isNative(b) ? b.text : null, isNative(b) ? Object.hashAll([for (final i in b.items ?? const <ChecklistItem>[]) Object.hash(i.id, i.text, i.done)]) : null),
+]);
+
+class _PageBodyState extends State<PageBody> {
+  late EditorState _es;
+  late EditorScrollController _scroll;
+  StreamSubscription<EditorTransactionValue>? _sub;
+  var _fingerprint = 0;
+  var _syncing = false, _scheduled = false, _replacing = false;
+
+  PageEditor get _ed => widget.ed;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller._state = this;
+    AppFlowyEditorLocalizations.load(const Locale('pt', 'BR'));
+    _open();
+    _ed.addListener(_onPage);
+  }
+
+  @override
+  void didUpdateWidget(PageBody old) {
+    super.didUpdateWidget(old);
+    widget.controller._state = this;
+    if (old.ed != widget.ed) {
+      old.ed.removeListener(_onPage);
+      widget.ed.addListener(_onPage);
+      _close();
+      _open();
+    }
+  }
+
+  void _open() {
+    _es = EditorState(document: blocksToDocument(_ed.blocks));
+    _scroll = EditorScrollController(editorState: _es);
+    _fingerprint = blocksFingerprint(_ed.blocks);
+    _sub = _es.transactionStream.listen((e) {
+      if (e.$1 == TransactionTime.after && !_replacing && e.$2.operations.isNotEmpty) _markDirty();
+    });
+  }
+
+  void _close() {
+    _sub?.cancel();
+    _scroll.dispose();
+    _es.dispose();
+  }
+
+  @override
+  void dispose() {
+    widget.controller._state = null;
+    _ed.removeListener(_onPage);
+    _close();
+    super.dispose();
+  }
+
+  // Edits made in one turn of the event loop are turned into blocks once.
+  void _markDirty() {
+    if (_scheduled) return;
+    _scheduled = true;
+    scheduleMicrotask(() {
+      _scheduled = false;
+      if (mounted) _sync();
+    });
+  }
+
+  void _sync() {
+    final byId = {for (final b in _ed.blocks) b.id: b};
+    final next = documentToBlocks(_es.document, byId, stamp: true);
+    _syncing = true;
+    try {
+      _ed.replaceBlocks(next);
+    } finally {
+      _syncing = false;
+    }
+    _fingerprint = blocksFingerprint(_ed.blocks);
+  }
+
+  void _onPage() {
+    if (_syncing) return;
+    final f = blocksFingerprint(_ed.blocks);
+    if (f != _fingerprint) _replace();
+  }
+
+  var _busy = false, _again = false;
+
+  /// The blocks changed under the editor: put the new ones in its document (the view stays where it is).
+  /// One at a time: a second change that arrives while the document is being rebuilt waits and is applied after it.
+  Future<void> _replace() async {
+    if (_busy) {
+      _again = true;
+      return;
+    }
+    _busy = true;
+    try {
+      do {
+        _again = false;
+        if (!mounted) return;
+        _fingerprint = blocksFingerprint(_ed.blocks);
+        final fresh = blocksToDocument(_ed.blocks).root.children.toList();
+        for (final n in fresh) {
+          n.unlink();
+        }
+        final old = _es.document.root.children.toList();
+        _replacing = true;
+        try {
+          // two steps: deleting and inserting in one transaction put the new nodes in the wrong order
+          if (old.isNotEmpty) await _es.apply(_es.transaction..deleteNodes(old), isRemote: true, withUpdateSelection: false, skipEditableCheck: true);
+          await _es.apply(_es.transaction..insertNodes([0], fresh, deepCopy: false), isRemote: true, withUpdateSelection: false, skipEditableCheck: true);
+        } finally {
+          _replacing = false;
+        }
+      } while (_again);
+    } finally {
+      _busy = false;
+    }
+  }
+
+  /// The block that holds the caret, after bringing the blocks up to date with the editor.
+  Block? _blockAtCaret() {
+    final sel = _es.selection;
+    if (sel == null) return null;
+    _sync();
+    final node = _es.getNodeAtPath(sel.start.path);
+    final id = node?.attributes[idKey];
+    return id is String ? _ed.blocks.where((b) => b.id == id).firstOrNull : null;
+  }
+
+  int? _indexOf(String id) {
+    final i = _es.document.root.children.toList().indexWhere((n) => n.attributes[idKey] == id);
+    return i < 0 ? null : i;
+  }
+
+  void _focus(String id) {
+    // the page may have just changed the blocks: wait for the document to catch up
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final i = _indexOf(id);
+      if (i == null) return;
+      final n = _es.getNodeAtPath([i]);
+      if (n?.delta == null) return;
+      _es.selection = Selection.collapsed(Position(path: [i]));
+    });
+  }
+
+  void _scrollTo(String id) {
+    final i = _indexOf(id);
+    if (i == null || _scroll.shrinkWrap) return;
+    // +1 for the header that sits at the top of the list
+    _scroll.itemScrollController.scrollTo(index: i + 1, duration: const Duration(milliseconds: 250));
+  }
+
+  TextStyle get _text => TextStyle(fontSize: 16.5, height: 1.68, color: AppColors.text.withValues(alpha: 0.9));
+
+  Map<String, BlockComponentBuilder> _builders() {
+    final pad = EdgeInsets.fromLTRB(widget.leftGutter, 6, 0, 6);
+    BlockComponentConfiguration cfg(String hint) => BlockComponentConfiguration(
+      padding: (_) => pad,
+      textStyle: (_, {textSpan}) => _text,
+      placeholderText: (_) => hint,
+      placeholderTextStyle: (_, {textSpan}) => _text.copyWith(color: AppColors.textMuted.withValues(alpha: 0.6)),
+    );
+    return {
+      PageBlockKeys.type: PageBlockComponentBuilder(),
+      ParagraphBlockKeys.type: ParagraphBlockComponentBuilder(configuration: cfg('Digite “/” para inserir um bloco')),
+      HeadingBlockKeys.type: HeadingBlockComponentBuilder(
+        configuration: cfg('Título'),
+        textStyleBuilder: (level) => TextStyle(fontFamily: 'serif', fontWeight: FontWeight.bold, height: 1.3, color: AppColors.text, fontSize: switch (level) { 1 => 30.0, 2 => 24.0, _ => 19.0 }),
+      ),
+      QuoteBlockKeys.type: QuoteBlockComponentBuilder(configuration: cfg('Citação')),
+      BulletedListBlockKeys.type: BulletedListBlockComponentBuilder(configuration: cfg('Item')),
+      NumberedListBlockKeys.type: NumberedListBlockComponentBuilder(configuration: cfg('Item')),
+      TodoListBlockKeys.type: TodoListBlockComponentBuilder(configuration: cfg('Tarefa')),
+      DividerBlockKeys.type: DividerBlockComponentBuilder(lineColor: AppColors.border, configuration: BlockComponentConfiguration(padding: (_) => EdgeInsets.fromLTRB(widget.leftGutter, 8, 0, 8))),
+      opaqueType: PindrelBlockBuilder(editorState: _es, render: widget.renderOpaque, configuration: const BlockComponentConfiguration(padding: _noPad, margin: _noPad)),
+    };
+  }
+
+  static EdgeInsets _noPad(Node _) => const EdgeInsets.symmetric(vertical: 6);
+
+  /// "/" in an empty paragraph opens the page's own insert menu (the package's has other blocks and English labels).
+  late final _slash = CharacterShortcutEvent(
+    key: 'pindrel slash',
+    character: '/',
+    handler: (es) async {
+      final sel = es.selection;
+      if (sel == null || !sel.isCollapsed) return false;
+      final node = es.getNodeAtPath(sel.start.path);
+      if (node == null || node.type != ParagraphBlockKeys.type || (node.delta?.isEmpty ?? true) == false) return false;
+      _sync();
+      final id = node.attributes[idKey];
+      if (id is! String) return false;
+      widget.onSlash(id);
+      return true;
+    },
+  );
+
+  /// "> " at the start of a paragraph makes a quote (the package only knows the typographic quotes).
+  static final _greaterToQuote = CharacterShortcutEvent(
+    key: 'pindrel greater to quote',
+    character: ' ',
+    handler: (es) async => formatMarkdownSymbol(
+      es,
+      (node) => node.type != QuoteBlockKeys.type,
+      (_, text, _) => text == '>',
+      (_, node, delta) => [
+        quoteNode(attributes: {QuoteBlockKeys.delta: delta.compose(Delta()..delete(1)).toJson()}),
+        ...node.children,
+      ],
+    ),
+  );
+
+  List<CharacterShortcutEvent> get _characters => [
+    for (final e in standardCharacterShortcutEvents)
+      if (e != slashCommand) e,
+    _greaterToQuote,
+    _slash,
+  ];
+
+  // no tables here, and Tab/Shift+Tab on lists only (a Tab in a paragraph would nest it inside the previous one)
+  List<CommandShortcutEvent> get _commands => [
+    for (final e in standardCommandShortcutEvents)
+      if (!tableCommands.contains(e)) e,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    // the blocks sit in a column as wide as the page's article; the header and footer use the full width
+    final pad = Article.padFor(width);
+    final side = ((width - (widget.zen ? 672 : 768)) / 2).clamp(0.0, 4000.0) + pad;
+    final touch = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
+    final style = EditorStyle(
+      padding: EdgeInsets.only(left: (side - widget.leftGutter).clamp(0.0, 4000.0) + 0, right: side),
+      cursorColor: AppColors.accentBorder,
+      dragHandleColor: AppColors.accentBorder,
+      selectionColor: AppColors.accent.withValues(alpha: 0.45),
+      textStyleConfiguration: TextStyleConfiguration(
+        text: _text,
+        bold: const TextStyle(fontWeight: FontWeight.w700),
+        italic: const TextStyle(fontStyle: FontStyle.italic),
+        underline: const TextStyle(decoration: TextDecoration.underline),
+        strikethrough: const TextStyle(decoration: TextDecoration.lineThrough),
+        href: const TextStyle(color: AppColors.accentText, decoration: TextDecoration.underline),
+        code: TextStyle(fontFamily: 'monospace', fontSize: 14.5, color: AppColors.text, backgroundColor: AppColors.border.withValues(alpha: 0.7)),
+      ),
+      textSpanDecorator: touch ? mobileTextSpanDecoratorForAttribute : defaultTextSpanDecoratorForAttribute,
+      mobileDragHandleBallSize: touch ? const Size(8, 8) : Size.zero,
+      mobileDragHandleWidth: touch ? 2.0 : 0.0,
+      enableHapticFeedbackOnAndroid: touch,
+    );
+    return Column(
+      children: [
+        Expanded(
+          child: AppFlowyEditor(
+            key: ObjectKey(_es),
+            editorState: _es,
+            editorScrollController: _scroll,
+            editable: !_ed.readOnly,
+            editorStyle: style,
+            blockComponentBuilders: _builders(),
+            characterShortcutEvents: _characters,
+            commandShortcutEvents: _commands,
+            header: widget.header,
+            footer: widget.footer,
+            showMagnifier: touch,
+          ),
+        ),
+        if (!_ed.readOnly) FormatBar(editorState: _es, ed: _ed, blockAtCaret: _blockAtCaret, onInsertAfter: widget.onInsertAfter),
+      ],
+    );
+  }
+}

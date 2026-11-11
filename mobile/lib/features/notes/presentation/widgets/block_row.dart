@@ -45,135 +45,137 @@ class BlockRow extends StatefulWidget {
   State<BlockRow> createState() => _BlockRowState();
 }
 
+const _turns = <(String, BlockType, int?, bool)>[
+  ('Texto', BlockType.paragraph, null, false),
+  ('Título 1', BlockType.heading, 1, false),
+  ('Título 2', BlockType.heading, 2, false),
+  ('Título 3', BlockType.heading, 3, false),
+  ('Lista com marcadores', BlockType.bullet, null, false),
+  ('Lista numerada', BlockType.numbered, null, false),
+  ('Citação', BlockType.quote, null, false),
+  ('Destaque', BlockType.callout, null, false),
+  ('Toggle', BlockType.toggle, null, false),
+  ('Título 1 com toggle', BlockType.heading, 1, true),
+  ('Título 2 com toggle', BlockType.heading, 2, true),
+  ('Título 3 com toggle', BlockType.heading, 3, true),
+];
+
+bool _isCurrent(Block b, BlockType t, int? level, bool toggle) {
+  if (b.type != t) return false;
+  return t != BlockType.heading ||
+      ((b.level ?? 2) == (level ?? 2) && b.toggle == toggle);
+}
+
+/// The entries of a block's menu (move, duplicate, nest, tone, turn into, delete). Each value is what to run.
+List<PopupMenuEntry<VoidCallback>> blockMenuItems(BuildContext context, {required PageEditor ed, required Block block, required int index, required int count}) {
+  final b = block;
+  final convertible = isTextType(b.type) || b.type == BlockType.toggle;
+  final canDuplicate =
+      b.type != BlockType.image || (b.fileId ?? '').isNotEmpty;
+  PopupMenuItem<VoidCallback> item(
+    String label,
+    VoidCallback run, {
+    bool enabled = true,
+    bool danger = false,
+  }) => PopupMenuItem(
+    value: run,
+    enabled: enabled,
+    height: 36,
+    child: Text(
+      label,
+      style: TextStyle(
+        fontSize: 14,
+        color: danger ? AppColors.offlineText : null,
+      ),
+    ),
+  );
+  PopupMenuEntry<VoidCallback> heading(String t) => PopupMenuItem(
+    enabled: false,
+    height: 28,
+    child: Text(t.toUpperCase(), style: monoLabel(size: 10, spacing: 1.4)),
+  );
+  return [
+    item('Subir', () => ed.moveBy(b.id, -1), enabled: index > 0),
+    item(
+      'Descer',
+      () => ed.moveBy(b.id, 1),
+      enabled: index < count - 1,
+    ),
+    if (canDuplicate) item('Duplicar', () => ed.duplicateBlock(b.id)),
+    if (b.type == BlockType.bullet || b.type == BlockType.numbered) ...[
+      item('Aninhar', () => ed.indent(b.id, 1)),
+      item('Tirar um nível', () => ed.indent(b.id, -1)),
+    ],
+    if (b.type == BlockType.callout) ...[
+      const PopupMenuDivider(),
+      heading('Tom do destaque'),
+      PopupMenuItem<VoidCallback>(
+        enabled: false,
+        height: 40,
+        child: Row(
+          children: [
+            for (final t in CalloutTone.values)
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Semantics(
+                  button: true,
+                  selected: (b.tone ?? CalloutTone.info) == t,
+                  label: 'Tom ${toneLabels[t]!.$1}',
+                  child: RingInkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () {
+                      Navigator.pop(context);
+                      ed.setTone(b.id, t);
+                    },
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(4),
+                        color: (b.tone ?? CalloutTone.info) == t
+                            ? AppColors.border.withValues(alpha: 0.6)
+                            : null,
+                        border: Border.all(
+                          color: (b.tone ?? CalloutTone.info) == t
+                              ? AppColors.accentBorder
+                              : Colors.transparent,
+                        ),
+                      ),
+                      child: Text(
+                        toneLabels[t]!.$2,
+                        style: const TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    ],
+    if (convertible) ...[
+      const PopupMenuDivider(),
+      heading('Transformar em'),
+      for (final (label, type, level, toggle) in _turns)
+        if (!_isCurrent(b, type, level, toggle))
+          item(
+            label,
+            () => ed.turnInto(b.id, type, level: level ?? 2, toggle: toggle),
+          ),
+    ],
+    const PopupMenuDivider(),
+    item('Excluir', () => ed.remove(b.id), danger: true),
+  ];
+}
+
+
 class _BlockRowState extends State<BlockRow> {
   var _hover = false;
   var _active = false;
   var _menu = false;
 
-  static const _turns = <(String, BlockType, int?, bool)>[
-    ('Texto', BlockType.paragraph, null, false),
-    ('Título 1', BlockType.heading, 1, false),
-    ('Título 2', BlockType.heading, 2, false),
-    ('Título 3', BlockType.heading, 3, false),
-    ('Lista com marcadores', BlockType.bullet, null, false),
-    ('Lista numerada', BlockType.numbered, null, false),
-    ('Citação', BlockType.quote, null, false),
-    ('Destaque', BlockType.callout, null, false),
-    ('Toggle', BlockType.toggle, null, false),
-    ('Título 1 com toggle', BlockType.heading, 1, true),
-    ('Título 2 com toggle', BlockType.heading, 2, true),
-    ('Título 3 com toggle', BlockType.heading, 3, true),
-  ];
-
-  bool _isCurrent(BlockType t, int? level, bool toggle) {
-    final b = widget.block;
-    if (b.type != t) return false;
-    return t != BlockType.heading ||
-        ((b.level ?? 2) == (level ?? 2) && b.toggle == toggle);
-  }
-
-  List<PopupMenuEntry<VoidCallback>> _items() {
-    final b = widget.block;
-    final ed = widget.ed;
-    final convertible = isTextType(b.type) || b.type == BlockType.toggle;
-    final canDuplicate =
-        b.type != BlockType.image || (b.fileId ?? '').isNotEmpty;
-    PopupMenuItem<VoidCallback> item(
-      String label,
-      VoidCallback run, {
-      bool enabled = true,
-      bool danger = false,
-    }) => PopupMenuItem(
-      value: run,
-      enabled: enabled,
-      height: 36,
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 14,
-          color: danger ? AppColors.offlineText : null,
-        ),
-      ),
-    );
-    PopupMenuEntry<VoidCallback> heading(String t) => PopupMenuItem(
-      enabled: false,
-      height: 28,
-      child: Text(t.toUpperCase(), style: monoLabel(size: 10, spacing: 1.4)),
-    );
-    return [
-      item('Subir', () => ed.moveBy(b.id, -1), enabled: widget.index > 0),
-      item(
-        'Descer',
-        () => ed.moveBy(b.id, 1),
-        enabled: widget.index < widget.count - 1,
-      ),
-      if (canDuplicate) item('Duplicar', () => ed.duplicateBlock(b.id)),
-      if (b.type == BlockType.bullet || b.type == BlockType.numbered) ...[
-        item('Aninhar', () => ed.indent(b.id, 1)),
-        item('Tirar um nível', () => ed.indent(b.id, -1)),
-      ],
-      if (b.type == BlockType.callout) ...[
-        const PopupMenuDivider(),
-        heading('Tom do destaque'),
-        PopupMenuItem<VoidCallback>(
-          enabled: false,
-          height: 40,
-          child: Row(
-            children: [
-              for (final t in CalloutTone.values)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Semantics(
-                    button: true,
-                    selected: (b.tone ?? CalloutTone.info) == t,
-                    label: 'Tom ${toneLabels[t]!.$1}',
-                    child: RingInkWell(
-                      borderRadius: BorderRadius.circular(4),
-                      onTap: () {
-                        Navigator.pop(context);
-                        ed.setTone(b.id, t);
-                      },
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(4),
-                          color: (b.tone ?? CalloutTone.info) == t
-                              ? AppColors.border.withValues(alpha: 0.6)
-                              : null,
-                          border: Border.all(
-                            color: (b.tone ?? CalloutTone.info) == t
-                                ? AppColors.accentBorder
-                                : Colors.transparent,
-                          ),
-                        ),
-                        child: Text(
-                          toneLabels[t]!.$2,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-      if (convertible) ...[
-        const PopupMenuDivider(),
-        heading('Transformar em'),
-        for (final (label, type, level, toggle) in _turns)
-          if (!_isCurrent(type, level, toggle))
-            item(
-              label,
-              () => ed.turnInto(b.id, type, level: level ?? 2, toggle: toggle),
-            ),
-      ],
-      const PopupMenuDivider(),
-      item('Excluir', () => ed.remove(b.id), danger: true),
-    ];
-  }
+  List<PopupMenuEntry<VoidCallback>> _items() => blockMenuItems(context, ed: widget.ed, block: widget.block, index: widget.index, count: widget.count);
 
   Widget _controls() {
     final label = '${widget.label} ${widget.index + 1}';

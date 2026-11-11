@@ -104,6 +104,21 @@ class PageEditor extends ChangeNotifier {
     }
   }
 
+  /// The rich-text editor hands the whole body back after an edit. The same
+  /// `Block` objects stay for the blocks it did not touch (the opaque ones), so
+  /// widgets and state tied to them keep working.
+  void replaceBlocks(List<Block> next) {
+    final p = page;
+    if (p?.content == null || !_can) return;
+    final old = p!.content!;
+    final keep = {for (final b in next) b.id};
+    final gone = [for (final b in old) if (!keep.contains(b.id)) b];
+    p.content = next;
+    revealed.removeWhere((id) => !keep.contains(id));
+    _changed();
+    if (gone.isNotEmpty) _release(fileIdsOf(gone));
+  }
+
   void move(int from, int at) {
     final p = page;
     if (p?.content == null || !_can) return;
