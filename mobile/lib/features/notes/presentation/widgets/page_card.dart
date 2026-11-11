@@ -8,8 +8,9 @@ import '../../data/workspace.dart';
 import 'tag_style.dart';
 import 'ui.dart';
 
-/// One page in the grid or the list. The whole card opens the page (a trashed one cannot be opened); pin and trash are
-/// always visible, there being no hover on a phone.
+/// One page in the grid or the list, laid out like the web's card. The whole card opens the page (a trashed one cannot
+/// be opened). Pin and trash are always visible: a phone or tablet has no hover, and a touch screen can sit on a
+/// desktop too, so nothing may depend on it.
 class PageCard extends StatelessWidget {
   const PageCard({
     super.key,
@@ -89,9 +90,9 @@ class PageCard extends StatelessWidget {
       _title,
       query,
       AppText.serif(
-        list ? 17 : 18,
+        list ? 18 : 20,
       ).copyWith(fontWeight: FontWeight.w600, height: 1.3),
-      AppText.serif(list ? 17 : 18).copyWith(
+      AppText.serif(list ? 18 : 20).copyWith(
         fontWeight: FontWeight.w600,
         height: 1.3,
         backgroundColor: AppColors.accent.withValues(alpha: 0.45),
@@ -152,8 +153,11 @@ class PageCard extends StatelessWidget {
     ),
   );
 
+  // The padding is the web's `p-5` (20), except on the right (12): the pin and the trash are 36 px buttons pulled toward the
+  // edge like the web's `-mr-2`, and a widget cannot be tapped outside its parent's bounds, so the room is made by the
+  // padding and the text blocks give the other 8 back with their own.
   Widget _card(List<InlineSpan> title) => Padding(
-    padding: const EdgeInsets.all(14),
+    padding: const EdgeInsets.fromLTRB(20, 14, 12, 12),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -162,72 +166,71 @@ class PageCard extends StatelessWidget {
           children: [
             Expanded(
               // a long title goes down a line instead of being cut (the web's `wrap-anywhere`)
-              child: Text.rich(TextSpan(children: title)),
-            ),
-            Transform.translate(
-              offset: const Offset(8, -6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [_lock(), _pin()],
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6, right: 8),
+                child: Text.rich(TextSpan(children: title)),
               ),
             ),
+            _lock(),
+            _pin(),
           ],
         ),
-        const SizedBox(height: 6),
-        // two lines of room whatever the text, so the cards of a row keep one size (the web's `min-h-[3lh]`)
-        ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 13 * 1.5 * 2),
-          child: Text(
-            _excerpt,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 13,
-              height: 1.5,
-              color: AppColors.textMuted,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 24),
-          child: _chips(),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.only(top: 4),
-          decoration: const BoxDecoration(
-            border: Border(top: BorderSide(color: AppColors.border)),
-          ),
-          child: Row(
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Flexible(
+              const SizedBox(height: 2),
+              // three lines of room whatever the text, so the cards of a row keep one size (the web's `line-clamp-3 min-h-[3lh]`)
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 14 * 1.625 * 3),
                 child: Text(
-                  formatDate(page.updated),
+                  _excerpt,
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
-                  style: AppText.mono(12, letterSpacing: 0),
-                ),
-              ),
-              const Spacer(),
-              Text(pageMeta(page), style: AppText.mono(12, letterSpacing: 0)),
-              const SizedBox(width: 4),
-              // 36 px of button in a 20 px line, pulled into the corner like the web's `-my-2 -mr-2`
-              SizedBox(
-                width: page.trashed ? 0 : 36,
-                height: 20,
-                child: OverflowBox(
-                  maxHeight: 36,
-                  child: Transform.translate(
-                    offset: const Offset(8, 0),
-                    child: _trash(),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    height: 1.625,
+                    color: AppColors.textMuted,
                   ),
                 ),
               ),
+              const SizedBox(height: 16),
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 28),
+                child: _chips(),
+              ),
+              const SizedBox(height: 16),
+              const Divider(height: 1, thickness: 1, color: AppColors.border),
             ],
           ),
         ),
+        // the 36 px footer row is the web's 20 px line with its `-my-2` button
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: SizedBox(
+            height: 36,
+            child: Row(
+              children: [
+                // Expanded, not Flexible + Spacer: those split the free space and leave half of it empty at the end
+                Expanded(
+                  child: Text(
+                    formatDate(page.updated),
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.mono(12, letterSpacing: 0),
+                  ),
+                ),
+                Text(pageMeta(page), style: AppText.mono(12, letterSpacing: 0)),
+                _trash(),
+              ],
+            ),
+          ),
+        ),
         if (page.trashed)
-          Padding(padding: const EdgeInsets.only(top: 12), child: _restore()),
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 8, right: 8),
+            child: _restore(),
+          ),
       ],
     ),
   );

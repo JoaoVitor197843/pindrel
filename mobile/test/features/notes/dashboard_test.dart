@@ -16,7 +16,7 @@ late NotesDb db;
 late Workspace ws;
 var clock = DateTime(2026, 11, 7, 12).millisecondsSinceEpoch;
 
-Future<void> pumpDashboard(WidgetTester tester, {Size size = const Size(400, 800), double textScale = 1}) async {
+Future<void> pumpDashboard(WidgetTester tester, {Size size = const Size(400, 1400), double textScale = 1}) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);

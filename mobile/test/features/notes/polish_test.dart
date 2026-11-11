@@ -300,12 +300,25 @@ void main() {
       expect(trash.center.dy, greaterThan(card.bottom - 40));
       expect(find.textContaining('Um título bem comprido', findRichText: true), findsWidgets);
     });
-    testWidgets('o cartão ficou compacto: menos de 200 px de altura com texto de um parágrafo', (tester) async {
+    testWidgets('a lixeira, o pin e a contagem de blocos ficam perto da borda direita do cartão, como na web', (tester) async {
+      ws.page(pid)!.tags = [ws.addTag('servidor')!.id];
+      await pump(tester, DashboardPage(ws: ws), size: const Size(1500, 900));
+      final card = tester.getRect(find.byKey(const Key('page-card')).first);
+      final trash = tester.getRect(find.byTooltip(RegExp('para a lixeira')).first);
+      final pin = tester.getRect(find.byTooltip(RegExp('Fixar')).first);
+      final count = tester.getRect(find.textContaining('bloco').first);
+      // the icon sits 10 px inside its 36 px button
+      expect(card.right - trash.right + 10, lessThan(26));
+      expect(card.right - trash.right + 10, greaterThan(18));
+      expect(card.right - pin.right + 10, lessThan(26));
+      expect(card.right - count.right, lessThan(52));
+    });
+    testWidgets('o cartão segue o da web: menos de 270 px de altura com texto de um parágrafo', (tester) async {
       final p = ws.page(pid)!;
       p.excerpt = 'Passos: exportar volumes do Docker, escrever configuration.nix, testar em VM antes de tocar no bare metal. Backup do Postgres primeiro.';
       p.tags = [ws.addTag('servidor')!.id, ws.addTag('trabalho')!.id];
       await pump(tester, DashboardPage(ws: ws), size: const Size(1500, 900));
-      expect(tester.getSize(find.byKey(const Key('page-card'))).height, lessThan(200));
+      expect(tester.getSize(find.byKey(const Key('page-card'))).height, lessThan(270));
     });
   });
 
