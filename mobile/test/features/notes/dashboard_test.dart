@@ -294,6 +294,38 @@ void main() {
       expect(find.text('http://localhost:11434'), findsOneWidget);
     });
 
+    testWidgets('configurações: cada seção é um botão da largura toda da lista, não só do texto', (tester) async {
+      await pumpDashboard(tester, size: const Size(1000, 800));
+      await tester.tap(find.byTooltip('Menu da conta de Você'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configurações'));
+      await tester.pumpAndSettle();
+      final list = tester.getRect(find.ancestor(of: find.text('Conta'), matching: find.byType(ListView)).first);
+      final row = tester.getRect(find.ancestor(of: find.text('Conta'), matching: find.byType(InkWell)).first);
+      // 8 px of padding on each side of the list
+      expect(row.width, list.width - 16);
+      // a tap on the empty end of the row, far from the text, opens the section
+      await tester.tapAt(Offset(row.right - 6, row.center.dy));
+      await tester.pumpAndSettle();
+      expect(find.text('Conta e servidor'), findsOneWidget);
+      // and the same on a phone, where the list is a screen of its own
+      await tester.tap(find.byTooltip('Fechar configurações'));
+      await tester.pumpAndSettle();
+    });
+    testWidgets('configurações no celular: a linha da seção toca em toda a largura', (tester) async {
+      await pumpDashboard(tester, size: const Size(400, 800));
+      await tester.tap(find.byTooltip('Menu da conta de Você'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configurações'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Voltar para as seções'));
+      await tester.pumpAndSettle();
+      final row = tester.getRect(find.ancestor(of: find.text('Lixeira'), matching: find.byType(InkWell)).first);
+      expect(row.width, greaterThan(300));
+      await tester.tapAt(Offset(row.right - 6, row.center.dy));
+      await tester.pumpAndSettle();
+      expect(find.text('Esvaziar lixeira (0)'), findsOneWidget);
+    });
     testWidgets('configurações no celular: lista de seções e voltar', (tester) async {
       await pumpDashboard(tester, size: const Size(400, 800));
       await tester.tap(find.byTooltip('Menu da conta de Você'));

@@ -544,6 +544,9 @@ class _FocusRingState extends State<FocusRing> {
       valueListenable: KeyboardMode.active,
       builder: (context, keyboard, child) => Stack(
         clipBehavior: Clip.none,
+        // passthrough: a tight width given by the parent (a list row) reaches the child, so the whole row is the button
+        // and not just the text inside it
+        fit: StackFit.passthrough,
         children: [
           child!,
           if (_focused && (keyboard || widget.always))
