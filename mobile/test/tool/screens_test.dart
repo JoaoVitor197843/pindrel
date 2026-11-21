@@ -98,14 +98,30 @@ void main() {
   testWidgets('screens', (tester) async {
     await _font('serif', ['/usr/share/fonts/liberation/LiberationSerif-Bold.ttf', '/usr/share/fonts/liberation/LiberationSerif-Regular.ttf']);
     await _font('monospace', ['/usr/share/fonts/TTF/DejaVuSansMono.ttf']);
+    // the editor's text has no family of its own, so it takes the test engine's default one
+    await _font('FlutterTest', ['/usr/share/fonts/TTF/DejaVuSans.ttf']);
     await _font('Roboto', ['/usr/share/fonts/TTF/DejaVuSans.ttf', '/usr/share/fonts/liberation/LiberationSans-Regular.ttf']);
     final db = NotesDb.inMemory();
     final ws = _seed(db);
     final editing = ws.pages.firstWhere((p) => p.title.startsWith('Rotina')).id;
     await shot(tester, 'dash-m', const Size(420, 900), () => DashboardPage(ws: ws));
     await shot(tester, 'dash-d', const Size(1300, 900), () => DashboardPage(ws: ws));
+    final tp = ws.newPage('Tabela');
+    tp.content = [
+      Block('h', BlockType.heading, text: 'Responsáveis'),
+      Block('p', BlockType.paragraph, text: 'Quem cuida de cada frente, com um texto para comparar o alinhamento.'),
+      Block('t', BlockType.table, cols: [TableColumn(id: 'c1', label: 'Frente', w: 200), TableColumn(id: 'c2', label: 'Responsável', w: 160), TableColumn(id: 'c3', label: 'Prazo', w: 120)], rows: [
+        {'c1': 'Conciliação **dos lançamentos**', 'c2': 'Marina', 'c3': '31/03'},
+        {'c1': 'Contratos', 'c2': 'Jurídico', 'c3': '07/04'},
+        {'c1': 'Relatório do conselho com um texto bem comprido que quebra', 'c2': 'Paulo', 'c3': '15/04'},
+      ]),
+      Block('q', BlockType.paragraph, text: 'Depois da tabela.'),
+    ];
+    ws.touch(tp.id);
+    await shot(tester, 'tab-d', const Size(1300, 800), () => EditorPage(ws: ws, pageId: tp.id));
+    await shot(tester, 'tab-m', const Size(420, 800), () => EditorPage(ws: ws, pageId: tp.id));
     await shot(tester, 'ed-m', const Size(420, 1500), () => EditorPage(ws: ws, pageId: editing));
-    await shot(tester, 'ed-focus', const Size(1500, 900), () => EditorPage(ws: ws, pageId: editing), () async => tester.tap(find.byType(TextField).at(1)));
+    await shot(tester, 'ed-focus', const Size(1500, 900), () => EditorPage(ws: ws, pageId: editing), () async => tester.tap(find.byType(TextField).first));
     await shot(tester, 'ed-drawer', const Size(900, 800), () => EditorPage(ws: ws, pageId: editing), () async => tester.tap(find.byTooltip('Abrir painel')));
     await shot(tester, 'ed-edge', const Size(900, 800), () => EditorPage(ws: ws, pageId: editing));
     await shot(tester, 'ed-xl', const Size(1920, 1000), () => EditorPage(ws: ws, pageId: editing));

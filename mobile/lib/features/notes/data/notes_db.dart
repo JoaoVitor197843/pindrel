@@ -1,3 +1,4 @@
+import '../../../core/performance/frame_pacer.dart';
 import 'dart:convert';
 
 import 'package:sqlite3/sqlite3.dart';
@@ -147,7 +148,12 @@ class NotesDb {
 
   Settings settings() {
     final m = {for (final r in _db.select('SELECT key,value FROM settings')) r['key'] as String: r['value'] as String};
-    return Settings(useTrash: m['useTrash'] != 'false', retention: (int.tryParse(m['retention'] ?? '') ?? 30).clamp(7, 90));
+    return Settings(
+      useTrash: m['useTrash'] != 'false',
+      retention: (int.tryParse(m['retention'] ?? '') ?? 30).clamp(7, 90),
+      textScale: Settings.cleanScale(double.tryParse(m['textScale'] ?? '') ?? 1.0),
+      power: PowerMode.parse(m['power']),
+    );
   }
 
   void saveSettings(Settings s) {
@@ -155,6 +161,8 @@ class NotesDb {
     try {
       _db.execute("INSERT INTO settings(key,value) VALUES('useTrash',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ['${s.useTrash}']);
       _db.execute("INSERT INTO settings(key,value) VALUES('retention',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ['${s.retention}']);
+      _db.execute("INSERT INTO settings(key,value) VALUES('textScale',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [s.textScale.toStringAsFixed(1)]);
+      _db.execute("INSERT INTO settings(key,value) VALUES('power',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [s.power.name]);
       _db.execute('COMMIT');
     } catch (_) {
       _db.execute('ROLLBACK');

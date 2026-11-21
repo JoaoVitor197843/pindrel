@@ -8,6 +8,7 @@ import '../../data/dock.dart';
 import '../../data/note_page.dart';
 import '../../data/page_editor.dart';
 import '../../data/workspace.dart';
+import '../../appflowy/page_body.dart';
 import '../widgets/block_fields.dart';
 import '../widgets/block_row.dart';
 import '../widgets/block_views.dart';
@@ -16,6 +17,7 @@ import '../widgets/export_menu.dart';
 import '../widgets/insert_menu.dart';
 import '../widgets/motion.dart';
 import '../widgets/side_panels.dart';
+import '../widgets/text_size_panel.dart';
 import '../widgets/ui.dart';
 
 const _dockMin = 1340.0;
@@ -57,18 +59,14 @@ class EditorPage extends StatefulWidget {
 
 class _EditorPageState extends State<EditorPage> {
   late final PageEditor _ed = PageEditor(widget.ws, widget.pageId);
-  final _scroll = ScrollController();
+  // the rich-text body: moves the caret and the view for the panels and the insert menu
+  final _body = PageBodyController();
   final _nodes = <String, FocusNode>{};
-  final _rowKeys = <String, GlobalKey>{};
-  final _draft = TextEditingController();
-  final _draftNode = FocusNode();
   // holds the keyboard focus while nothing is being typed, so Esc can leave the zen mode
   final _pageNode = FocusNode(skipTraversal: true);
   String? _wantFocus;
   var _zen = false;
   // the block that has the keyboard (the others fade back in zen mode), and the rows whose entrance already played
-  String? _activeId;
-  final _entered = <String>{};
   bool? _propsDock, _panelDock;
   // the panels as drawers over the page (narrow windows); they always start closed
   var _propsDrawer = false, _panelDrawer = false;
@@ -76,14 +74,18 @@ class _EditorPageState extends State<EditorPage> {
   @override
   void dispose() {
     _ed.dispose();
-    _scroll.dispose();
-    _draft.dispose();
-    _draftNode.dispose();
     _pageNode.dispose();
     for (final n in _nodes.values) {
       n.dispose();
     }
     super.dispose();
+  }
+
+  /// Makes the text of the page larger or smaller by [step] (0: back to normal) and says how large it is now.
+  void _textSize(double step) {
+    final ws = widget.ws;
+    ws.setTextScale(step == 0 ? 1.0 : ws.settings.textScale + step);
+    _toast('Texto em ${percent(ws.settings.textScale)}');
   }
 
   void _setZen(bool on) {
@@ -100,8 +102,26 @@ class _EditorPageState extends State<EditorPage> {
   FocusNode _focusFor(String id) => _nodes.putIfAbsent(id, FocusNode.new);
 
   void _requestFocus(String id, {bool atStart = false}) {
+    // a text block is the rich-text editor's: it puts the caret there once its document has the block;
+    // the other blocks (code, toggle...) take focus through their own field
+    _body.focusBlock(id);
     _wantFocus = id;
     setState(() {});
+  }
+
+  /// A tap under the last block: a new paragraph there (unless the last block is already an empty one).
+  void _addAtEnd() {
+    final last = _ed.blocks.lastOrNull;
+    if (last != null && last.type == BlockType.paragraph && (last.text ?? '').isEmpty) {
+      _requestFocus(last.id);
+      return;
+    }
+    final b = _ed.insert(BlockType.paragraph);
+    if (b == null) {
+      _toast('Esta página chegou ao limite de $maxBlocks blocos');
+      return;
+    }
+    _requestFocus(b.id);
   }
 
   void _applyFocus() {
@@ -116,31 +136,7 @@ class _EditorPageState extends State<EditorPage> {
   void _toast(String text) => Toast.show(context, text);
 
   void _jump(String id) {
-    final ctx = _rowKeys[id]?.currentContext;
-    if (ctx != null) {
-      Scrollable.ensureVisible(
-        ctx,
-        duration: const Duration(milliseconds: 250),
-        curve: Curves.easeOut,
-      );
-    } else {
-      // far away and not built: land near it, then settle once it is drawn
-      final i = _ed.blocks.indexWhere((b) => b.id == id);
-      if (i >= 0 && _scroll.hasClients) {
-        _scroll
-            .animateTo(
-              (i * 64.0).clamp(0, _scroll.position.maxScrollExtent),
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeOut,
-            )
-            .then((_) {
-              final c = _rowKeys[id]?.currentContext;
-              if (mounted && c != null && c.mounted) {
-                Scrollable.ensureVisible(c);
-              }
-            });
-      }
-    }
+    _body.scrollTo(id);
     if (_panelDrawer) setState(() => _panelDrawer = false);
   }
 
@@ -412,6 +408,8 @@ class _EditorPageState extends State<EditorPage> {
         _applyFocus();
         final width = MediaQuery.sizeOf(context).width;
         final docked = width >= _dockMin && !_zen;
+        // with the system's text large the words of the header buttons no longer fit beside each other: icons only
+        final largeText = MediaQuery.textScalerOf(context).scale(1.0) > 1.25;
         final roomForArrows = width >= 360;
         final compact = width < 480;
         final propsOpen = _propsDock ?? true;
@@ -428,49 +426,28 @@ class _EditorPageState extends State<EditorPage> {
         final gutter = BlockRow.gutterFor(width);
         final place = page.trashed ? 'Lixeira' : (page.locked ? 'Cofre' : null);
 
-        Widget block(int i) {
-          final b = _ed.blocks[i];
-          final key = _rowKeys.putIfAbsent(b.id, GlobalKey.new);
-          final animate = !_entered.contains(b.id);
-          _entered.add(b.id);
-          return Article(
-            key: ValueKey(b.id),
-            zen: _zen,
-            leftGutter: gutter,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: BlockRow(
-                key: key,
-                index: i,
-                count: _ed.blocks.length,
-                block: b,
-                label: _labels[b.type]!,
-                ed: _ed,
-                onInsertAfter: () => _insertMenu(after: b.id),
-                animate: animate,
-                dim: _zen && _activeId != null && _activeId != b.id,
-                onActive: (on) {
-                  if (on) {
-                    if (_activeId != b.id) setState(() => _activeId = b.id);
-                  } else if (_activeId == b.id) {
-                    setState(() => _activeId = null);
-                  }
-                },
-                child: BlockBody(block: b, cx: cx),
-              ),
-            ),
-          );
-        }
+        // blocks the editor does not edit itself (code, callout, toggle, table, media...) keep their own widgets and menus
+        Widget opaque(BuildContext _, String id) => ListenableBuilder(
+          listenable: _ed,
+          builder: (context, _) {
+            final i = _ed.blocks.indexWhere((x) => x.id == id);
+            if (i < 0) return const SizedBox.shrink();
+            final b = _ed.blocks[i];
+            return BlockRow(
+              index: i,
+              count: _ed.blocks.length,
+              block: b,
+              label: _labels[b.type]!,
+              ed: _ed,
+              onInsertAfter: () => _insertMenu(after: b.id),
+              animate: false,
+              dim: false,
+              child: BlockBody(block: b, cx: cx),
+            );
+          },
+        );
 
-        final list = ReorderableListView.builder(
-          scrollController: _scroll,
-          buildDefaultDragHandles: false,
-          padding: const EdgeInsets.only(bottom: 128),
-          proxyDecorator: (child, index, animation) => Material(
-            color: Colors.transparent,
-            child: Opacity(opacity: 0.6, child: child),
-          ),
-          header: Stack(
+        final pageHeader = Stack(
             children: [
               Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -534,8 +511,8 @@ class _EditorPageState extends State<EditorPage> {
                   child: Article(child: PageIconRow(ed: _ed, overlay: true)),
                 ),
             ],
-          ),
-          footer: Article(
+          );
+        final pageFooter = Article(
             zen: _zen,
             leftGutter: gutter,
             child: Padding(
@@ -544,45 +521,16 @@ class _EditorPageState extends State<EditorPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (!_ed.readOnly)
-                    TextField(
-                      key: const Key('draft'),
-                      controller: _draft,
-                      focusNode: _draftNode,
-                      maxLength: maxText,
-                      maxLines: null,
-                      style: const TextStyle(fontSize: 16.5, height: 1.68),
-                      decoration: InputDecoration(
-                        counterText: '',
-                        filled: false,
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 6),
-                        hintText:
-                            'Escreva algo, ou digite “/” para inserir um bloco',
-                        hintStyle: TextStyle(
-                          fontSize: 16.5,
-                          color: AppColors.textMuted.withValues(alpha: 0.7),
-                        ),
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
+                    // a tap under the last block puts the caret in a new paragraph (the editor has no room of its own there)
+                    Semantics(
+                      button: true,
+                      label: 'Adicionar texto no fim da página',
+                      child: GestureDetector(
+                        key: const Key('add-at-end'),
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _addAtEnd,
+                        child: const SizedBox(height: 96, width: double.infinity),
                       ),
-                      onChanged: (v) {
-                        if (v == '/') {
-                          _draft.clear();
-                          _insertMenu();
-                        } else if (v.isNotEmpty) {
-                          final b = _ed.insert(BlockType.paragraph);
-                          _draft.clear();
-                          if (b != null) {
-                            _ed.setText(b.id, v);
-                            _requestFocus(b.id);
-                          } else {
-                            _toast(
-                              'Esta página chegou ao limite de $maxBlocks blocos',
-                            );
-                          }
-                        }
-                      },
                     ),
                   if (_ed.blocks.isEmpty && !_ed.readOnly)
                     Padding(
@@ -639,10 +587,18 @@ class _EditorPageState extends State<EditorPage> {
                 ],
               ),
             ),
-          ),
-          itemCount: _ed.blocks.length,
-          onReorderItem: (from, to) => _ed.move(from, to > from ? to + 1 : to),
-          itemBuilder: (_, i) => block(i),
+          );
+        final list = PageBody(
+          ed: _ed,
+          controller: _body,
+          header: pageHeader,
+          footer: pageFooter,
+          renderOpaque: opaque,
+          onSlash: (id) => _insertMenu(after: id, replaceEmpty: true),
+          onInsertAfter: (id) => _insertMenu(after: id),
+          leftGutter: gutter,
+          textScale: widget.ws.settings.textScale,
+          zen: _zen,
         );
 
         final propsPanel = _panelBox('Propriedades', PageProps(ed: _ed));
@@ -713,7 +669,9 @@ class _EditorPageState extends State<EditorPage> {
                           ),
                           if (width >= 768)
                             Expanded(
-                              child: Row(
+                              // what is left of the header after its buttons: the "edited" note is the first to go
+                              child: LayoutBuilder(
+                                builder: (context, room) => room.maxWidth < 200 ? const SizedBox.shrink() : Row(
                                 children: [
                                   if (place != null) ...[
                                     const Text(
@@ -749,6 +707,7 @@ class _EditorPageState extends State<EditorPage> {
                                       style: const TextStyle(fontSize: 14),
                                     ),
                                   ),
+                                  if (room.maxWidth > 420) ...[
                                   const SizedBox(width: 12),
                                   Flexible(
                                       child: Text(
@@ -762,13 +721,22 @@ class _EditorPageState extends State<EditorPage> {
                                         ),
                                       ),
                                     ),
+                                  ],
                                 ],
+                              ),
                               ),
                             ),
                         ],
                       ),
                     ),
                     if (compact) ...[
+                      _HeaderButton(
+                        icon: Icons.format_size,
+                        label: '',
+                        tooltip: 'Tamanho do texto',
+                        showLabel: false,
+                        onTap: () => showTextSizePanel(context, widget.ws),
+                      ),
                       ExportMenu(ed: _ed, compact: true, onDone: _toast),
                       PopupMenuButton<VoidCallback>(
                         tooltip: 'Mais opções da página',
@@ -806,10 +774,18 @@ class _EditorPageState extends State<EditorPage> {
                       ),
                     ] else ...[
                       _HeaderButton(
+                        icon: Icons.format_size,
+                        label: 'Texto',
+                        tooltip: 'Tamanho do texto (Ctrl + e Ctrl −)',
+                        // an icon is enough: the word waits for a wide header
+                        showLabel: width >= 1100 && !largeText,
+                        onTap: () => showTextSizePanel(context, widget.ws),
+                      ),
+                      _HeaderButton(
                         icon: Icons.fullscreen,
                         label: 'Zen',
                         tooltip: 'Modo zen',
-                        showLabel: width >= 768,
+                        showLabel: width >= 768 && !largeText,
                         onTap: () => _setZen(true),
                       ),
                       if (!roomForArrows) ...[
@@ -832,7 +808,7 @@ class _EditorPageState extends State<EditorPage> {
                         padding: const EdgeInsets.only(left: 8),
                         child: ExportMenu(
                           ed: _ed,
-                          compact: width < 768,
+                          compact: width < 768 || largeText,
                           onDone: _toast,
                         ),
                       ),
@@ -842,7 +818,7 @@ class _EditorPageState extends State<EditorPage> {
                         tooltip: page.trashed
                             ? 'Excluir página definitivamente'
                             : 'Excluir página',
-                        showLabel: width >= 768,
+                        showLabel: width >= 768 && !largeText,
                         danger: true,
                         onTap: _delete,
                       ),
@@ -853,7 +829,7 @@ class _EditorPageState extends State<EditorPage> {
                       child: Row(
                         children: [
                           // the web shows this from 640 px; its CSS shrinks, a Row does not, so here it waits for room
-                          if (width >= 1000)
+                          if (width >= 1000 && !largeText)
                             Text(
                               _ed.saving
                                   ? 'salvando…'
@@ -882,6 +858,17 @@ class _EditorPageState extends State<EditorPage> {
           bindings: {
             const SingleActivator(LogicalKeyboardKey.escape): () =>
                 _zen ? _setZen(false) : null,
+            // the text size, as in a browser: Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac; = is + without Shift)
+            for (final meta in [false, true]) ...{
+              for (final key in [LogicalKeyboardKey.equal, LogicalKeyboardKey.add, LogicalKeyboardKey.numpadAdd])
+                SingleActivator(key, control: !meta, meta: meta): () => _textSize(textScaleStep),
+              SingleActivator(LogicalKeyboardKey.add, control: !meta, meta: meta, shift: true): () => _textSize(textScaleStep),
+              SingleActivator(LogicalKeyboardKey.equal, control: !meta, meta: meta, shift: true): () => _textSize(textScaleStep),
+              for (final key in [LogicalKeyboardKey.minus, LogicalKeyboardKey.numpadSubtract])
+                SingleActivator(key, control: !meta, meta: meta): () => _textSize(-textScaleStep),
+              for (final key in [LogicalKeyboardKey.digit0, LogicalKeyboardKey.numpad0])
+                SingleActivator(key, control: !meta, meta: meta): () => _textSize(0),
+            },
           },
           child: Focus(
             focusNode: _pageNode,

@@ -1,1 +1,6 @@
 include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    # a vendored copy of appflowy_editor (see third_party/appflowy_editor/PINDREL_PATCHES.md): not our code to lint
+    - third_party/**

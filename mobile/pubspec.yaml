@@ -25,6 +25,9 @@ dependencies:
   path_provider: ^2.1.6
   path: ^1.9.1
   characters: ^1.4.0
+  # Rich-text page editor: a local copy, see third_party/appflowy_editor/PINDREL_PATCHES.md
+  appflowy_editor:
+    path: third_party/appflowy_editor
 dev_dependencies:
   flutter_test:
     sdk: flutter

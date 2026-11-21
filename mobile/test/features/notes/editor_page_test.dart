@@ -9,6 +9,8 @@ import 'package:mobile/features/notes/data/workspace.dart';
 import 'package:mobile/features/notes/presentation/pages/editor_page.dart';
 import 'package:mobile/features/notes/presentation/widgets/ui.dart';
 
+import 'appflowy/editor_test_utils.dart';
+
 late NotesDb db;
 late Workspace ws;
 late String pid;
@@ -34,7 +36,6 @@ Future<void> pumpEditor(WidgetTester tester, {Size size = const Size(900, 1100),
 List<Block> body() => ws.page(pid)!.content ?? ws.contentOf(pid)!;
 void setBody(List<Block> blocks) => ws.page(pid)!.content = blocks;
 
-Finder get draft => find.byKey(const Key('draft'));
 Finder get titleField => find.descendant(of: find.byKey(const ValueKey('title')), matching: find.byType(TextField));
 Finder field(String text) => find.widgetWithText(TextField, text);
 
@@ -90,23 +91,49 @@ void main() {
   });
 
   group('blocos', () {
-    testWidgets('a linha de baixo cria um parágrafo com o que se digita', (tester) async {
+    testWidgets('tocar embaixo da última linha põe o cursor num parágrafo novo', (tester) async {
       await pumpEditor(tester);
-      await tester.enterText(draft, 'olá mundo');
-      await tester.pump();
-      expect(body().single.text, 'olá mundo');
-      expect(draft, findsOneWidget);
-      expect((tester.widget<TextField>(draft).controller!).text, '');
+      expect(body(), isEmpty);
+      await tester.tap(find.byKey(const Key('add-at-end')));
+      await tester.pumpAndSettle();
+      expect(body().single.type, BlockType.paragraph);
+      expect(editorOf(tester).selection, isNotNull);
+      // a second tap does not pile up empty paragraphs
+      await tester.tap(find.byKey(const Key('add-at-end')));
+      await tester.pumpAndSettle();
+      expect(body().length, 1);
     });
-    testWidgets('"/" na linha de baixo abre a lista de blocos', (tester) async {
+    testWidgets('o que se digita no editor vira texto do bloco, com os marcadores da web', (tester) async {
+      setBody([Block('a', BlockType.paragraph, text: 'olá')]);
       await pumpEditor(tester);
-      await tester.enterText(draft, '/');
+      await caretAt(tester, 0, 3);
+      await typeAtEnd(tester, 0, ' mundo');
+      await tester.pumpAndSettle();
+      expect(body().single.text, 'olá mundo');
+      await selectIn(tester, 0, 4, 9);
+      await tester.tap(find.byTooltip('Negrito'));
+      await tester.pumpAndSettle();
+      expect(body().single.text, 'olá **mundo**');
+      expect(body().single.id, 'a');
+    });
+    testWidgets('"/" num parágrafo vazio abre a lista e troca pelo bloco escolhido', (tester) async {
+      setBody([Block('a', BlockType.paragraph, text: '')]);
+      await pumpEditor(tester);
+      await caretAt(tester, 0);
+      expect(await pressChar(tester, '/'), true);
       await tester.pumpAndSettle();
       expect(find.text('Título 1'), findsOneWidget);
-      await tester.scrollUntilVisible(find.text('Divisor'), 200, scrollable: find.byType(Scrollable).last);
-      await tester.tap(find.text('Divisor'));
+      await tester.tap(find.text('Citação'));
       await tester.pumpAndSettle();
-      expect(body().map((b) => b.type), [BlockType.divider]);
+      expect(body().map((b) => b.type), [BlockType.quote]);
+      expect(editorOf(tester).document.root.children.map((n) => n.type), ['quote']);
+    });
+    testWidgets('"/" no meio de um texto é só uma barra', (tester) async {
+      setBody([Block('a', BlockType.paragraph, text: 'a')]);
+      await pumpEditor(tester);
+      await caretAt(tester, 0, 1);
+      expect(await pressChar(tester, '/'), false);
+      expect(find.text('Título 1'), findsNothing);
     });
     testWidgets('página vazia oferece os botões "Começar com"', (tester) async {
       await pumpEditor(tester);
@@ -116,72 +143,99 @@ void main() {
       expect(body().single.type, BlockType.checklist);
       expect(find.text('Começar com'), findsNothing);
     });
-    testWidgets('"# ", "- ", "1. " e "> " viram título, lista, lista numerada e citação', (tester) async {
-      for (final (typed, type) in [('# ', BlockType.heading), ('- ', BlockType.bullet), ('1. ', BlockType.numbered), ('> ', BlockType.quote)]) {
-        ws.page(pid)!.content = [Block('a', BlockType.paragraph, text: '')];
+    testWidgets('"# ", "- ", "1. ", "> " e "[] " viram título, lista, lista numerada, citação e tarefa', (tester) async {
+      for (final (typed, type) in [('#', BlockType.heading), ('-', BlockType.bullet), ('1.', BlockType.numbered), ('>', BlockType.quote), ('[]', BlockType.checklist)]) {
+        setBody([Block('a', BlockType.paragraph, text: '')]);
         await pumpEditor(tester);
-        await tester.enterText(find.widgetWithText(TextField, '').first, 'x');
-        await tester.enterText(find.byType(TextField).at(1), typed);
-        await tester.pump();
+        await caretAt(tester, 0);
+        await typeAtEnd(tester, 0, typed);
+        expect(await pressChar(tester, ' '), true, reason: typed);
+        await tester.pumpAndSettle();
         expect(body().first.type, type, reason: typed);
-        expect(body().first.text, '', reason: typed);
+        expect(blockText(body().first), '', reason: typed);
+        await tester.pumpWidget(const SizedBox());
       }
     });
-    testWidgets('"/" no parágrafo vazio troca pelo bloco escolhido', (tester) async {
+    testWidgets('as letras de um marcador completo viram formatação ao digitar o último símbolo', (tester) async {
       setBody([Block('a', BlockType.paragraph, text: '')]);
       await pumpEditor(tester);
-      await tester.enterText(find.byType(TextField).at(1), '/');
+      await caretAt(tester, 0);
+      await typeAtEnd(tester, 0, '**forte*');
+      await pressChar(tester, '*');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Citação'));
+      await tester.pump();
+      expect(body().single.text, contains('**forte**'));
+    });
+    testWidgets('um bloco que o menu põe no fim da página aparece no editor e fica com o mesmo id', (tester) async {
+      setBody([Block('a', BlockType.paragraph, text: 'um')]);
+      await pumpEditor(tester);
+      await caretAt(tester, 0);
+      await tester.tap(find.byTooltip('Inserir bloco abaixo'));
       await tester.pumpAndSettle();
-      expect(body().map((b) => b.type), [BlockType.quote]);
+      await tester.enterText(find.byKey(const Key('insert-filter')), 'divisor');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Divisor'));
+      await tester.pumpAndSettle();
+      expect(body().map((b) => b.type), [BlockType.paragraph, BlockType.divider]);
+      expect(editorOf(tester).document.root.children.map((n) => n.type), ['paragraph', 'divider']);
+      expect(editorOf(tester).document.root.children.first.attributes['bid'], 'a');
     });
     testWidgets('Enter no meio parte o bloco; Enter num item vazio sai da lista', (tester) async {
       setBody([Block('a', BlockType.paragraph, text: 'olá mundo')]);
       await pumpEditor(tester);
-      await tester.enterText(field('olá mundo'), 'olá\n mundo');
-      await tester.pump();
+      await caretAt(tester, 0, 3);
+      expect(await pressChar(tester, '\n'), true);
       expect(body().map((b) => b.text), ['olá', ' mundo']);
+      expect(body().map((b) => b.id).toSet().length, 2);
+      await tester.pumpWidget(const SizedBox());
       setBody([Block('b', BlockType.bullet, text: '', indent: 0)]);
       await pumpEditor(tester, id: pid);
-      await tester.enterText(find.byType(TextField).at(1), '\n');
-      await tester.pump();
+      await caretAt(tester, 0);
+      await pressChar(tester, '\n');
       expect(body().single.type, BlockType.paragraph);
     });
-    testWidgets('lista de tarefas: marca, escreve, acrescenta e tira', (tester) async {
-      setBody([makeBlock(BlockType.checklist)]);
+    testWidgets('lista de tarefas: marca, escreve, acrescenta com Enter e junta ao apagar', (tester) async {
+      setBody([Block('c', BlockType.checklist, items: [ChecklistItem(id: 'i1', text: 'leite')])]);
       await pumpEditor(tester);
-      await tester.tap(find.byWidgetPredicate((w) => w is Semantics && w.properties.checked != null).first);
+      // the package draws its own box; it is toggled through the editor's own node
+      final es = editorOf(tester);
+      final node = es.getNodeAtPath([0])!;
+      await es.apply(es.transaction..updateNode(node, {'checked': true}));
       await tester.pump();
       expect(body().first.items!.first.done, true);
-      await tester.enterText(field('Tarefa'), 'pão');
-      await tester.pump();
-      expect(body().first.items!.first.text, 'pão');
-      await tester.tap(find.text('+ Item'));
-      await tester.pumpAndSettle();
+      await caretAt(tester, 0, 5);
+      await pressChar(tester, '\n');
+      expect(body().length, 1, reason: 'a new line stays in the same checklist');
       expect(body().first.items!.length, 2);
-      await tester.enterText(find.widgetWithText(TextField, 'Tarefa').last, 'x\n');
+      await typeAtEnd(tester, 1, 'pão');
       await tester.pump();
-      expect(body().first.items!.length, 3);
-      await tester.tap(find.byTooltip('Remover item').first);
-      await tester.pumpAndSettle();
-      expect(body().first.items!.length, 2);
+      expect(body().first.items!.map((i) => i.text), ['leite', 'pão']);
+      expect(body().first.items!.map((i) => i.id).toSet().length, 2);
     });
     testWidgets('tabela: escreve numa célula, acrescenta e remove linhas e colunas', (tester) async {
       setBody([makeBlock(BlockType.table)]);
       await pumpEditor(tester, size: const Size(1100, 1000));
-      final b = body().first;
-      await tester.enterText(find.byType(TextField).at(5), 'oi');
-      await tester.pump();
-      expect(b.rows!.any((r) => r.values.contains('oi')), true);
-      await tester.tap(find.text('+ linha'));
-      await tester.tap(find.text('+ coluna'));
+      final es = editorOf(tester);
+      // the first cell of the first body row (row 0 is the header, three labels)
+      await tester.tap(tableCells().at(3));
       await tester.pumpAndSettle();
-      expect((b.rows!.length, b.cols!.length), (4, 4));
-      // the table scrolls sideways inside the page column: the first column is the one in view
-      await tester.tap(find.byTooltip('Remover coluna Coluna 1'));
+      final cell = es.getNodeAtPath(es.selection!.start.path)!;
+      await typeInto(tester, cell, 'oi');
+      await tester.pumpAndSettle();
+      expect(body().first.rows!.first.values.contains('oi'), true);
+      await tester.tap(find.text('+ linha'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Adicionar coluna'));
+      await tester.pumpAndSettle();
+      expect((body().first.rows!.length, body().first.cols!.length), (4, 4));
+      // the menu of the column the caret is in
+      await tester.tap(find.byTooltip('Coluna 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(of: find.byType(PopupMenuItem<int>), matching: find.text('Excluir coluna')));
       await tester.pumpAndSettle();
       expect(body().first.cols!.length, 3);
+      expect(body().first.rows!.every((r) => r.length == 3), true);
+      await tester.pump(const Duration(milliseconds: 100));
     });
     testWidgets('link com endereço perigoso é recusado; um bom é guardado', (tester) async {
       setBody([makeBlock(BlockType.bookmark)]);
@@ -280,9 +334,8 @@ void main() {
     testWidgets('limite de blocos avisa em vez de quebrar', (tester) async {
       setBody([for (var i = 0; i < maxBlocks; i++) Block('d$i', BlockType.divider)]);
       await pumpEditor(tester);
-      await tester.drag(find.byType(Scrollable).first, const Offset(0, -400000));
-      await tester.pumpAndSettle();
-      await tester.enterText(draft, 'mais um');
+      await tester.scrollUntilVisible(find.byKey(const Key('add-at-end')), 3000, scrollable: find.byType(Scrollable).first, maxScrolls: 400);
+      await tester.tap(find.byKey(const Key('add-at-end')));
       await tester.pump();
       expect(find.textContaining('limite de $maxBlocks blocos'), findsOneWidget);
       expect(body().length, maxBlocks);
@@ -290,52 +343,52 @@ void main() {
   });
 
   group('menu do bloco', () {
-    testWidgets('subir, descer, duplicar e excluir', (tester) async {
+    Future<void> blockMenu(WidgetTester tester, int index, String item) async {
+      await caretAt(tester, index);
+      await tester.tap(find.byTooltip('Opções do bloco'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(of: find.byType(PopupMenuItem<VoidCallback>), matching: find.text(item)).last, warnIfMissed: false);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('subir, descer, duplicar e excluir (pela barra, no bloco onde está o cursor)', (tester) async {
       setBody([Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')]);
       await pumpEditor(tester);
-      await tester.tap(find.byTooltip('Opções do bloco 2'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Subir'));
-      await tester.pumpAndSettle();
+      await blockMenu(tester, 1, 'Subir');
       expect(body().map((b) => b.text), ['dois', 'um']);
-      await tester.tap(find.byTooltip('Opções do bloco 1'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Duplicar'));
-      await tester.pumpAndSettle();
+      expect(editorOf(tester).document.root.children.map((n) => n.attributes['bid']), ['b', 'a']);
+      await blockMenu(tester, 0, 'Duplicar');
       expect(body().map((b) => b.text), ['dois', 'dois', 'um']);
-      await tester.tap(find.byTooltip('Opções do bloco 3'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.descendant(of: find.byType(PopupMenuItem<VoidCallback>), matching: find.text('Excluir')));
-      await tester.pumpAndSettle();
+      await blockMenu(tester, 2, 'Excluir');
       expect(body().map((b) => b.text), ['dois', 'dois']);
     });
     testWidgets('Subir no primeiro e Descer no último ficam desligados', (tester) async {
       setBody([Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')]);
       await pumpEditor(tester);
-      await tester.tap(find.byTooltip('Opções do bloco 1'));
+      List<bool> enabled() => [for (final i in tester.widgetList<PopupMenuItem<VoidCallback>>(find.byType(PopupMenuItem<VoidCallback>)).take(2)) i.enabled];
+      await caretAt(tester, 0);
+      await tester.tap(find.byTooltip('Opções do bloco'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Subir'), warnIfMissed: false);
+      expect(enabled(), [false, true]);
+      await tester.tapAt(const Offset(5, 5));
       await tester.pumpAndSettle();
-      expect(body().map((b) => b.text), ['um', 'dois']);
+      await caretAt(tester, 1);
+      await tester.tap(find.byTooltip('Opções do bloco'));
+      await tester.pumpAndSettle();
+      expect(enabled(), [true, false]);
     });
-    testWidgets('transformar um texto em título e em lista', (tester) async {
+    testWidgets('transformar um texto em título e em lista, e aninhar o item', (tester) async {
       setBody([Block('a', BlockType.paragraph, text: 'um')]);
       await pumpEditor(tester);
-      await tester.tap(find.byTooltip('Opções do bloco 1'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Título 1').last);
-      await tester.pumpAndSettle();
+      await blockMenu(tester, 0, 'Título 1');
       expect((body().first.type, body().first.level, body().first.text), (BlockType.heading, 1, 'um'));
-      await tester.tap(find.byTooltip('Opções do bloco 1'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Lista numerada'));
-      await tester.pumpAndSettle();
+      await blockMenu(tester, 0, 'Lista numerada');
       expect(body().first.type, BlockType.numbered);
-      await tester.tap(find.byTooltip('Opções do bloco 1'));
+      setBody([Block('a', BlockType.numbered, text: 'um', indent: 0), Block('b', BlockType.numbered, text: 'dois', indent: 0)]);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Aninhar'));
-      await tester.pumpAndSettle();
-      expect(body().first.indent, 1);
+      await blockMenu(tester, 1, 'Aninhar');
+      expect(body().map((b) => b.indent), [0, 1]);
+      expect(editorOf(tester).document.root.children.length, 1, reason: 'o item aninhado fica dentro do primeiro');
     });
     testWidgets('o tom de um destaque', (tester) async {
       setBody([Block('c', BlockType.callout, text: 'cuidado')]);
@@ -346,36 +399,32 @@ void main() {
       await tester.pumpAndSettle();
       expect(body().first.tone, CalloutTone.warning);
     });
-    testWidgets('arrastar pela alça troca a ordem', (tester) async {
-      setBody([Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois'), Block('c', BlockType.paragraph, text: 'três')]);
+    testWidgets('o + de um bloco que o editor não edita abre a lista e insere logo abaixo', (tester) async {
+      setBody([Block('a', BlockType.code, lang: 'go', text: 'x'), Block('b', BlockType.code, lang: 'go', text: 'y')]);
       await pumpEditor(tester);
-      final g = await tester.startGesture(tester.getCenter(find.byTooltip('Opções do bloco 1')));
-      await tester.pump(const Duration(milliseconds: 600));
-      await g.moveBy(const Offset(0, 140));
-      await tester.pump();
-      await g.up();
+      await tester.tap(find.byTooltip('Inserir bloco depois de Bloco de código 1'));
       await tester.pumpAndSettle();
-      expect(body().map((b) => b.text).toList(), isNot(['um', 'dois', 'três']));
-      expect(body().length, 3);
-    });
-    testWidgets('o + de um bloco abre a lista e insere logo abaixo', (tester) async {
-      setBody([Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')]);
-      await pumpEditor(tester);
-      await tester.tap(find.byTooltip('Inserir bloco depois de Parágrafo 1'));
+      await tester.enterText(find.byKey(const Key('insert-filter')), 'divisor');
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Divisor'), 200, scrollable: find.byType(Scrollable).last);
       await tester.tap(find.text('Divisor'));
       await tester.pumpAndSettle();
-      expect(body().map((b) => b.type), [BlockType.paragraph, BlockType.divider, BlockType.paragraph]);
+      expect(body().map((b) => b.type), [BlockType.code, BlockType.divider, BlockType.code]);
     });
-    testWidgets('no celular os controles só aparecem no bloco tocado', (tester) async {
-      setBody([Block('a', BlockType.paragraph, text: 'um'), Block('b', BlockType.paragraph, text: 'dois')]);
+    testWidgets('no celular os controles só aparecem no bloco tocado (blocos do próprio app)', (tester) async {
+      setBody([Block('a', BlockType.code, lang: 'go', text: 'um'), Block('b', BlockType.code, lang: 'go', text: 'dois')]);
       await pumpEditor(tester, size: const Size(400, 900));
       expect(find.byTooltip('Opções do bloco 1'), findsNothing);
       await tester.tap(field('um'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Opções do bloco 1'), findsOneWidget);
       expect(find.byTooltip('Opções do bloco 2'), findsNothing);
+    });
+    testWidgets('a barra do editor só aparece com o cursor no texto', (tester) async {
+      setBody([Block('a', BlockType.paragraph, text: 'um')]);
+      await pumpEditor(tester);
+      expect(find.byKey(const Key('format-bar')), findsNothing);
+      await caretAt(tester, 0, 1);
+      expect(find.byKey(const Key('format-bar')), findsOneWidget);
     });
   });
 
@@ -640,15 +689,19 @@ void main() {
       ws.trash(pid);
       await pumpEditor(tester);
       expect(find.text('Esta página está na lixeira e não pode ser editada.'), findsOneWidget);
-      expect(find.byKey(const Key('draft')), findsNothing);
+      expect(find.byKey(const Key('add-at-end')), findsNothing);
       expect(find.byTooltip('Opções do bloco 1'), findsNothing);
       expect(find.text('+ tag'), findsNothing);
-      final f = tester.widget<TextField>(field('fica'));
-      expect(f.readOnly, true);
+      // the text is there, but the editor takes no edits and shows no bar
+      expect(find.textContaining('fica', findRichText: true), findsOneWidget);
+      expect(editorOf(tester).editable, false);
+      await caretAt(tester, 0, 1);
+      expect(find.byKey(const Key('format-bar')), findsNothing);
       await tester.tap(find.text('Restaurar'));
       await tester.pumpAndSettle();
       expect(ws.page(pid)!.trashed, false);
-      expect(find.byKey(const Key('draft')), findsOneWidget);
+      expect(find.byKey(const Key('add-at-end')), findsOneWidget);
+      expect(editorOf(tester).editable, true);
     });
     testWidgets('uma página que sumiu enquanto estava aberta não quebra', (tester) async {
       await pumpEditor(tester);
@@ -681,12 +734,13 @@ void main() {
     testWidgets('texto enorme e estranho num bloco', (tester) async {
       setBody([Block('a', BlockType.paragraph, text: '')]);
       await pumpEditor(tester);
-      await tester.enterText(find.byType(TextField).at(1), 'a' * (maxText + 500));
+      await typeAtEnd(tester, 0, 'a' * (maxText + 500));
       await tester.pump();
       expect(body().first.text!.length, maxText);
-      await tester.enterText(find.byType(TextField).at(1), '😀 日本語 \u202E\u0000 <script>');
+      await typeAtEnd(tester, 0, '😀 日本語 \u202E\u0000 <script> **x* [a](javascript:x)');
       await tester.pump();
       expect(tester.takeException(), isNull);
+      expect(body().first.text!.length, lessThanOrEqualTo(maxText));
     });
     testWidgets('trezentos blocos: só os que aparecem são montados', (tester) async {
       setBody([for (var i = 0; i < 300; i++) Block('p$i', BlockType.paragraph, text: 'linha $i')]);
@@ -694,7 +748,7 @@ void main() {
       expect(find.byType(TextField).evaluate().length, lessThan(40));
     });
     testWidgets('toques repetidos e fora de ordem: abrir e fechar menus em sequência', (tester) async {
-      setBody([Block('a', BlockType.paragraph, text: 'um')]);
+      setBody([Block('a', BlockType.code, lang: 'go', text: 'um')]);
       await pumpEditor(tester);
       for (var i = 0; i < 3; i++) {
         await tester.tap(find.byTooltip('Opções do bloco 1'));
