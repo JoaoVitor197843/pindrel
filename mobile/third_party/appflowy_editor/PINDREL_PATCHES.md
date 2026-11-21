@@ -22,3 +22,5 @@ Changes (search for `PINDREL PATCH`):
 4. `desktop_selection_service.dart`: the context menu also opens for a caret (it needed a selection with rectangles).
 
 Only `lib/` and `assets/` were copied (no tests, no example).
+
+- `pubspec.yaml`: `keyboard_height_plugin` ^0.1.5 -> ^0.3.0. 0.1.5 compiles against android-31 and the AndroidX libraries it pulls in need 34+, so `checkReleaseAarMetadata` failed the Android release build (v0.1.0-alpha.10). The API we use (`onKeyboardHeightChanged`, `dispose`) is unchanged.
