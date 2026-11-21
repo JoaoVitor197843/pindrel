@@ -257,6 +257,17 @@ pub fn error_of(r: &Reply) -> ErrorHttp {
     ErrorHttp::decode(r.body.clone()).expect("body is a protobuf ErrorHttp")
 }
 
+/// A port nobody holds. Taken from below the kernel's ephemeral range (32768 and up) on purpose: asking the kernel for a
+/// port and dropping it let a `port = 0` bind of another test in the same run be handed the very same number
+/// ("Address already in use", seen once in CI), and a number handed out here is never handed out again by this process.
 pub fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    use std::sync::atomic::{AtomicU16, Ordering};
+    static NEXT: AtomicU16 = AtomicU16::new(15000);
+    loop {
+        let port = NEXT.fetch_add(1, Ordering::Relaxed);
+        assert!(port < 30000, "ran out of test ports");
+        if std::net::TcpListener::bind(("0.0.0.0", port)).is_ok() {
+            return port;
+        }
+    }
 }

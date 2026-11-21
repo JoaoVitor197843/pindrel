@@ -16,10 +16,6 @@ use tokio::{
 };
 use tokio_rustls::TlsConnector;
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
-}
-
 fn auto(port: u16, dir: &std::path::Path, refresh: Duration) -> TlsConfig {
     TlsConfig {
         port,
