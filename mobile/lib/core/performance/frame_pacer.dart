@@ -159,9 +159,16 @@ mixin PacedFrames on SchedulerBinding {
 
 /// The same bindings as `WidgetsFlutterBinding`, plus [PacedFrames].
 class PindrelBinding extends BindingBase with GestureBinding, SchedulerBinding, ServicesBinding, PaintingBinding, SemanticsBinding, RendererBinding, WidgetsBinding, PacedFrames {
-  static PindrelBinding ensureInitialized() {
-    if (_instance == null) PindrelBinding();
-    return _instance!;
+  /// Does nothing when another binding already owns the app (the integration test's, which `main()` is called under).
+  static void ensureInitialized() {
+    if (_instance != null) return;
+    try {
+      WidgetsBinding.instance;
+      return;
+    } catch (_) {
+      // none yet: ours is the one
+    }
+    PindrelBinding();
   }
 
   PindrelBinding() {
