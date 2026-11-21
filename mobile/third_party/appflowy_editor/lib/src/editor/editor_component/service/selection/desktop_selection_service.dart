@@ -599,8 +599,8 @@ class _DesktopSelectionServiceWidgetState
       return;
     }
 
-    // only shows around the selection area.
-    if (selectionRects.isEmpty) {
+    // only shows around the selection area. PINDREL PATCH: a caret has no rects but a right click on text must open it
+    if (selectionRects.isEmpty && !(editorState.selection?.isCollapsed ?? false)) {
       return;
     }
 

@@ -370,8 +370,12 @@ void _clearCol(
   final rowsLen = tableNode.attributes[TableBlockKeys.rowsLen];
   for (var i = 0; i < rowsLen; i++) {
     final node = getCellNode(tableNode, col, i)!;
+    // Pindrel: the old paragraph is removed, not left under the new one (a cell holds exactly one paragraph)
+    final old = node.children.first;
+    final at = old.path;
+    transaction.deleteNode(old);
     transaction.insertNode(
-      node.children.first.path,
+      at,
       paragraphNode(text: ''),
     );
   }
@@ -389,8 +393,12 @@ void _clearRow(
   final colsLen = tableNode.attributes[TableBlockKeys.colsLen];
   for (var i = 0; i < colsLen; i++) {
     final node = getCellNode(tableNode, i, row)!;
+    // Pindrel: the old paragraph is removed, not left under the new one (a cell holds exactly one paragraph)
+    final old = node.children.first;
+    final at = old.path;
+    transaction.deleteNode(old);
     transaction.insertNode(
-      node.children.first.path,
+      at,
       paragraphNode(text: ''),
     );
   }

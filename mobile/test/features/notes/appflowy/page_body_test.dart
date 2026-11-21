@@ -1,5 +1,6 @@
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/theme/app_theme.dart';
 import 'package:mobile/features/notes/data/blocks.dart';
@@ -55,6 +56,39 @@ void main() {
         await press(tester, tip);
         expect(body().single.text, 'uma frase boa', reason: '$tip off');
       }
+    });
+
+    testWidgets('o botão deixa de aparecer ligado quando a marca sai do texto selecionado, por qualquer caminho', (tester) async {
+      await open(tester, [Block('a', BlockType.paragraph, text: 'uma __frase__ boa')]);
+      bool on(String tip) => tester.widgetList<Semantics>(find.byWidgetPredicate((w) => w is Semantics && w.properties.label == tip && w.properties.selected != null)).first.properties.selected == true;
+      await selectIn(tester, 0, 4, 9);
+      expect(on('Sublinhado'), true);
+      // taken off from outside the bar (a shortcut, a paste, the editor's own command): same selection, other text
+      final es = editorOf(tester);
+      await es.formatDelta(es.selection, {AppFlowyRichTextKeys.underline: null});
+      await tester.pumpAndSettle();
+      expect(body().single.text, 'uma frase boa');
+      expect(on('Sublinhado'), false);
+      // and by the bar's own button, twice
+      await tester.tap(find.byTooltip('Negrito'));
+      await tester.pumpAndSettle();
+      expect(on('Negrito'), true);
+      await tester.tap(find.byTooltip('Negrito'));
+      await tester.pumpAndSettle();
+      expect(on('Negrito'), false);
+    });
+
+    testWidgets('depois de "Começar com: Texto" os atalhos do teclado já valem, sem precisar clicar no texto', (tester) async {
+      await open(tester, [Block('a', BlockType.paragraph, text: '')]);
+      bodyOf(tester).controller.focusBlock('a');
+      await tester.pumpAndSettle();
+      expect(FocusManager.instance.primaryFocus.toString(), contains('page editor'), reason: 'the editor holds the focus');
+      final es = editorOf(tester);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      expect(es.toggledStyle['bold'], true, reason: 'Ctrl+B turned bold on for what is typed next');
     });
 
     testWidgets('várias marcas na mesma palavra e a leitura da web volta igual', (tester) async {
@@ -166,14 +200,14 @@ void main() {
     });
 
     testWidgets('um bloco que o editor não edita guarda o que se digita nele, ao lado de texto editado', (tester) async {
-      final table = makeBlock(BlockType.table);
-      await open(tester, [Block('a', BlockType.paragraph, text: 'antes'), table]);
-      await tester.enterText(find.widgetWithText(TextField, 'Coluna 1').first, 'Nome');
+      final code = Block('k', BlockType.code, lang: 'go', text: 'x');
+      await open(tester, [Block('a', BlockType.paragraph, text: 'antes'), code]);
+      await tester.enterText(find.widgetWithText(TextField, 'x').first, 'fmt.Println()');
       await tester.pump();
       await typeAtEnd(tester, 0, ' e depois');
       await tester.pumpAndSettle();
-      expect(body().last.cols!.first.label, 'Nome');
-      expect(identical(body().last, table), true, reason: 'the very same block object');
+      expect(body().last.text, 'fmt.Println()');
+      expect(identical(body().last, code), true, reason: 'the very same block object');
       expect(body().first.text, 'antes e depois');
     });
 

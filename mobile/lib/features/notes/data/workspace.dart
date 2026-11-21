@@ -1,3 +1,4 @@
+import '../../../core/performance/frame_pacer.dart';
 import 'package:flutter/widgets.dart' show ChangeNotifier;
 import 'package:characters/characters.dart';
 
@@ -29,6 +30,7 @@ class Workspace extends ChangeNotifier {
     pages = _db.pages();
     tags = _db.tags();
     settings = _db.settings();
+    FramePacer.mode.value = settings.power;
     _purgeExpired();
   }
 
@@ -329,8 +331,18 @@ class Workspace extends ChangeNotifier {
     return t;
   }
 
+  /// The size of the text of the pages, one step at a time or to a given factor (see [Settings.textScale]).
+  void setTextScale(double scale) {
+    final next = Settings.cleanScale(scale);
+    if (next == settings.textScale) return;
+    settings = settings.copy(textScale: next);
+    _db.saveSettings(settings);
+    notifyListeners();
+  }
+
   void saveSettings(Settings next) {
     settings = next.copy();
+    FramePacer.mode.value = settings.power;
     _db.saveSettings(settings);
     _purgeExpired();
     notifyListeners();

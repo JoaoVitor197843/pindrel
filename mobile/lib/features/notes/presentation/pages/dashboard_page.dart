@@ -454,12 +454,15 @@ class _Main extends StatelessWidget {
         if (ws.view == NotesView.vault)
           SliverPadding(
             padding: EdgeInsets.fromLTRB(padH, 32, padH, 0),
-            sliver: const SliverToBoxAdapter(
+            sliver: SliverToBoxAdapter(
               child: _Empty(
                 icon: Icons.lock_outline,
                 title: 'Cofre em breve',
                 body:
                     'O cofre guarda páginas cifradas no aparelho; a chave nunca sai daqui. Ainda está sendo construído.',
+                cta: 'Voltar às páginas',
+                ctaIcon: Icons.arrow_back,
+                onCta: () => ws.go(NotesView.all),
               ),
             ),
           )

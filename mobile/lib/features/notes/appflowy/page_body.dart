@@ -15,8 +15,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_theme.dart' show AppText;
 import '../data/blocks.dart';
 import '../data/page_editor.dart';
+import 'context_menu.dart';
 import 'doc_codec.dart';
 import 'format_bar.dart';
 import '../presentation/widgets/editor_chrome.dart' show Article;
@@ -53,6 +55,7 @@ class PageBody extends StatefulWidget {
     required this.onInsertAfter,
     required this.controller,
     this.leftGutter = 0,
+    this.textScale = 1.0,
     this.zen = false,
   });
 
@@ -74,6 +77,9 @@ class PageBody extends StatefulWidget {
   /// Room the page keeps on the left of each block for its controls (opaque blocks draw them there);
   /// the text of the blocks the editor owns is moved in by the same amount, so everything lines up.
   final double leftGutter;
+
+  /// The user's size for the text of the page (1 = normal); the system's own text size is applied on top of it.
+  final double textScale;
   final bool zen;
 
   @override
@@ -81,12 +87,27 @@ class PageBody extends StatefulWidget {
 }
 
 /// A cheap fingerprint of everything the editor shows, to tell an outside change from our own sync.
+int _tableHash(Block b) => Object.hash(
+  Object.hashAll([for (final c in b.cols ?? const <TableColumn>[]) Object.hash(c.id, c.label, c.w)]),
+  Object.hashAll([for (final r in b.rows ?? const <Map<String, String>>[]) Object.hashAll([for (final c in b.cols ?? const <TableColumn>[]) r[c.id]])]),
+);
+
 int blocksFingerprint(List<Block> blocks) => Object.hashAll([
   for (final b in blocks)
-    Object.hash(b.id, b.type, b.level, b.indent, b.toggle, isNative(b) ? b.text : null, isNative(b) ? Object.hashAll([for (final i in b.items ?? const <ChecklistItem>[]) Object.hash(i.id, i.text, i.done)]) : null),
+    Object.hash(
+      b.id,
+      b.type,
+      b.level,
+      b.indent,
+      b.toggle,
+      isNative(b) ? b.text : null,
+      isNative(b) ? Object.hashAll([for (final i in b.items ?? const <ChecklistItem>[]) Object.hash(i.id, i.text, i.done)]) : null,
+      b.type == BlockType.table ? _tableHash(b) : null,
+    ),
 ]);
 
 class _PageBodyState extends State<PageBody> {
+  final _editorFocus = FocusNode(debugLabel: 'page editor');
   late EditorState _es;
   late EditorScrollController _scroll;
   StreamSubscription<EditorTransactionValue>? _sub;
@@ -133,6 +154,7 @@ class _PageBodyState extends State<PageBody> {
 
   @override
   void dispose() {
+    _editorFocus.dispose();
     widget.controller._state = null;
     _ed.removeListener(_onPage);
     _close();
@@ -206,7 +228,11 @@ class _PageBodyState extends State<PageBody> {
     final sel = _es.selection;
     if (sel == null) return null;
     _sync();
-    final node = _es.getNodeAtPath(sel.start.path);
+    var node = _es.getNodeAtPath(sel.start.path);
+    // a caret in a table cell belongs to the table
+    while (node != null && node.attributes[idKey] is! String) {
+      node = node.parent;
+    }
     final id = node?.attributes[idKey];
     return id is String ? _ed.blocks.where((b) => b.id == id).firstOrNull : null;
   }
@@ -225,7 +251,12 @@ class _PageBodyState extends State<PageBody> {
       final n = _es.getNodeAtPath([i]);
       if (n?.delta == null) return;
       _es.selection = Selection.collapsed(Position(path: [i]));
+      // The editor takes the keyboard focus too, not only the text input. Without it typing worked but Ctrl+B, Ctrl+I
+      // and the other shortcuts did nothing until the first click in the text (found on the real app after
+      // "Começar com: Texto"): a selection set by code is not a tap, so the editor does not ask for the focus itself.
+      _editorFocus.requestFocus();
     });
+    WidgetsBinding.instance.scheduleFrame(); // a post-frame callback waits for a frame, and there may be none coming
   }
 
   void _scrollTo(String id) {
@@ -235,14 +266,27 @@ class _PageBodyState extends State<PageBody> {
     _scroll.itemScrollController.scrollTo(index: i + 1, duration: const Duration(milliseconds: 250));
   }
 
+  TextStyle get _headerText => AppText.mono(12, color: AppColors.textMuted, letterSpacing: 0.9).copyWith(height: 1.8);
+
+  TextStyle get _cellText => const TextStyle(fontSize: 15, height: 1.5, color: AppColors.text);
+
   TextStyle get _text => TextStyle(fontSize: 16.5, height: 1.68, color: AppColors.text.withValues(alpha: 0.9));
+
+  /// The blocks the editor does not edit (code, callouts...) are scaled the way its paragraphs are.
+  Widget _renderOpaque(BuildContext context, String id) {
+    final q = MediaQuery.of(context);
+    return MediaQuery(data: q.copyWith(textScaler: TextScaler.linear(widget.textScale * q.textScaler.scale(1.0))), child: widget.renderOpaque(context, id));
+  }
 
   Map<String, BlockComponentBuilder> _builders() {
     final pad = EdgeInsets.fromLTRB(widget.leftGutter, 6, 0, 6);
+    // a paragraph inside a table cell: no gutter, no hint, a smaller step
+    bool inCell(Node n) => n.parent?.type == TableCellBlockKeys.type;
+    bool inHeader(Node n) => inCell(n) && n.parent!.attributes[TableCellBlockKeys.rowPosition] == 0;
     BlockComponentConfiguration cfg(String hint) => BlockComponentConfiguration(
-      padding: (_) => pad,
-      textStyle: (_, {textSpan}) => _text,
-      placeholderText: (_) => hint,
+      padding: (n) => inCell(n) ? const EdgeInsets.symmetric(vertical: 4) : pad,
+      textStyle: (n, {textSpan}) => inHeader(n) ? _headerText : inCell(n) ? _cellText : _text,
+      placeholderText: (n) => inCell(n) ? '' : hint,
       placeholderTextStyle: (_, {textSpan}) => _text.copyWith(color: AppColors.textMuted.withValues(alpha: 0.6)),
     );
     return {
@@ -257,7 +301,19 @@ class _PageBodyState extends State<PageBody> {
       NumberedListBlockKeys.type: NumberedListBlockComponentBuilder(configuration: cfg('Item')),
       TodoListBlockKeys.type: TodoListBlockComponentBuilder(configuration: cfg('Tarefa')),
       DividerBlockKeys.type: DividerBlockComponentBuilder(lineColor: AppColors.border, configuration: BlockComponentConfiguration(padding: (_) => EdgeInsets.fromLTRB(widget.leftGutter, 8, 0, 8))),
-      opaqueType: PindrelBlockBuilder(editorState: _es, render: widget.renderOpaque, configuration: const BlockComponentConfiguration(padding: _noPad, margin: _noPad)),
+      TableBlockKeys.type: TableBlockComponentBuilder(
+        byRows: true,
+        // the row handles hang in the gutter the other blocks leave on the left; on a phone they take their own 28 px
+        configuration: BlockComponentConfiguration(padding: (_) => EdgeInsets.only(left: (widget.leftGutter - 28).clamp(0, 400)), margin: (_) => const EdgeInsets.symmetric(vertical: 6)),
+        tableStyle: const TableStyle(borderColor: AppColors.border),
+        cellStyle: _cellText,
+        headerRow: true,
+        maxCols: maxCols,
+        maxRows: maxRows + 1,
+        maxColWidth: maxColWidth.toDouble(),
+        controlColor: AppColors.textMuted,
+      ),
+      opaqueType: PindrelBlockBuilder(editorState: _es, render: _renderOpaque, configuration: const BlockComponentConfiguration(padding: _noPad, margin: _noPad)),
     };
   }
 
@@ -271,7 +327,7 @@ class _PageBodyState extends State<PageBody> {
       final sel = es.selection;
       if (sel == null || !sel.isCollapsed) return false;
       final node = es.getNodeAtPath(sel.start.path);
-      if (node == null || node.type != ParagraphBlockKeys.type || (node.delta?.isEmpty ?? true) == false) return false;
+      if (node == null || node.type != ParagraphBlockKeys.type || node.parent?.type != PageBlockKeys.type || (node.delta?.isEmpty ?? true) == false) return false;
       _sync();
       final id = node.attributes[idKey];
       if (id is! String) return false;
@@ -295,18 +351,45 @@ class _PageBodyState extends State<PageBody> {
     ),
   );
 
+  // The shortcuts that turn a paragraph into another block must not fire inside a table cell: a cell holds one
+  // paragraph and its text, nothing else. The inline ones (bold, italic, code...) and the line breaks stay.
+  static final _blockShortcuts = {
+    formatAsteriskToBulletedList,
+    formatMinusToBulletedList,
+    formatNumberToNumberedList,
+    formatDoubleQuoteToQuote,
+    formatSignToHeading,
+    formatEmptyBracketsToUncheckedBox,
+    formatHyphenEmptyBracketsToUncheckedBox,
+    formatFilledBracketsToCheckedBox,
+    formatHyphenFilledBracketsToCheckedBox,
+    convertMinusesToDivider,
+    convertStarsToDivider,
+    convertUnderscoreToDivider,
+    _greaterToQuote,
+  };
+
+  static CharacterShortcutEvent _notInCell(CharacterShortcutEvent e) => CharacterShortcutEvent(
+    key: e.key,
+    character: e.character,
+    handler: (es) async {
+      final sel = es.selection;
+      final node = sel == null ? null : es.getNodeAtPath(sel.start.path);
+      if (node?.parent?.type == TableCellBlockKeys.type) return false;
+      return e.handler(es);
+    },
+  );
+
   List<CharacterShortcutEvent> get _characters => [
     for (final e in standardCharacterShortcutEvents)
-      if (e != slashCommand) e,
-    _greaterToQuote,
+      if (e != slashCommand) _blockShortcuts.contains(e) ? _notInCell(e) : e,
+    _notInCell(_greaterToQuote),
     _slash,
   ];
 
-  // no tables here, and Tab/Shift+Tab on lists only (a Tab in a paragraph would nest it inside the previous one)
-  List<CommandShortcutEvent> get _commands => [
-    for (final e in standardCommandShortcutEvents)
-      if (!tableCommands.contains(e)) e,
-  ];
+  // Tab/Shift+Tab on lists only (a Tab in a paragraph would nest it inside the previous one); the table's own
+  // keys (Tab to the next cell, arrows, Enter) stay
+  List<CommandShortcutEvent> get _commands => standardCommandShortcutEvents;
 
   @override
   Widget build(BuildContext context) {
@@ -317,6 +400,8 @@ class _PageBodyState extends State<PageBody> {
     final touch = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
     final style = EditorStyle(
       padding: EdgeInsets.only(left: (side - widget.leftGutter).clamp(0.0, 4000.0) + 0, right: side),
+      // the editor's paragraphs ignore the system's text size, so it is folded in here
+      textScaleFactor: widget.textScale * MediaQuery.textScalerOf(context).scale(1.0),
       cursorColor: AppColors.accentBorder,
       dragHandleColor: AppColors.accentBorder,
       selectionColor: AppColors.accent.withValues(alpha: 0.45),
@@ -339,6 +424,8 @@ class _PageBodyState extends State<PageBody> {
         Expanded(
           child: AppFlowyEditor(
             key: ObjectKey(_es),
+            focusNode: _editorFocus,
+            contextMenuBuilder: pageContextMenu,
             editorState: _es,
             editorScrollController: _scroll,
             editable: !_ed.readOnly,

@@ -47,17 +47,18 @@ class TableNode {
       }
     }
 
+    // Pindrel: one pass over the cells instead of a search of all of them per position
+    // (the search was colsLen * rowsLen * children, 1.4 million steps for a 12 x 100 table, at every build)
+    final grid = List.generate(colsLen, (_) => List<Node?>.filled(rowsLen, null));
+    for (final child in node.children) {
+      final c = child.attributes[TableCellBlockKeys.colPosition];
+      final r = child.attributes[TableCellBlockKeys.rowPosition];
+      if (c is int && r is int && c >= 0 && c < colsLen && r >= 0 && r < rowsLen) grid[c][r] ??= child;
+    }
     for (var i = 0; i < colsLen; i++) {
       _cells.add([]);
       for (var j = 0; j < rowsLen; j++) {
-        final cell = node.children
-            .where(
-              (n) =>
-                  n.attributes[TableCellBlockKeys.colPosition] == i &&
-                  n.attributes[TableCellBlockKeys.rowPosition] == j,
-            )
-            .firstOrNull;
-
+        final cell = grid[i][j];
         if (cell == null) {
           AppFlowyEditorLog.editor.debug('TableNode: cell is empty');
           _cells.clear();

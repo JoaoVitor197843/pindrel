@@ -1,20 +1,22 @@
 import 'package:flutter/material.dart';
+
+import '../../../../core/performance/frame_pacer.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../data/ai_providers.dart';
-import '../../data/note_page.dart';
 import '../../data/transfer.dart';
 import '../../data/workspace.dart';
 import 'ui.dart';
 
 enum _Unsaved { keep, discard, save }
 
-enum SettingsSection { general, account, trash, data, ai }
+enum SettingsSection { general, power, account, trash, data, ai }
 
 const _nav = {
   SettingsSection.general: 'Geral',
+  SettingsSection.power: 'Energia',
   SettingsSection.account: 'Conta',
   SettingsSection.trash: 'Lixeira',
   SettingsSection.data: 'Importar/Exportar',
@@ -47,16 +49,19 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late bool _atList = false;
   late bool _useTrash = widget.ws.settings.useTrash;
   late double _days = widget.ws.settings.retention.toDouble();
+  late PowerMode _power = widget.ws.settings.power;
   var _provider = aiProviders.first;
 
   /// Whether the switch or the slider differ from what is saved: the only settings there are to save.
   bool get _dirty =>
       _useTrash != widget.ws.settings.useTrash ||
+      _power != widget.ws.settings.power ||
       _days.round() != widget.ws.settings.retention;
 
   void _save() {
     widget.ws.saveSettings(
-      Settings(useTrash: _useTrash, retention: _days.round()),
+      // copy: what this dialog does not show (the text size) must stay as it is
+      widget.ws.settings.copy(useTrash: _useTrash, retention: _days.round(), power: _power),
     );
     widget.onToast('Configurações salvas');
     Navigator.pop(context);
@@ -262,6 +267,43 @@ class _SettingsDialogState extends State<SettingsDialog> {
     ],
   );
 
+  static const _powerOptions = <(PowerMode, String, String)>[
+    (PowerMode.auto, 'Automático', 'Usa o ritmo máximo da tela (60 ou 120 quadros). Se o aparelho não der conta, passa sozinho para 30 firmes e tenta voltar depois.'),
+    (PowerMode.smooth, 'Sempre fluido', 'Nunca limita os quadros, mesmo que o aparelho esteja engasgando. Mais suave, mas gasta mais bateria.'),
+    (PowerMode.saving, 'Economia de energia', 'Sempre 30 quadros por segundo, sem animações de enfeite, e tabelas longas ficam mais simples enquanto rolam. A rolagem fica menos fluida.'),
+  ];
+
+  Widget _switchRow(Key key, String label, bool on, VoidCallback onTap) => Row(
+    children: [
+      Expanded(child: Text(label, style: const TextStyle(fontSize: 15))),
+      Semantics(
+        toggled: on,
+        label: label,
+        child: RingInkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(99),
+          child: Container(
+            key: key,
+            width: 48,
+            height: 28,
+            padding: const EdgeInsets.all(2),
+            alignment: on ? Alignment.centerRight : Alignment.centerLeft,
+            decoration: BoxDecoration(
+              color: on ? AppColors.accent : AppColors.background,
+              borderRadius: BorderRadius.circular(99),
+              border: Border.all(color: AppColors.fieldBorder),
+            ),
+            child: Container(
+              width: 22,
+              height: 22,
+              decoration: const BoxDecoration(color: AppColors.text, shape: BoxShape.circle),
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
+
   Widget _content() => ListView(
     padding: const EdgeInsets.all(20),
     shrinkWrap: true,
@@ -269,43 +311,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
       SettingsSection.general => [
         Text('Geral', style: AppText.serif(24)),
         const SizedBox(height: 16),
-        Row(
-          children: [
-            const Expanded(
-              child: Text('Usar a lixeira', style: TextStyle(fontSize: 15)),
-            ),
-            Semantics(
-              toggled: _useTrash,
-              label: 'Usar a lixeira',
-              child: RingInkWell(
-                onTap: () => setState(() => _useTrash = !_useTrash),
-                borderRadius: BorderRadius.circular(99),
-                child: Container(
-                  key: const Key('trash-switch'),
-                  width: 48,
-                  height: 28,
-                  padding: const EdgeInsets.all(2),
-                  alignment: _useTrash
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  decoration: BoxDecoration(
-                    color: _useTrash ? AppColors.accent : AppColors.background,
-                    borderRadius: BorderRadius.circular(99),
-                    border: Border.all(color: AppColors.fieldBorder),
-                  ),
-                  child: Container(
-                    width: 22,
-                    height: 22,
-                    decoration: const BoxDecoration(
-                      color: AppColors.text,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+        _switchRow(const Key('trash-switch'), 'Usar a lixeira', _useTrash, () => setState(() => _useTrash = !_useTrash)),
         const SizedBox(height: 4),
         Text(
           _useTrash
@@ -349,6 +355,54 @@ class _SettingsDialogState extends State<SettingsDialog> {
             ],
           ),
         ),
+      ],
+      SettingsSection.power => [
+        Text('Energia', style: AppText.serif(24)),
+        const SizedBox(height: 8),
+        const Text(
+          'Quantos quadros por segundo o app desenha. Menos quadros gastam menos bateria e esquentam menos o aparelho.',
+          style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+        ),
+        const SizedBox(height: 16),
+        for (final (mode, title, body) in _powerOptions)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Semantics(
+              inMutuallyExclusiveGroup: true,
+              checked: _power == mode,
+              label: title,
+              child: RingInkWell(
+                key: Key('power-${mode.name}'),
+                onTap: () => setState(() => _power = mode),
+                borderRadius: BorderRadius.circular(fieldRadius),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(fieldRadius),
+                    border: Border.all(color: _power == mode ? AppColors.accentBorder : AppColors.border),
+                    color: _power == mode ? AppColors.accent.withValues(alpha: 0.25) : Colors.transparent,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(_power == mode ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18, color: _power == mode ? AppColors.accentText : AppColors.textMuted),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(title, style: const TextStyle(fontSize: 15)),
+                            const SizedBox(height: 4),
+                            Text(body, style: const TextStyle(fontSize: 13, color: AppColors.textMuted)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
       ],
       SettingsSection.account => [
         Text('Conta', style: AppText.serif(24)),

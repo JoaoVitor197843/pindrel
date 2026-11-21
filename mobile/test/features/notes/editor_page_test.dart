@@ -172,7 +172,8 @@ void main() {
       await caretAt(tester, 0);
       await tester.tap(find.byTooltip('Inserir bloco abaixo'));
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Divisor'), 200, scrollable: find.byType(Scrollable).last);
+      await tester.enterText(find.byKey(const Key('insert-filter')), 'divisor');
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Divisor'));
       await tester.pumpAndSettle();
       expect(body().map((b) => b.type), [BlockType.paragraph, BlockType.divider]);
@@ -214,18 +215,27 @@ void main() {
     testWidgets('tabela: escreve numa célula, acrescenta e remove linhas e colunas', (tester) async {
       setBody([makeBlock(BlockType.table)]);
       await pumpEditor(tester, size: const Size(1100, 1000));
-      final b = body().first;
-      await tester.enterText(find.byType(TextField).at(5), 'oi');
-      await tester.pump();
-      expect(b.rows!.any((r) => r.values.contains('oi')), true);
-      await tester.tap(find.text('+ linha'));
-      await tester.tap(find.text('+ coluna'));
+      final es = editorOf(tester);
+      // the first cell of the first body row (row 0 is the header, three labels)
+      await tester.tap(tableCells().at(3));
       await tester.pumpAndSettle();
-      expect((b.rows!.length, b.cols!.length), (4, 4));
-      // the table scrolls sideways inside the page column: the first column is the one in view
-      await tester.tap(find.byTooltip('Remover coluna Coluna 1'));
+      final cell = es.getNodeAtPath(es.selection!.start.path)!;
+      await typeInto(tester, cell, 'oi');
+      await tester.pumpAndSettle();
+      expect(body().first.rows!.first.values.contains('oi'), true);
+      await tester.tap(find.text('+ linha'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Adicionar coluna'));
+      await tester.pumpAndSettle();
+      expect((body().first.rows!.length, body().first.cols!.length), (4, 4));
+      // the menu of the column the caret is in
+      await tester.tap(find.byTooltip('Coluna 1'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.descendant(of: find.byType(PopupMenuItem<int>), matching: find.text('Excluir coluna')));
       await tester.pumpAndSettle();
       expect(body().first.cols!.length, 3);
+      expect(body().first.rows!.every((r) => r.length == 3), true);
+      await tester.pump(const Duration(milliseconds: 100));
     });
     testWidgets('link com endereço perigoso é recusado; um bom é guardado', (tester) async {
       setBody([makeBlock(BlockType.bookmark)]);
@@ -394,7 +404,8 @@ void main() {
       await pumpEditor(tester);
       await tester.tap(find.byTooltip('Inserir bloco depois de Bloco de código 1'));
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Divisor'), 200, scrollable: find.byType(Scrollable).last);
+      await tester.enterText(find.byKey(const Key('insert-filter')), 'divisor');
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Divisor'));
       await tester.pumpAndSettle();
       expect(body().map((b) => b.type), [BlockType.code, BlockType.divider, BlockType.code]);

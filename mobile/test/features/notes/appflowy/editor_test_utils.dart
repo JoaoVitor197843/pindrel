@@ -42,3 +42,13 @@ Future<bool> pressChar(WidgetTester t, String char) async {
   }
   return false;
 }
+
+/// Types [text] into any node (a table cell's paragraph, say) at [at], as one edit.
+Future<void> typeInto(WidgetTester t, Node node, String text, {int at = 0}) async {
+  final es = editorOf(t);
+  await es.apply(es.transaction..insertText(node, at, text));
+  await t.pump();
+}
+
+/// The paragraphs of the table cells that exist right now (only the rows near the screen are built).
+Finder tableCells() => find.descendant(of: find.byType(RowsTableView), matching: find.byType(AppFlowyRichText));

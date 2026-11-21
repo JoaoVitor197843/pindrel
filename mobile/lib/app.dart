@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'core/performance/frame_pacer.dart';
+
 import 'core/theme/app_theme.dart';
 import 'features/notes/presentation/pages/notes_gate.dart';
 
@@ -15,6 +17,12 @@ class PindrelApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
       themeMode: ThemeMode.dark,
+      // "Energia > Economia" also stops decorative motion (entrances, pulsing dots), as the system's reduce-motion does
+      builder: (context, child) => ValueListenableBuilder<PowerMode>(
+        valueListenable: FramePacer.mode,
+        child: child,
+        builder: (context, mode, child) => mode == PowerMode.saving ? MediaQuery(data: MediaQuery.of(context).copyWith(disableAnimations: true), child: child!) : child!,
+      ),
       home: home,
     );
   }

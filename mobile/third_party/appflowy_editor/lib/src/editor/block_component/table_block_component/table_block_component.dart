@@ -1,4 +1,5 @@
 import 'package:appflowy_editor/appflowy_editor.dart';
+import 'package:appflowy_editor/src/editor/block_component/table_block_component/table_rows_view.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -81,10 +82,29 @@ class TableBlockComponentBuilder extends BlockComponentBuilder {
     super.configuration,
     this.tableStyle = const TableStyle(),
     this.menuBuilder,
+    this.byRows = false,
+    this.cellStyle = const TextStyle(fontSize: 16, height: 1.5),
+    this.labels = const TableLabels(),
+    this.headerRow = false,
+    this.gutter = 28,
+    this.maxRows,
+    this.maxCols,
+    this.maxColWidth = 600,
+    this.controlColor = const Color(0xFF9A968E),
   });
 
   final TableBlockComponentMenuBuilder? menuBuilder;
   final TableStyle tableStyle;
+  final bool headerRow;
+  final double gutter;
+  final int? maxRows, maxCols;
+  final double maxColWidth;
+  final Color controlColor;
+
+  /// Pindrel: lay the table out by rows, building only the ones near the screen (see table_rows_view.dart).
+  final bool byRows;
+  final TextStyle cellStyle;
+  final TableLabels labels;
 
   @override
   BlockComponentWidget build(BlockComponentContext blockComponentContext) {
@@ -101,6 +121,15 @@ class TableBlockComponentBuilder extends BlockComponentBuilder {
       configuration: configuration,
       menuBuilder: menuBuilder,
       tableStyle: tableStyle,
+      byRows: byRows,
+      cellStyle: cellStyle,
+      labels: labels,
+      headerRow: headerRow,
+      gutter: gutter,
+      maxRows: maxRows,
+      maxCols: maxCols,
+      maxColWidth: maxColWidth,
+      controlColor: controlColor,
       showActions: showActions(node),
       actionBuilder: (context, state) => actionBuilder(
         blockComponentContext,
@@ -153,30 +182,18 @@ class TableBlockComponentBuilder extends BlockComponentBuilder {
           return false;
         }
 
-        // all children should contain rowPosition and colPosition
-        for (var i = 0; i < colsLen; i++) {
-          for (var j = 0; j < rowsLen; j++) {
-            final child = children.where(
-              (n) =>
-                  n.attributes[TableCellBlockKeys.colPosition] == i &&
-                  n.attributes[TableCellBlockKeys.rowPosition] == j,
+        // every position (col, row) holds exactly one cell (one pass, not a search per position)
+        if (colsLen is! int || rowsLen is! int) return false;
+        final seen = <int>{};
+        for (final n in children) {
+          final c = n.attributes[TableCellBlockKeys.colPosition];
+          final r = n.attributes[TableCellBlockKeys.rowPosition];
+          if (c is! int || r is! int || c < 0 || c >= colsLen || r < 0 || r >= rowsLen || !seen.add(c * rowsLen + r)) {
+            AppFlowyEditorLog.editor.debug(
+              'TableBlockComponentBuilder: a cell is missing, repeated or out of the table',
             );
-            if (child.isEmpty) {
-              AppFlowyEditorLog.editor.debug(
-                'TableBlockComponentBuilder: child($i, $j) is empty',
-              );
 
-              return false;
-            }
-
-            // should only contains one child
-            if (child.length != 1) {
-              AppFlowyEditorLog.editor.debug(
-                'TableBlockComponentBuilder: child($i, $j) is not unique',
-              );
-
-              return false;
-            }
+            return false;
           }
         }
 
@@ -191,6 +208,15 @@ class TableBlockComponentWidget extends BlockComponentStatefulWidget {
     required super.node,
     this.tableStyle = const TableStyle(),
     this.menuBuilder,
+    this.byRows = false,
+    this.cellStyle = const TextStyle(fontSize: 16, height: 1.5),
+    this.labels = const TableLabels(),
+    this.headerRow = false,
+    this.gutter = 28,
+    this.maxRows,
+    this.maxCols,
+    this.maxColWidth = 600,
+    this.controlColor = const Color(0xFF9A968E),
     super.showActions,
     super.actionBuilder,
     super.actionTrailingBuilder,
@@ -201,6 +227,14 @@ class TableBlockComponentWidget extends BlockComponentStatefulWidget {
 
   final TableBlockComponentMenuBuilder? menuBuilder;
   final TableStyle tableStyle;
+  final bool byRows;
+  final TextStyle cellStyle;
+  final TableLabels labels;
+  final bool headerRow;
+  final double gutter;
+  final int? maxRows, maxCols;
+  final double maxColWidth;
+  final Color controlColor;
 
   @override
   State<TableBlockComponentWidget> createState() =>
@@ -228,19 +262,37 @@ class _TableBlockComponentWidgetState extends State<TableBlockComponentWidget>
   Widget build(BuildContext context) {
     Widget child = Scrollbar(
       controller: _scrollController,
+      // a table wider than the page is cut at its edge: the bar says so (it only shows when there is more to see)
+      thumbVisibility: widget.byRows,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.only(top: 10, left: 10, bottom: 4),
+        padding: widget.byRows ? EdgeInsets.zero : const EdgeInsets.only(top: 10, left: 10, bottom: 4),
         controller: _scrollController,
         scrollDirection: Axis.horizontal,
-        child: TableView(
-          tableNode: widget.tableNode,
-          editorState: editorState,
-          menuBuilder: widget.menuBuilder,
-          tableStyle: widget.tableStyle,
-        ),
+        child: widget.byRows
+            ? RowsTableView(
+                tableNode: widget.tableNode,
+                editorState: editorState,
+                tableStyle: widget.tableStyle,
+                cellStyle: widget.cellStyle,
+                labels: widget.labels,
+                headerRow: widget.headerRow,
+                gutter: widget.gutter,
+                maxRows: widget.maxRows,
+                maxCols: widget.maxCols,
+                maxColWidth: widget.maxColWidth,
+                controlColor: widget.controlColor,
+              )
+            : TableView(
+                tableNode: widget.tableNode,
+                editorState: editorState,
+                menuBuilder: widget.menuBuilder,
+                tableStyle: widget.tableStyle,
+              ),
       ),
     );
 
+    // by rows the table is as wide as the page's column, not as its cells: the block must not be centered
+    if (widget.byRows) child = SizedBox(width: double.infinity, child: child);
     child = Padding(
       key: tableKey,
       padding: padding,

@@ -154,7 +154,8 @@ class BlockBody extends StatelessWidget {
       case BlockType.secure:
         return _SecureBlock(block: b);
       case BlockType.table:
-        return _Table(block: b, cx: cx);
+        // the page editor draws tables itself (appflowy_editor's table); this is only a safety net
+        return const SizedBox.shrink();
       case BlockType.toc:
         return _Toc(cx: cx);
       case BlockType.bookmark:
@@ -409,82 +410,6 @@ class _SecureBlock extends StatelessWidget {
               ),
             ))))),
       ]);
-}
-
-class _Table extends StatelessWidget {
-  const _Table({required this.block, required this.cx});
-  final Block block;
-  final BlockContext cx;
-  @override
-  Widget build(BuildContext context) {
-    final ed = cx.ed;
-    final cols = block.cols!;
-    Widget handle(String tip, List<PopupMenuEntry<VoidCallback>> items) => PopupMenuButton<VoidCallback>(
-          tooltip: tip,
-          color: AppColors.surface,
-          padding: EdgeInsets.zero,
-          onSelected: (run) => run(),
-          itemBuilder: (_) => items,
-          child: const SizedBox(width: 22, height: 28, child: Center(child: Text('⠿', style: TextStyle(fontSize: 14, color: AppColors.textMuted)))),
-        );
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Column(children: [
-          Row(children: [
-            const SizedBox(width: 22),
-            for (final c in cols)
-              Container(
-                key: ValueKey('h-${c.id}'),
-                width: c.w.toDouble(),
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.border))),
-                child: Row(children: [
-                  if (!ed.readOnly)
-                    handle('Coluna ${c.label}', [
-                      PopupMenuItem(value: () => ed.moveCol(block.id, cols.indexOf(c), cols.indexOf(c) - 1), child: const Text('Mover para a esquerda')),
-                      PopupMenuItem(value: () => ed.moveCol(block.id, cols.indexOf(c), cols.indexOf(c) + 2), child: const Text('Mover para a direita')),
-                      PopupMenuItem(value: () => ed.resizeCol(block.id, c.id, c.w + 40), child: const Text('Alargar')),
-                      PopupMenuItem(value: () => ed.resizeCol(block.id, c.id, c.w - 40), child: const Text('Estreitar')),
-                    ]),
-                  Expanded(child: SyncedField(value: c.label, hint: 'Coluna', maxLength: 80, readOnly: ed.readOnly, multiline: false, style: AppText.mono(12, color: AppColors.textMuted, letterSpacing: 1.2), onChanged: (t) => ed.setLabel(block.id, c.id, t))),
-                  if (!ed.readOnly) GhostIconButton(icon: Icons.close, tooltip: 'Remover coluna ${c.label}', size: 24, iconSize: 12, onPressed: () => ed.removeCol(block.id, c.id)),
-                ]),
-              ),
-          ]),
-          for (var r = 0; r < block.rows!.length; r++)
-            Row(children: [
-              SizedBox(
-                width: 22,
-                child: ed.readOnly
-                    ? null
-                    : handle('Linha ${r + 1}', [
-                        PopupMenuItem(value: () => ed.moveRow(block.id, r, r - 1), child: const Text('Subir')),
-                        PopupMenuItem(value: () => ed.moveRow(block.id, r, r + 2), child: const Text('Descer')),
-                        PopupMenuItem(value: () => ed.removeRow(block.id, r), child: const Text('Remover linha')),
-                      ]),
-              ),
-              for (final c in cols)
-                Container(
-                  key: ValueKey('c-$r-${c.id}'),
-                  width: c.w.toDouble(),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.border))),
-                  child: SyncedField(value: block.rows![r][c.id] ?? '', maxLength: 2000, readOnly: ed.readOnly, style: const TextStyle(fontSize: 16, height: 1.5), onChanged: (t) => ed.setCell(block.id, r, c.id, t)),
-                ),
-            ]),
-        ]),
-      ),
-      if (!ed.readOnly)
-        Padding(
-          padding: const EdgeInsets.only(top: 4),
-          child: Wrap(spacing: 8, children: [
-            RingInkWell(onTap: () => ed.addRow(block.id), child: Padding(padding: const EdgeInsets.all(6), child: Text('+ linha', style: AppText.mono(12, letterSpacing: 0)))),
-            RingInkWell(onTap: () => ed.addCol(block.id), child: Padding(padding: const EdgeInsets.all(6), child: Text('+ coluna', style: AppText.mono(12, letterSpacing: 0)))),
-          ]),
-        ),
-    ]);
-  }
 }
 
 class _Toc extends StatelessWidget {

@@ -146,7 +146,7 @@ class NotesTopBar extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
-                        Icons.search,
+                        Icons.bolt,
                         size: 14,
                         color: AppColors.textMuted,
                       ),

@@ -4,6 +4,8 @@
 // toolbars are not used: they bring a white theme, a keyboard-height plugin and
 // colours the stored text has nowhere to keep.
 
+import 'dart:async';
+
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/material.dart';
 
@@ -34,6 +36,29 @@ class _FormatBarState extends State<FormatBar> {
   /// A menu or dialog of the bar is open: the editor lost the focus (and its selection) to it, but the bar has to stay.
   var _busy = false;
 
+  StreamSubscription<EditorTransactionValue>? _tx;
+
+  @override
+  void initState() {
+    super.initState();
+    // A mark taken off the selected text changes the document, not the selection: the buttons must follow it
+    _tx = editorState.transactionStream.listen((e) {
+      if (e.$1 == TransactionTime.after && mounted) setState(() {});
+    });
+    editorState.toggledStyleNotifier.addListener(_restyle);
+  }
+
+  void _restyle() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _tx?.cancel();
+    editorState.toggledStyleNotifier.removeListener(_restyle);
+    super.dispose();
+  }
+
   static final _marks = <(String, IconData, String)>[
     (AppFlowyRichTextKeys.bold, Icons.format_bold, 'Negrito'),
     (AppFlowyRichTextKeys.italic, Icons.format_italic, 'Itálico'),
@@ -46,7 +71,9 @@ class _FormatBarState extends State<FormatBar> {
     final sel = editorState.selection;
     if (sel == null) return false;
     if (sel.isCollapsed) return editorState.toggledStyle[key] == true;
-    return editorState.getDeltaAttributeValueInSelection<Object>(key) != null;
+    // taking a mark off with the bar's button leaves `bold: false` in the delta, which is not a mark that is on
+    final v = editorState.getDeltaAttributeValueInSelection<Object>(key);
+    return v != null && v != false;
   }
 
   Future<void> _highlight() async {

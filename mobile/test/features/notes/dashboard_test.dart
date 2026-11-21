@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mobile/features/notes/presentation/widgets/settings_dialog.dart';
+import 'package:mobile/core/performance/frame_pacer.dart';
 import 'package:mobile/core/theme/app_theme.dart';
 import 'package:mobile/features/notes/data/blocks.dart';
 import 'package:mobile/features/notes/data/notes_db.dart';
@@ -250,6 +252,48 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Página excluída'), findsOneWidget);
       expect(ws.counts.trash, 0);
+    });
+
+    testWidgets('configurações: a seção Energia escolhe o modo, só vale ao salvar, fica gravada e não mexe no tamanho do texto', (tester) async {
+      seed();
+      ws.setTextScale(1.4);
+      addTearDown(FramePacer.reset);
+      await pumpDashboard(tester, size: const Size(1500, 900));
+      await tester.tap(find.byTooltip('Menu da conta de Você'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configurações'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Energia'));
+      await tester.pumpAndSettle();
+      expect(ws.settings.power, PowerMode.auto, reason: 'the default: full rate, 30 only when the device is late');
+      expect(find.byKey(const Key('power-auto')), findsOneWidget);
+      await tester.scrollUntilVisible(find.byKey(const Key('power-saving')), 100, scrollable: find.descendant(of: find.byType(SettingsDialog), matching: find.byType(Scrollable)).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('power-saving')), warnIfMissed: true);
+      await tester.pumpAndSettle();
+      await tester.pumpAndSettle();
+      expect(FramePacer.mode.value, PowerMode.auto, reason: 'only Salvar applies it, like the other settings');
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+      expect(ws.settings.power, PowerMode.saving);
+      expect(FramePacer.mode.value, PowerMode.saving);
+      expect(ws.settings.textScale, 1.4, reason: 'saving the dialog must not put the text size back to 100%');
+      expect(db.settings().power, PowerMode.saving, reason: 'kept on disk');
+      // and back, through the other option
+      await tester.tap(find.byTooltip('Menu da conta de Você'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Configurações'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Energia'));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.byKey(const Key('power-smooth')), 100, scrollable: find.descendant(of: find.byType(SettingsDialog), matching: find.byType(Scrollable)).last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('power-smooth')), warnIfMissed: true);
+      await tester.pumpAndSettle();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Salvar'));
+      await tester.pumpAndSettle();
+      expect(FramePacer.mode.value, PowerMode.smooth);
     });
 
     testWidgets('configurações: seções de dados e de lixeira', (tester) async {

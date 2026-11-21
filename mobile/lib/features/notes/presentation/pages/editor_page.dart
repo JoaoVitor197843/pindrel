@@ -17,6 +17,7 @@ import '../widgets/export_menu.dart';
 import '../widgets/insert_menu.dart';
 import '../widgets/motion.dart';
 import '../widgets/side_panels.dart';
+import '../widgets/text_size_panel.dart';
 import '../widgets/ui.dart';
 
 const _dockMin = 1340.0;
@@ -78,6 +79,13 @@ class _EditorPageState extends State<EditorPage> {
       n.dispose();
     }
     super.dispose();
+  }
+
+  /// Makes the text of the page larger or smaller by [step] (0: back to normal) and says how large it is now.
+  void _textSize(double step) {
+    final ws = widget.ws;
+    ws.setTextScale(step == 0 ? 1.0 : ws.settings.textScale + step);
+    _toast('Texto em ${percent(ws.settings.textScale)}');
   }
 
   void _setZen(bool on) {
@@ -400,6 +408,8 @@ class _EditorPageState extends State<EditorPage> {
         _applyFocus();
         final width = MediaQuery.sizeOf(context).width;
         final docked = width >= _dockMin && !_zen;
+        // with the system's text large the words of the header buttons no longer fit beside each other: icons only
+        final largeText = MediaQuery.textScalerOf(context).scale(1.0) > 1.25;
         final roomForArrows = width >= 360;
         final compact = width < 480;
         final propsOpen = _propsDock ?? true;
@@ -587,6 +597,7 @@ class _EditorPageState extends State<EditorPage> {
           onSlash: (id) => _insertMenu(after: id, replaceEmpty: true),
           onInsertAfter: (id) => _insertMenu(after: id),
           leftGutter: gutter,
+          textScale: widget.ws.settings.textScale,
           zen: _zen,
         );
 
@@ -658,7 +669,9 @@ class _EditorPageState extends State<EditorPage> {
                           ),
                           if (width >= 768)
                             Expanded(
-                              child: Row(
+                              // what is left of the header after its buttons: the "edited" note is the first to go
+                              child: LayoutBuilder(
+                                builder: (context, room) => room.maxWidth < 200 ? const SizedBox.shrink() : Row(
                                 children: [
                                   if (place != null) ...[
                                     const Text(
@@ -694,6 +707,7 @@ class _EditorPageState extends State<EditorPage> {
                                       style: const TextStyle(fontSize: 14),
                                     ),
                                   ),
+                                  if (room.maxWidth > 420) ...[
                                   const SizedBox(width: 12),
                                   Flexible(
                                       child: Text(
@@ -707,13 +721,22 @@ class _EditorPageState extends State<EditorPage> {
                                         ),
                                       ),
                                     ),
+                                  ],
                                 ],
+                              ),
                               ),
                             ),
                         ],
                       ),
                     ),
                     if (compact) ...[
+                      _HeaderButton(
+                        icon: Icons.format_size,
+                        label: '',
+                        tooltip: 'Tamanho do texto',
+                        showLabel: false,
+                        onTap: () => showTextSizePanel(context, widget.ws),
+                      ),
                       ExportMenu(ed: _ed, compact: true, onDone: _toast),
                       PopupMenuButton<VoidCallback>(
                         tooltip: 'Mais opções da página',
@@ -751,10 +774,18 @@ class _EditorPageState extends State<EditorPage> {
                       ),
                     ] else ...[
                       _HeaderButton(
+                        icon: Icons.format_size,
+                        label: 'Texto',
+                        tooltip: 'Tamanho do texto (Ctrl + e Ctrl −)',
+                        // an icon is enough: the word waits for a wide header
+                        showLabel: width >= 1100 && !largeText,
+                        onTap: () => showTextSizePanel(context, widget.ws),
+                      ),
+                      _HeaderButton(
                         icon: Icons.fullscreen,
                         label: 'Zen',
                         tooltip: 'Modo zen',
-                        showLabel: width >= 768,
+                        showLabel: width >= 768 && !largeText,
                         onTap: () => _setZen(true),
                       ),
                       if (!roomForArrows) ...[
@@ -777,7 +808,7 @@ class _EditorPageState extends State<EditorPage> {
                         padding: const EdgeInsets.only(left: 8),
                         child: ExportMenu(
                           ed: _ed,
-                          compact: width < 768,
+                          compact: width < 768 || largeText,
                           onDone: _toast,
                         ),
                       ),
@@ -787,7 +818,7 @@ class _EditorPageState extends State<EditorPage> {
                         tooltip: page.trashed
                             ? 'Excluir página definitivamente'
                             : 'Excluir página',
-                        showLabel: width >= 768,
+                        showLabel: width >= 768 && !largeText,
                         danger: true,
                         onTap: _delete,
                       ),
@@ -798,7 +829,7 @@ class _EditorPageState extends State<EditorPage> {
                       child: Row(
                         children: [
                           // the web shows this from 640 px; its CSS shrinks, a Row does not, so here it waits for room
-                          if (width >= 1000)
+                          if (width >= 1000 && !largeText)
                             Text(
                               _ed.saving
                                   ? 'salvando…'
@@ -827,6 +858,17 @@ class _EditorPageState extends State<EditorPage> {
           bindings: {
             const SingleActivator(LogicalKeyboardKey.escape): () =>
                 _zen ? _setZen(false) : null,
+            // the text size, as in a browser: Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac; = is + without Shift)
+            for (final meta in [false, true]) ...{
+              for (final key in [LogicalKeyboardKey.equal, LogicalKeyboardKey.add, LogicalKeyboardKey.numpadAdd])
+                SingleActivator(key, control: !meta, meta: meta): () => _textSize(textScaleStep),
+              SingleActivator(LogicalKeyboardKey.add, control: !meta, meta: meta, shift: true): () => _textSize(textScaleStep),
+              SingleActivator(LogicalKeyboardKey.equal, control: !meta, meta: meta, shift: true): () => _textSize(textScaleStep),
+              for (final key in [LogicalKeyboardKey.minus, LogicalKeyboardKey.numpadSubtract])
+                SingleActivator(key, control: !meta, meta: meta): () => _textSize(-textScaleStep),
+              for (final key in [LogicalKeyboardKey.digit0, LogicalKeyboardKey.numpad0])
+                SingleActivator(key, control: !meta, meta: meta): () => _textSize(0),
+            },
           },
           child: Focus(
             focusNode: _pageNode,

@@ -32,14 +32,14 @@ List<Block> sample() => [
 
 void main() {
   group('blocks to document', () {
-    test('the editor edits text, lists, checklists and dividers; everything else is opaque', () {
+    test('the editor edits text, lists, checklists, dividers and tables; everything else is opaque', () {
       final doc = blocksToDocument(sample());
       expect(doc.root.children.map((n) => n.type).toList(), [
         'heading', 'paragraph', 'quote',
         'bulleted_list', 'bulleted_list', // b0 (with b1/b2 inside) and b3
         'numbered_list', 'numbered_list',
         'todo_list', 'todo_list', 'divider',
-        opaqueType, opaqueType, opaqueType, opaqueType, opaqueType, opaqueType,
+        opaqueType, opaqueType, opaqueType, 'table', opaqueType, opaqueType,
       ]);
     });
 
@@ -86,7 +86,7 @@ void main() {
     test('opaque blocks come back as the very same objects (nothing in the editor can damage them)', () {
       final before = sample();
       final after = trip(before);
-      for (final id in ['code', 'call', 'tog', 'tab', 'sec', 'toc']) {
+      for (final id in ['code', 'call', 'tog', 'sec', 'toc']) {
         expect(identical(after.firstWhere((b) => b.id == id), before.firstWhere((b) => b.id == id)), isTrue, reason: id);
       }
     });
@@ -94,6 +94,127 @@ void main() {
     test('rich text survives', () {
       final after = trip([Block('p', BlockType.paragraph, text: '**a** *b* __c__ ~~d~~ ==e== `f` [g](https://x.org)')]);
       expect(after.single.text, '**a** *b* __c__ ~~d~~ ==e== `f` [g](https://x.org)');
+    });
+  });
+
+  group('tables', () {
+    Block table() => Block(
+      't',
+      BlockType.table,
+      cols: [TableColumn(id: 'a', label: 'Nome', w: 200), TableColumn(id: 'b', label: '**Idade**', w: 120)],
+      rows: [
+        {'a': 'Ana', 'b': '30'},
+        {'a': 'Bia *B*', 'b': ''},
+      ],
+    );
+
+    test('the stored table is the package table: row 0 holds the labels, cells carry id and width', () {
+      final doc = blocksToDocument([table()]);
+      final n = doc.root.children.single;
+      expect(n.type, 'table');
+      expect(n.attributes[idKey], 't');
+      expect((n.attributes['colsLen'], n.attributes['rowsLen']), (2, 3));
+      expect(n.children.length, 6);
+      final head = n.children.where((c) => c.attributes['rowPosition'] == 0).toList();
+      expect(head.map((c) => c.attributes[colIdKey]), ['a', 'b']);
+      expect(head.map((c) => c.attributes['width']), [200.0, 120.0]);
+      expect(head.last.children.single.delta!.toPlainText(), 'Idade', reason: 'the marks became a mark, not characters');
+    });
+
+    test('the trip is lossless, with marks in cells and labels', () {
+      final t = table();
+      final after = trip([t]).single;
+      expect(after.id, 't');
+      expect([for (final c in after.cols!) (c.id, c.label, c.w)], [('a', 'Nome', 200), ('b', '**Idade**', 120)]);
+      expect(after.rows, [
+        {'a': 'Ana', 'b': '30'},
+        {'a': 'Bia *B*', 'b': ''},
+      ]);
+    });
+
+    test('a table with no columns or no rows still has a header and survives', () {
+      expect(trip([Block('t', BlockType.table, cols: [], rows: [])]).single.cols!.length, 1);
+      final noRows = trip([Block('t', BlockType.table, cols: [TableColumn(id: 'a', label: 'A')], rows: [])]).single;
+      expect((noRows.cols!.length, noRows.rows!.length), (1, 0));
+    });
+
+    test('the cells of a table are never read as blocks of their own', () {
+      final out = trip([Block('p', BlockType.paragraph, text: 'a'), table(), Block('q', BlockType.paragraph, text: 'b')]);
+      expect(out.map((b) => b.type), [BlockType.paragraph, BlockType.table, BlockType.paragraph]);
+    });
+
+    test('a column the editor made has no id: it gets one, and the same one at every later sync', () {
+      final doc = blocksToDocument([table()]);
+      final n = doc.root.children.single;
+      // what the package does for "insert a column on the right": new cells without our attributes, positions renumbered
+      for (final c in n.children) {
+        if (c.attributes['colPosition'] == 1) c.updateAttributes({'colPosition': 2});
+      }
+      for (var r = 0; r < 3; r++) {
+        n.insert(Node(type: 'table/cell', attributes: {'colPosition': 1, 'rowPosition': r}, children: [Node(type: 'paragraph', attributes: {'delta': (Delta()..insert(r == 0 ? 'Nova' : '')).toJson()})]));
+      }
+      n.updateAttributes({'colsLen': 3});
+      final first = documentToBlocks(doc, {}, stamp: true).single;
+      expect(first.cols!.map((c) => c.label), ['Nome', 'Nova', '**Idade**']);
+      expect(first.cols![0].id, 'a');
+      expect(first.cols![2].id, 'b');
+      final fresh = first.cols![1].id;
+      expect(fresh, isNot(anyOf('a', 'b')));
+      expect(documentToBlocks(doc, {}).single.cols![1].id, fresh, reason: 'stamped on the header cell');
+    });
+
+    test('a duplicated column gets a new id, the first keeps its own', () {
+      final doc = blocksToDocument([table()]);
+      final n = doc.root.children.single;
+      final copies = [for (final c in n.children.where((c) => c.attributes['colPosition'] == 0)) Node(type: 'table/cell', attributes: {...c.attributes, 'colPosition': 1}, children: [c.children.first.copyWith()])];
+      for (final c in n.children) {
+        if (c.attributes['colPosition'] == 1) c.updateAttributes({'colPosition': 2});
+      }
+      n.updateAttributes({'colsLen': 3});
+      for (final c in copies) {
+        n.insert(c);
+      }
+      final cols = documentToBlocks(doc, {}).single.cols!;
+      expect(cols.map((c) => c.id).toSet().length, 3);
+      expect(cols[0].id, 'a');
+      expect(cols.map((c) => c.label), ['Nome', 'Nome', '**Idade**']);
+    });
+
+    test('limits: columns, rows and the size of a cell are cut to what the model allows', () {
+      final big = Block('t', BlockType.table, cols: [for (var i = 0; i < 12; i++) TableColumn(id: 'c$i', label: 'x')], rows: [for (var r = 0; r < 200; r++) {for (var i = 0; i < 12; i++) 'c$i': 'v'}]);
+      final doc = blocksToDocument([big]);
+      final n = doc.root.children.single;
+      // a hundred more columns and rows than the model keeps, and a huge cell
+      for (var c = 12; c < 40; c++) {
+        for (var r = 0; r < 205; r++) {
+          n.insert(Node(type: 'table/cell', attributes: {'colPosition': c, 'rowPosition': r}, children: [Node(type: 'paragraph', attributes: {'delta': (Delta()..insert('z' * 5000)).toJson()})]));
+        }
+      }
+      n.children.first.children.first.updateAttributes({'delta': (Delta()..insert('y' * 5000)).toJson()});
+      final out = documentToBlocks(doc, {}).single;
+      expect(out.cols!.length, maxCols);
+      expect(out.rows!.length, maxRows);
+      expect(out.cols!.first.label.length, maxLabelText);
+    });
+
+    test('a damaged table (missing cells, bad positions, no paragraph inside) never throws', () {
+      final doc = blocksToDocument([table()]);
+      final n = doc.root.children.single;
+      n.children.last.children.first.unlink();
+      n.insert(Node(type: 'table/cell', attributes: {'colPosition': 'x', 'rowPosition': -1}));
+      n.insert(Node(type: 'table/cell'));
+      n.children[1].unlink();
+      final out = documentToBlocks(doc, {});
+      expect(out.single.type, BlockType.table);
+      expect(out.single.cols, isNotEmpty);
+    });
+
+    test('a repeated width or a width outside the range is brought back into it', () {
+      final doc = blocksToDocument([table()]);
+      for (final c in doc.root.children.single.children.where((c) => c.attributes['rowPosition'] == 0)) {
+        c.updateAttributes({'width': 5.0});
+      }
+      expect(documentToBlocks(doc, {}).single.cols!.map((c) => c.w), [minColWidth, minColWidth]);
     });
   });
 
