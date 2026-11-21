@@ -1,5 +1,6 @@
 // The frame limiter: when it holds a frame back, and when the monitor says a device is too slow for the full rate.
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/performance/frame_pacer.dart';
 
@@ -58,6 +59,12 @@ void main() {
       expect(PowerMode.parse('30fps'), PowerMode.auto);
       expect(PowerMode.parse(''), PowerMode.auto);
     });
+  });
+
+  test('main() under a test binding (the integration smoke test) does not start a second binding', () {
+    final first = TestWidgetsFlutterBinding.ensureInitialized();
+    expect(PindrelBinding.ensureInitialized, returnsNormally);
+    expect(WidgetsBinding.instance, same(first));
   });
 
   group('PaceMonitor', () {
