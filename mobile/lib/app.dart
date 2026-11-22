@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'core/performance/frame_pacer.dart';
 
 import 'core/theme/app_theme.dart';
-import 'features/notes/presentation/pages/notes_gate.dart';
+import 'features/auth/presentation/pages/start_gate.dart';
 
 class PindrelApp extends StatelessWidget {
   /// [home] lets a test start on another screen (the account screen, for one).
-  const PindrelApp({super.key, this.home = const NotesGate()});
+  const PindrelApp({super.key, this.home = const StartGate()});
   final Widget home;
 
   @override

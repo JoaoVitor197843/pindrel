@@ -8,6 +8,8 @@ import 'package:mobile/core/theme/app_theme.dart';
 import 'package:mobile/features/notes/data/blocks.dart';
 import 'package:mobile/features/notes/data/notes_db.dart';
 import 'package:mobile/features/notes/data/workspace.dart';
+import 'package:mobile/features/auth/data/server_trust.dart';
+import 'package:mobile/features/auth/presentation/providers/servers_provider.dart';
 import 'package:mobile/features/notes/presentation/pages/dashboard_page.dart';
 import 'package:mobile/features/notes/presentation/pages/notes_gate.dart';
 import 'package:mobile/features/notes/presentation/providers/notes_provider.dart';
@@ -594,7 +596,7 @@ void main() {
   group('porta de entrada', () {
     testWidgets('abre as notas do aparelho', (tester) async {
       await tester.pumpWidget(ProviderScope(
-        overrides: [workspaceProvider.overrideWith((ref) async => ws)],
+        overrides: [keyValueStoreProvider.overrideWithValue(MemoryKeyValueStore()), workspaceProvider.overrideWith((ref) async => ws)],
         child: MaterialApp(theme: AppTheme.dark, home: const NotesGate()),
       ));
       await tester.pumpAndSettle();
@@ -604,6 +606,7 @@ void main() {
       var tries = 0;
       await tester.pumpWidget(ProviderScope(
         overrides: [
+          keyValueStoreProvider.overrideWithValue(MemoryKeyValueStore()),
           workspaceProvider.overrideWith((ref) async {
             if (tries++ == 0) throw StateError('disco cheio');
             return ws;

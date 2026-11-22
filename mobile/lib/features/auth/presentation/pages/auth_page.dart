@@ -5,7 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/api/auth_api.dart';
+import '../../../notes/presentation/pages/account_gate.dart';
 import '../../data/server_list_state.dart';
+import '../providers/auth_provider.dart';
 import '../providers/servers_provider.dart';
 import '../widgets/auth_desktop_panel.dart';
 import '../widgets/auth_form.dart';
@@ -22,8 +25,25 @@ class AuthPage extends StatelessWidget {
   /// Minimum width (in dp) to use the desktop layout.
   static const desktopBreakpoint = 840.0;
 
+  /// ...and the least height: a phone on its side is wide enough but only 300-430 dp tall, too little for the panel and
+  /// its footer, so it gets the single column.
+  static const desktopMinHeight = 520.0;
+
+  /// Below this height the header drops its tagline and scrolls away with the form.
+  static const compactHeight = 480.0;
+
   /// Called when tapping "Continuar offline neste dispositivo".
   final VoidCallback? onContinueOffline;
+
+  /// Signed in: the account's notes replace every screen (going "back" must not land on the login again).
+  static void _enter(BuildContext context, Account user) {
+    final server = ProviderScope.containerOf(context).read(authSessionProvider).server;
+    if (server == null) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(builder: (_) => AccountGate(user: user, server: server)),
+      (_) => false,
+    );
+  }
 
   static void _showAddServer(BuildContext context) {
     unawaited(AddServerDialog.show(context));
@@ -35,14 +55,17 @@ class AuthPage extends StatelessWidget {
       body: LayoutBuilder(
         builder: (context, constraints) {
           void addServer() => _showAddServer(context);
-          if (constraints.maxWidth >= desktopBreakpoint) {
+          void signedIn(Account user) => _enter(context, user);
+          if (constraints.maxWidth >= desktopBreakpoint && constraints.maxHeight >= desktopMinHeight) {
             return _DesktopLayout(
               onContinueOffline: onContinueOffline,
+              onSignedIn: signedIn,
               onAddServer: addServer,
             );
           }
           return _MobileLayout(
             onContinueOffline: onContinueOffline,
+            onSignedIn: signedIn,
             onAddServer: addServer,
           );
         },
@@ -52,13 +75,34 @@ class AuthPage extends StatelessWidget {
 }
 
 class _MobileLayout extends StatelessWidget {
-  const _MobileLayout({this.onContinueOffline, required this.onAddServer});
+  const _MobileLayout({this.onContinueOffline, this.onSignedIn, required this.onAddServer});
 
   final VoidCallback? onContinueOffline;
+  final void Function(Account)? onSignedIn;
   final VoidCallback onAddServer;
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).height < AuthPage.compactHeight;
+    if (compact) {
+      // the whole page scrolls, so the form gets the screen once the header is out of the way
+      return SingleChildScrollView(
+        child: Column(
+          children: [
+            AuthHeader(onAddServer: onAddServer, compact: true),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: AuthForm(onContinueOffline: onContinueOffline, onSignedIn: onSignedIn),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Column(
       children: [
         AuthHeader(onAddServer: onAddServer),
@@ -68,7 +112,7 @@ class _MobileLayout extends StatelessWidget {
             child: Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 480),
-                child: AuthForm(onContinueOffline: onContinueOffline),
+                child: AuthForm(onContinueOffline: onContinueOffline, onSignedIn: onSignedIn),
               ),
             ),
           ),
@@ -79,9 +123,10 @@ class _MobileLayout extends StatelessWidget {
 }
 
 class _DesktopLayout extends StatelessWidget {
-  const _DesktopLayout({this.onContinueOffline, required this.onAddServer});
+  const _DesktopLayout({this.onContinueOffline, this.onSignedIn, required this.onAddServer});
 
   final VoidCallback? onContinueOffline;
+  final void Function(Account)? onSignedIn;
   final VoidCallback onAddServer;
 
   @override
@@ -114,6 +159,7 @@ class _DesktopLayout extends StatelessWidget {
                       child: AuthForm(
                         showSubtitle: true,
                         onContinueOffline: onContinueOffline,
+                        onSignedIn: onSignedIn,
                       ),
                     ),
                   ),

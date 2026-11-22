@@ -81,6 +81,11 @@ List<SetCookie> parseSetCookies(String? header) {
   return cookies;
 }
 
+/// An answer over the size limit: it is dropped without being read to the end.
+class ReplyTooLarge implements Exception {
+  const ReplyTooLarge();
+}
+
 class ApiClient {
   ApiClient({
     required this.client,
@@ -100,6 +105,46 @@ class ApiClient {
         ...await _cookieHeader(),
       },
       body: input.writeToBuffer(),
+    );
+    await _saveResponseCookies(response);
+    return response;
+  }
+
+  /// Any method, protobuf in and bytes out. The whole call (headers and body) is bounded by [timeout], and an answer
+  /// bigger than [maxBytes] is cut off while it streams (it is not from a Pindrel server): [ReplyTooLarge].
+  Future<http.Response> send(
+    String method,
+    String path, {
+    GeneratedMessage? body,
+    String? token,
+    Duration timeout = const Duration(seconds: 15),
+    int maxBytes = 64 * 1024,
+  }) async {
+    final request = http.Request(method, Uri.parse('$baseUrl$path'));
+    request.headers['Accept'] = 'application/x-protobuf';
+    if (body != null) {
+      request.headers['Content-Type'] = 'application/x-protobuf';
+      request.bodyBytes = body.writeToBuffer();
+    }
+    if (token != null) request.headers['Authorization'] = 'Bearer $token';
+    request.headers.addAll(await _cookieHeader());
+
+    final streamed = await client.send(request).timeout(timeout);
+    final declared = streamed.contentLength;
+    if (declared != null && declared > maxBytes) throw const ReplyTooLarge();
+    final bytes = <int>[];
+    await for (final chunk in streamed.stream.timeout(timeout)) {
+      bytes.addAll(chunk);
+      if (bytes.length > maxBytes) throw const ReplyTooLarge();
+    }
+    final response = http.Response.bytes(
+      bytes,
+      streamed.statusCode,
+      headers: streamed.headers,
+      request: request,
+      isRedirect: streamed.isRedirect,
+      persistentConnection: streamed.persistentConnection,
+      reasonPhrase: streamed.reasonPhrase,
     );
     await _saveResponseCookies(response);
     return response;

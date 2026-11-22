@@ -27,9 +27,15 @@ class DashboardPage extends StatefulWidget {
     required this.ws,
     this.userName = 'Você',
     this.server = 'neste aparelho',
+    this.email,
+    this.onLogout,
   });
   final Workspace ws;
   final String userName, server;
+
+  /// Set when an account is signed in: the account settings then offer to leave it.
+  final String? email;
+  final VoidCallback? onLogout;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -63,9 +69,10 @@ class _DashboardPageState extends State<DashboardPage> {
     _open(p.id);
   }
 
-  void _account() => Navigator.of(
-    context,
-  ).push(MaterialPageRoute<void>(builder: (_) => const AuthPage()));
+  // signed in, "Conta e servidor" is the account section of the settings; otherwise it is the way to sign in
+  void _account() => widget.onLogout != null
+      ? _settings(SettingsSection.account)
+      : Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const AuthPage()));
 
   void _settings([SettingsSection section = SettingsSection.general]) =>
       showDialog<void>(
@@ -75,6 +82,8 @@ class _DashboardPageState extends State<DashboardPage> {
           section: section,
           userName: widget.userName,
           server: widget.server,
+          email: widget.email,
+          onLogout: widget.onLogout,
           onAccount: _account,
           onToast: (m) => Toast.show(context, m),
         ),
@@ -163,6 +172,7 @@ class _DashboardPageState extends State<DashboardPage> {
               onSettings: _settings,
               onData: () => _settings(SettingsSection.data),
               onAccount: _account,
+              onLogout: widget.onLogout,
             ),
             Expanded(
               child: _Main(
@@ -702,7 +712,7 @@ class _Empty extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Entrance(
     child: Container(
-      padding: const EdgeInsets.all(40),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40), // narrow phones need the room for the button
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(fieldRadius),
         border: Border.all(color: AppColors.border),

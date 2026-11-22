@@ -20,6 +20,7 @@ class NotesTopBar extends StatelessWidget {
     required this.onSettings,
     required this.onData,
     required this.onAccount,
+    this.onLogout,
   });
 
   final TextEditingController search;
@@ -27,6 +28,9 @@ class NotesTopBar extends StatelessWidget {
   final bool compact, showMenuButton;
   final String userName, server;
   final VoidCallback onMenu, onPalette, onSettings, onData, onAccount;
+
+  /// Set when an account is open: the menu then has "Sair da conta" one tap away.
+  final VoidCallback? onLogout;
 
   String get _initials {
     final words = userName
@@ -210,11 +214,22 @@ class NotesTopBar extends StatelessWidget {
               const PopupMenuDivider(),
               PopupMenuItem(
                 value: onAccount,
-                child: const Text(
-                  'Conta e servidor',
-                  style: TextStyle(fontSize: 14),
+                child: Text(
+                  onLogout == null ? 'Conta e servidor' : 'Conta',
+                  style: const TextStyle(fontSize: 14),
                 ),
               ),
+              if (onLogout != null)
+                PopupMenuItem(
+                  value: onLogout!,
+                  child: const Row(
+                    children: [
+                      Icon(Icons.logout, size: 16, color: AppColors.offlineText),
+                      SizedBox(width: 8),
+                      Text('Sair da conta', style: TextStyle(fontSize: 14, color: AppColors.offlineText)),
+                    ],
+                  ),
+                ),
             ],
             child: Container(
               height: 44,

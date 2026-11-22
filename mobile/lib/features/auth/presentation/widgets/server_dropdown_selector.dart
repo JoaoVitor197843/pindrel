@@ -135,7 +135,8 @@ class _ServerDropdownSelectorState
     await controller.revokeTrust(server);
     if (choice == RevokeChoice.repair && mounted) {
       // the announced one when there is one (it carries the plain address that tells where the secure side is)
-      final again = controller.current.available
+      final again =
+          controller.current.available
               .where((s) => s.id == server.id)
               .firstOrNull ??
           server;
@@ -232,54 +233,58 @@ class _SelectorButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final connection = state.connection;
     return Container(
-      constraints: BoxConstraints(maxWidth: maxWidth),
+      // 44 dp tall is the least a finger hits reliably; the width is the content's, up to maxWidth
+      constraints: BoxConstraints(maxWidth: maxWidth, minHeight: 44),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(color: AppColors.border),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Semantics(
-            label: switch (connection) {
-              ServerConnection.connected => 'Servidor conectado',
-              ServerConnection.disconnected => 'Servidor desconectado',
-              ServerConnection.none => 'Nenhum servidor',
-            },
-            child: PulsingDot(
-              key: const ValueKey('server-status-dot'),
-              color: connectionColor(connection),
-              diameter: dotDiameterFor(_fontSize),
-              pulsing: connection != ServerConnection.none,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Text(
-              selectorLabel(state).toUpperCase(),
-              overflow: TextOverflow.ellipsis,
-              style: AppText.mono(
-                _fontSize,
-                color: AppColors.text,
-                letterSpacing: 1,
+      child: Center(
+        widthFactor: 1,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              label: switch (connection) {
+                ServerConnection.connected => 'Servidor conectado',
+                ServerConnection.disconnected => 'Servidor desconectado',
+                ServerConnection.none => 'Nenhum servidor',
+              },
+              child: PulsingDot(
+                key: const ValueKey('server-status-dot'),
+                color: connectionColor(connection),
+                diameter: dotDiameterFor(_fontSize),
+                pulsing: connection != ServerConnection.none,
               ),
             ),
-          ),
-          AnimatedRotation(
-            key: const ValueKey('server-chevron'),
-            turns: open ? 0.5 : 0,
-            duration: MediaQuery.maybeDisableAnimationsOf(context) ?? false
-                ? Duration.zero
-                : const Duration(milliseconds: 200),
-            child: const Icon(
-              Icons.expand_more,
-              size: 16,
-              color: AppColors.textMuted,
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                selectorLabel(state).toUpperCase(),
+                overflow: TextOverflow.ellipsis,
+                style: AppText.mono(
+                  _fontSize,
+                  color: AppColors.text,
+                  letterSpacing: 1,
+                ),
+              ),
             ),
-          ),
-        ],
+            AnimatedRotation(
+              key: const ValueKey('server-chevron'),
+              turns: open ? 0.5 : 0,
+              duration: MediaQuery.maybeDisableAnimationsOf(context) ?? false
+                  ? Duration.zero
+                  : const Duration(milliseconds: 200),
+              child: const Icon(
+                Icons.expand_more,
+                size: 16,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -356,7 +361,8 @@ class _ServerMenuEntryState extends State<_ServerMenuEntry> {
                   onTap: state.connecting != null
                       ? null
                       : () => Navigator.pop(context, server),
-                  onRevoke: () => Navigator.pop(context, _RevokeRequest(server)),
+                  onRevoke: () =>
+                      Navigator.pop(context, _RevokeRequest(server)),
                 ),
             ],
             const Divider(height: 1, color: AppColors.border),
