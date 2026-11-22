@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Pindrel
+Comment=Notas auto-hospedadas
+Exec=@EXEC@
+Icon=com.pindrel.app
+Terminal=false
+Categories=Office;
+StartupWMClass=com.pindrel.app
