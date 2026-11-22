@@ -8,6 +8,8 @@ import 'package:mobile/main.dart' as app;
 /// does not crash"; the behaviour is covered by the widget tests in test/.
 ///
 /// Run with: fvm flutter test integration_test/app_smoke_test.dart -d DEVICE
+/// It opens the app's real data folder and expects no notes in it (as on the CI machines). On a machine with notes of its own
+/// point the data elsewhere first: `XDG_DATA_HOME=/tmp/smoke_data ... -d linux`.
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -38,19 +40,14 @@ void main() {
     }
 
     app.main();
+    // the first screen waits for the secure storage (it asks whether a session was kept; up to 4 s when the keyring is
+    // slow), so wait for the login to show instead of counting frames
+    for (var i = 0; i < 60 && find.text('Bem-vindo de volta').evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 300));
+    }
     await frames(tester);
 
-    // the app opens on the notes of the device (no server needed)
-    expect(find.text('Minhas páginas'), findsWidgets);
-    expect(find.text('Nenhuma página ainda'), findsOneWidget);
-
-    // the way to the account screen: "Conta e servidor" lives in the account chip's popup menu (tooltip
-    // "Menu da conta de ..."), on every window size; the sidebar button 'Abrir menu' is not involved
-    await tester.tap(find.byTooltip(RegExp('^Menu da conta')));
-    await frames(tester, 3);
-    await tester.tap(find.text('Conta e servidor'));
-    await frames(tester);
-
+    // the app opens on the login (the notes of the device are one tap away)
     expect(find.text('Pindrel'), findsWidgets);
     expect(find.text('Bem-vindo de volta'), findsOneWidget);
     expect(find.text('Continuar offline neste dispositivo'), findsOneWidget);
@@ -65,6 +62,12 @@ void main() {
     await tester.enterText(find.byType(TextField).first, 'smoke@teste.dev');
     await frames(tester, 2);
     expect(find.text('smoke@teste.dev'), findsOneWidget);
+
+    // the button warns about empty fields instead of calling a server (none was chosen here)
+    await tester.ensureVisible(find.widgetWithText(FilledButton, 'Entrar'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Entrar'));
+    await frames(tester, 2);
+    expect(find.text('Digite a senha.'), findsOneWidget);
 
     // login <-> register
     await tester.ensureVisible(find.text('Criar conta'));
@@ -81,8 +84,10 @@ void main() {
       find.text('Continuar offline neste dispositivo'),
     );
     await tester.tap(find.text('Continuar offline neste dispositivo'));
-    await frames(tester, 3);
-    // ...and goes back to the notes
+    // ...and opens the notes of the device: the SQLite file is opened now, so wait for the page instead of counting frames
+    for (var i = 0; i < 60 && find.text('Nenhuma página ainda').evaluate().isEmpty; i++) {
+      await tester.pump(const Duration(milliseconds: 300));
+    }
     expect(find.text('Nenhuma página ainda'), findsOneWidget);
 
     expect(

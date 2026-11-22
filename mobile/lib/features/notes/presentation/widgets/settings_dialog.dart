@@ -33,7 +33,11 @@ class SettingsDialog extends StatefulWidget {
     required this.server,
     required this.onAccount,
     required this.onToast,
+    this.email,
+    this.onLogout,
   });
+  final String? email;
+  final VoidCallback? onLogout;
   final Workspace ws;
   final SettingsSection section;
   final String userName, server;
@@ -412,27 +416,34 @@ class _SettingsDialogState extends State<SettingsDialog> {
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
         ),
         Text(widget.server, style: AppText.mono(12, letterSpacing: 0)),
+        if (widget.email != null) Text(widget.email!, style: const TextStyle(fontSize: 14, color: AppColors.textMuted)),
         const SizedBox(height: 12),
-        const Text(
-          'Suas notas ficam neste aparelho e funcionam sem servidor. Entrar em um servidor é opcional.',
-          style: TextStyle(
+        Text(
+          widget.onLogout == null
+              ? 'Suas notas ficam neste aparelho e funcionam sem servidor. Entrar em um servidor é opcional.'
+              : 'Suas notas desta conta ficam neste aparelho. A sincronização com o servidor ainda não existe.',
+          style: const TextStyle(
             fontSize: 14,
             color: AppColors.textMuted,
             height: 1.5,
           ),
         ),
-        const SizedBox(height: 16),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlineTextButton(
-            label: 'Conta e servidor',
-            icon: Icons.dns_outlined,
-            onPressed: () {
-              Navigator.pop(context);
-              widget.onAccount();
-            },
+        // signed in there is nothing to press here yet: leaving the account is in the account menu, and what belongs on this
+        // screen (name, password, deleting the account) waits for routes the server does not have
+        if (widget.onLogout == null) ...[
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlineTextButton(
+              label: 'Conta e servidor',
+              icon: Icons.dns_outlined,
+              onPressed: () {
+                Navigator.pop(context);
+                widget.onAccount();
+              },
+            ),
           ),
-        ),
+        ],
       ],
       SettingsSection.trash => [
         Text('Lixeira', style: AppText.serif(24)),

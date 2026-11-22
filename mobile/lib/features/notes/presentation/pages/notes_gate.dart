@@ -6,8 +6,8 @@ import '../../../../core/theme/app_theme.dart';
 import '../providers/notes_provider.dart';
 import 'dashboard_page.dart';
 
-/// Opens the notes database, then shows the dashboard. The app works with no
-/// server: the account screen is one step away, never in the way.
+/// Opens the notes database of the device and shows the dashboard: where "Continuar offline" leads. The app works with
+/// no server; the account screen is one step away ("Conta e servidor").
 class NotesGate extends ConsumerWidget {
   const NotesGate({super.key});
 

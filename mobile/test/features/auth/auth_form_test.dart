@@ -118,16 +118,19 @@ void main() {
     expect(find.text('Notas locais chegam em breve.'), findsOneWidget);
   });
 
-  testWidgets('o botão primário segue o modo e não faz nada ainda', (
+  testWidgets('o botão primário segue o modo e, com campos vazios, só avisa e não chama o servidor', (
     tester,
   ) async {
     await pumpForm(tester);
     expect(find.widgetWithText(FilledButton, 'Entrar'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Entrar'));
     await tester.pump();
+    expect(find.text('Informe um e-mail válido.'), findsOneWidget);
     await tester.tap(find.text('Criar conta').last);
     await tester.pump();
     expect(find.widgetWithText(FilledButton, 'Criar conta'), findsOneWidget);
+    // switching mode clears the old warning
+    expect(find.text('Informe um e-mail válido.'), findsNothing);
   });
 
   testWidgets('o subtítulo só aparece quando pedido e acompanha o modo', (

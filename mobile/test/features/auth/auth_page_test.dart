@@ -176,6 +176,7 @@ void main() {
     ) async {
       await pumpApp(tester, reduceMotion: false);
       for (var i = 0; i < 5; i++) {
+        await tester.ensureVisible(find.byKey(const ValueKey('toggle-mode')));
         await tester.tap(find.byKey(const ValueKey('toggle-mode')));
         await tester.pump(const Duration(milliseconds: 30));
       }
@@ -310,7 +311,8 @@ void main() {
     // The primary button also becomes "Criar conta"; the link becomes "Entrar".
     expect(find.text('Criar conta'), findsOneWidget);
 
-    await tester.tap(find.text('Entrar'));
+    await tester.ensureVisible(find.byKey(const ValueKey('toggle-mode')));
+    await tester.tap(find.byKey(const ValueKey('toggle-mode')));
     await tester.pump();
 
     expect(find.text('Bem-vindo de volta'), findsOneWidget);
