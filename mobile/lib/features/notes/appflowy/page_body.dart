@@ -21,6 +21,7 @@ import '../data/page_editor.dart';
 import 'context_menu.dart';
 import 'doc_codec.dart';
 import 'format_bar.dart';
+import 'inline_marks.dart' show deltaToMarks;
 import '../presentation/widgets/editor_chrome.dart' show Article;
 import 'pindrel_block_component.dart';
 
@@ -142,8 +143,68 @@ class _PageBodyState extends State<PageBody> {
     _scroll = EditorScrollController(editorState: _es);
     _fingerprint = blocksFingerprint(_ed.blocks);
     _sub = _es.transactionStream.listen((e) {
-      if (e.$1 == TransactionTime.after && !_replacing && e.$2.operations.isNotEmpty) _markDirty();
+      if (e.$1 == TransactionTime.after && !_replacing && e.$2.operations.isNotEmpty) {
+        // before the sync (microtasks run in order): what the sync would cut when it stores is cut here, where it is typed
+        scheduleMicrotask(() {
+          if (mounted) _clipToLimits(e.$2);
+        });
+        _markDirty();
+      }
     });
+  }
+
+  /// The longest text a node may hold: the same limits `documentToBlocks` cuts at when it stores the page, so what is
+  /// on the screen is what is kept (a paste of 3000 characters in a cell used to show 3000 and come back as 2000).
+  int _limitOf(Node n) {
+    final cell = n.parent;
+    if (cell?.type != TableCellBlockKeys.type) return maxText;
+    return cell!.attributes[TableCellBlockKeys.rowPosition] == 0 ? maxLabelText : maxCellText;
+  }
+
+  /// Cuts the end of every text the transaction touched that is over its limit.
+  void _clipToLimits(Transaction t) {
+    final seen = <Node>{};
+    void visit(Node? n) {
+      if (n == null || !seen.add(n)) return;
+      if (n.delta != null) _clipNode(n);
+      for (final c in n.children.toList()) {
+        visit(c);
+      }
+    }
+
+    for (final op in t.operations) {
+      if (op is InsertOperation) {
+        for (var i = 0; i < op.nodes.length; i++) {
+          visit(_es.getNodeAtPath([...op.path.sublist(0, op.path.length - 1), op.path.last + i]));
+        }
+      } else {
+        visit(_es.getNodeAtPath(op.path));
+      }
+    }
+  }
+
+  void _clipNode(Node n) {
+    final d = n.delta!;
+    final max = _limitOf(n);
+    if (d.length <= max && deltaToMarks(d).length <= max) return;
+    final plain = d.toPlainText();
+    // the markers (`**`, `[](..)`) count in the stored text, so cut the characters until the stored form fits
+    var keep = plain.length < max ? plain.length : max;
+    while (keep > 0) {
+      final cut = d.compose(Delta()..retain(keep)..delete(plain.length - keep));
+      final over = deltaToMarks(cut).length - max;
+      if (over <= 0) break;
+      keep = keep > over ? keep - over : 0;
+    }
+    // never leave half of a surrogate pair (an emoji)
+    if (keep > 0 && keep < plain.length && (plain.codeUnitAt(keep - 1) & 0xFC00) == 0xD800) keep--;
+    if (keep >= plain.length) return;
+    final tr = _es.transaction..deleteText(n, keep, plain.length - keep);
+    final sel = _es.selection;
+    if (sel != null && sel.isCollapsed && listEquals(sel.start.path, n.path) && sel.start.offset > keep) {
+      tr.afterSelection = Selection.collapsed(Position(path: n.path, offset: keep));
+    }
+    _es.apply(tr);
   }
 
   void _close() {

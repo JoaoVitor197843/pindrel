@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/features/auth/data/durable_store.dart';
 import 'package:mobile/features/auth/data/server_trust.dart';
+import 'package:path/path.dart' as p;
 
 class _Broken implements KeyValueStore {
   @override
@@ -52,7 +53,7 @@ void main() {
       for (var i = 0; i < 40; i++) {
         expect(await file.read('k$i'), 'v$i');
       }
-      expect(dir.listSync().whereType<File>().map((f) => f.path.split('/').last), ['pindrel-store.json'], reason: 'no temporary file is left');
+      expect(dir.listSync().whereType<File>().map((f) => p.basename(f.path)), ['pindrel-store.json'], reason: 'no temporary file is left');
     });
 
     test('arquivo danificado vira vazio e a próxima escrita o conserta', () async {

@@ -99,7 +99,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compilar (Windows)
-        run: cargo build --release --locked --features selfcert
+        run: cargo build --release --locked --features selfcert,tray
 
       - name: Empacotar
         shell: pwsh
