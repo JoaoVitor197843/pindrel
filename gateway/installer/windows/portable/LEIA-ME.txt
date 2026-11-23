@@ -1,0 +1,8 @@
+Pindrel Gateway (portatil)
+
+1. Dê dois cliques em iniciar.cmd. Na primeira vez ele cria gateway.env e abre para você editar.
+2. Ajuste UPSTREAMS (onde está a API) e, se quiser, SERVER_NAME e GATEWAY_PORT. Veja os comentários em gateway.env.example.
+3. Para parear aparelhos por HTTPS, tire o # das linhas TLS_AUTO, TLS_DIR e TLS_PORT.
+4. O Windows pode perguntar sobre o Firewall na primeira vez: permita em redes privadas.
+
+Para remover: apague esta pasta. Para a versão que instala, inicia com o Windows e tem desinstalador, baixe o instalador.

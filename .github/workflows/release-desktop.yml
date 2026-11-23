@@ -1,9 +1,9 @@
-# Windows and macOS builds of the app, plus a compile check of the iOS app. Flutter cannot cross-compile them from the
+# Windows and macOS builds of the app and the Windows build of the gateway (zip and installer), plus a compile check of the iOS app. Flutter cannot cross-compile them from the
 # Linux runner of the Forgejo, so GitHub Actions does it. This folder is on purpose: Forgejo reads .forgejo/workflows and
 # ignores .github, and GitHub reads only this one.
 #
 # - Push to main that touches the app: builds only, to catch a break before a release.
-# - Tag `v*` (the Forgejo push mirror sends it): builds, and attaches the zips to a GitHub release. The Forgejo
+# - Tag `v*` (the Forgejo push mirror sends it): builds, and attaches the zips (and the Windows installer) to a GitHub release. The Forgejo
 #   release-tag.yml waits for them there and copies them into its own release (.forgejo/scripts/github-assets.sh).
 # - No signing: Windows shows SmartScreen on the first run, macOS needs "Open" from the context menu, and the iOS job
 #   only compiles (--no-codesign): nothing it makes can be installed.
@@ -14,7 +14,7 @@ on:
     branches: [main]
     tags: ["v*"]
     # GitHub does not apply path filters to tags
-    paths: ["mobile/**", "shared/protos/**", ".github/workflows/release-desktop.yml"]
+    paths: ["mobile/**", "gateway/**", "shared/protos/**", ".github/workflows/release-desktop.yml"]
   workflow_dispatch:
 
 permissions:
@@ -54,18 +54,84 @@ jobs:
           case "$GITHUB_REF" in refs/tags/v*) ;; *) ver=0.0.0 ;; esac
           flutter build windows --release --build-name="$ver" --build-number="$GITHUB_RUN_NUMBER"
 
+      # two downloads of the same build: a zip to unpack anywhere (portable) and an installer that also brings the
+      # uninstaller (Inno Setup, mobile/windows/installer/pindrel.iss). The runner has Inno Setup; if an image ever drops it,
+      # it is fetched from Chocolatey.
       - name: Empacotar
         shell: pwsh
         working-directory: .
         run: |
           $tag = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME } else { 'ci' }
+          # the version of the installer takes digits only: v1.2.0-rc1 becomes 1.2.0
+          $ver = if ($tag -eq 'ci') { '0.0.0' } else { ($tag -replace '^v', '') -replace '-.*$', '' }
           New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive -Path 'mobile/build/windows/x64/runner/Release/*' -DestinationPath "dist/pindrel-app_${tag}_windows_amd64.zip"
+          $release = (Resolve-Path 'mobile/build/windows/x64/runner/Release').Path
+          Compress-Archive -Path "$release/*" -DestinationPath "dist/pindrel-app_${tag}_windows_amd64_portable.zip"
+
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+          $path = if ($iscc) { $iscc.Source } else { 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path $path)) {
+            choco install innosetup -y --no-progress
+            $path = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          }
+          & $path "/DAppVersion=$ver" "/DSourceDir=$release" "/O$((Resolve-Path dist).Path)" "/Fpindrel-app_${tag}_windows_amd64_installer" mobile/windows/installer/pindrel.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed: $LASTEXITCODE" }
+          Get-ChildItem dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist/*.zip
+          path: |
+            dist/*.zip
+            dist/*.exe
+          if-no-files-found: error
+
+  # The gateway for Windows, built with its own HTTPS (the `selfcert` feature: MSVC is the C compiler `ring` needs). Same two
+  # downloads as the app: a portable zip and an installer with its uninstaller (gateway/installer/windows).
+  gateway-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+        working-directory: gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compilar (Windows)
+        run: cargo build --release --locked --features selfcert
+
+      - name: Empacotar
+        shell: pwsh
+        working-directory: .
+        run: |
+          $tag = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME } else { 'ci' }
+          $ver = if ($tag -eq 'ci') { '0.0.0' } else { ($tag -replace '^v', '') -replace '-.*$', '' }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $release = (Resolve-Path 'gateway/target/release').Path
+          $stage = Join-Path $env:RUNNER_TEMP 'gateway-portable'
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item "$release/gateway.exe" $stage
+          Copy-Item gateway/installer/windows/gateway.env.example $stage
+          Copy-Item gateway/installer/windows/portable/* $stage
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/pindrel-gateway_${tag}_windows_amd64_portable.zip"
+
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+          $path = if ($iscc) { $iscc.Source } else { 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path $path)) {
+            choco install innosetup -y --no-progress
+            $path = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          }
+          & $path "/DAppVersion=$ver" "/DSourceDir=$release" "/O$((Resolve-Path dist).Path)" "/Fpindrel-gateway_${tag}_windows_amd64_installer" gateway/installer/windows/pindrel-gateway.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed: $LASTEXITCODE" }
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gateway-windows
+          path: |
+            dist/*.zip
+            dist/*.exe
           if-no-files-found: error
 
   macos:
@@ -143,7 +209,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, macos]
+    needs: [windows, gateway-windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -161,9 +227,9 @@ jobs:
         run: |
           pre=""
           case "$TAG" in *-*) pre="--prerelease" ;; esac
-          notes="Builds de Windows e macOS da versão $TAG (sem assinatura). As demais plataformas e os binários do gateway estão na release principal do Forgejo."
+          notes="Builds de Windows (app e gateway, em zip portátil e instalador) e macOS da versão $TAG (sem assinatura). As demais plataformas e os binários do gateway estão na release principal do Forgejo."
           # every download has its checksum next to it, like the ones the Forgejo makes
-          (cd dist && for f in *.zip; do sha256sum "$f" > "$f.sha256"; done)
+          (cd dist && for f in *.zip *.exe; do [ -f "$f" ] || continue; sha256sum "$f" > "$f.sha256"; done)
           # a re-run replaces the files instead of failing on the existing release
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
             || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "$notes" $pre

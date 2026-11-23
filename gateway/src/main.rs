@@ -1,6 +1,6 @@
 use std::{net::TcpStream, process::ExitCode, time::Duration};
 
-use pindrel_gateway::{config::Config, server};
+use pindrel_gateway::{config::Config, envfile, server};
 
 /// `gateway healthcheck`: exit 0 when the local listener accepts connections (Docker HEALTHCHECK, no wget needed).
 fn healthcheck() -> ExitCode {
@@ -34,13 +34,29 @@ async fn main() -> ExitCode {
     if std::env::args().nth(1).as_deref() == Some("healthcheck") {
         return healthcheck();
     }
-    let cfg = match Config::from_env() {
+    // `--config <file>` / GATEWAY_CONFIG: settings from a file; a variable that is really set still wins over it
+    let file = match envfile::path_from(std::env::args().skip(1), |k| std::env::var(k).ok()) {
+        None => Default::default(),
+        Some(path) => match envfile::load(std::path::Path::new(&path)) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("invalid configuration:\n - {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+    };
+    let cfg = match Config::from_lookup(|k| std::env::var(k).ok().or_else(|| file.get(k).cloned())) {
         Ok(c) => c,
         Err(errs) => {
             eprintln!("invalid configuration:\n - {}", errs.join("\n - "));
             return ExitCode::FAILURE;
         }
     };
+    // `--check`: the settings are valid, nothing was started (installers run it before enabling the service)
+    if std::env::args().skip(1).any(|a| a == "--check") {
+        println!("configuration ok");
+        return ExitCode::SUCCESS;
+    }
     let upstreams = cfg.upstreams.len();
     let running = match server::start(cfg).await {
         Ok(r) => r,

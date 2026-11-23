@@ -6,6 +6,7 @@ pub mod config;
 #[cfg(feature = "selfcert")]
 pub mod connect;
 pub mod discovery;
+pub mod envfile;
 pub mod handler;
 pub mod identity;
 pub mod known;

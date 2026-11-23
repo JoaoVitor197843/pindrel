@@ -45,6 +45,10 @@ jobs:
       - name: Análise — rustfmt
         run: cargo fmt --check
 
+      # install.sh / uninstall.sh of the Linux release, on a staged root: no user, no service, no root
+      - name: Instalador do Linux
+        run: sh installer/linux/test_install.sh
+
       # the plain gateway, and with every optional feature (HTTPS, its own CA, the pairing): both ship
       - name: Análise — clippy
         run: |
@@ -107,7 +111,7 @@ jobs:
       - name: Fuzz (40 s por alvo)
         run: |
           cargo +nightly fuzz build --fuzz-dir fuzz
-          for t in discovered_servers settings client_ip; do
+          for t in discovered_servers settings client_ip envfile; do
             mkdir -p "fuzz/corpus/$t"
             cargo +nightly fuzz run --fuzz-dir fuzz "$t" "fuzz/corpus/$t" "fuzz/seeds/$t" -- -max_total_time=40 -rss_limit_mb=1024
           done

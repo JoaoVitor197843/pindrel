@@ -77,3 +77,59 @@ fn serves_reports_healthy_and_stops_cleanly_on_sigterm() {
     assert!(exit.success(), "a clean shutdown exits with 0, got {exit}");
     assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
 }
+
+#[test]
+fn settings_come_from_a_file_and_the_real_environment_wins() {
+    let dir = std::env::temp_dir().join(format!("pindrel-cfg-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("gateway.env");
+    std::fs::write(&file, "# written by the installer\nGATEWAY_PORT=0\nMDNS_ENABLED=maybe\n").unwrap();
+    // the file alone: its bad values are reported, and UPSTREAMS (not in it) is still required
+    let out = gateway().arg("--config").arg(&file).output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        err.contains("GATEWAY_PORT") && err.contains("MDNS_ENABLED") && err.contains("UPSTREAMS"),
+        "{err}"
+    );
+    // a variable set for real replaces the file's value: with it fixed, only the file's other problem is left
+    let out = gateway().arg("--config").arg(&file).env("GATEWAY_PORT", "8200").output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!err.contains("GATEWAY_PORT") && err.contains("MDNS_ENABLED"), "{err}");
+    // GATEWAY_CONFIG does the same as the flag
+    let out = gateway().env("GATEWAY_CONFIG", &file).output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("MDNS_ENABLED"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_config_file_that_cannot_be_read_stops_the_start() {
+    let out = gateway()
+        .arg("--config")
+        .arg("/no/such/gateway.env")
+        .env("UPSTREAMS", "127.0.0.1:1")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot read"));
+}
+
+#[test]
+fn check_validates_the_settings_and_starts_nothing() {
+    let port = free_port();
+    let ok = gateway()
+        .arg("--check")
+        .env("UPSTREAMS", "127.0.0.1:1")
+        .env("GATEWAY_PORT", port.to_string())
+        .output()
+        .unwrap();
+    assert!(ok.status.success());
+    assert!(String::from_utf8_lossy(&ok.stdout).contains("configuration ok"));
+    assert!(
+        TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(300)).is_err(),
+        "nothing may listen"
+    );
+    let bad = gateway().arg("--check").env("GATEWAY_PORT", "0").output().unwrap();
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("UPSTREAMS"));
+}

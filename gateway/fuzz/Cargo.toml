@@ -38,3 +38,10 @@ path = "fuzz_targets/client_ip.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "envfile"
+path = "fuzz_targets/envfile.rs"
+test = false
+doc = false
+bench = false
