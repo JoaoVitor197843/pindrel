@@ -421,6 +421,9 @@ func TestDB_QuotaHoldsWhenManyUploadsStartTogether(t *testing.T) {
 }
 
 func TestDB_ServerOutOfSpaceRefusesNewUploads(t *testing.T) {
+	if !files.FreeSpaceIsReadable(t.TempDir()) {
+		t.Skip("this platform cannot read the free space of a disk (diskfree_other.go): the check is off by design, the server image is Linux")
+	}
 	e := newEnv(t, func(c *files.Config) { c.MinFreeBytes = 1 << 60 })
 	if _, rec := e.create(e.user(), 10, "x", false); rec.Code != http.StatusInsufficientStorage || errCode(rec) != "storage_full" {
 		t.Errorf("%d %q", rec.Code, errCode(rec))
