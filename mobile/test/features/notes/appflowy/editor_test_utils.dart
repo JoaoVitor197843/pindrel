@@ -2,9 +2,24 @@
 // (the IME) is not there in a widget test, so a test edits the document with transactions and fires the very same
 // shortcut events the editor would fire.
 
+import 'dart:io' show Platform;
+
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/features/notes/appflowy/page_body.dart';
+
+/// A [testWidgets] for a test that puts thousands of characters into one text (the limits are 2000 in a table cell and
+/// 20000 in a block, so they cannot be tested with less). `flutter test` runs them on a stack of 1 MB on Windows (8 MB
+/// on Linux and macOS) and the editor lays such a text out deeply enough to overflow it: the whole test process dies
+/// with "Stack Overflow", taking every test after it. The app itself is not affected: it ran 10000 and 20000 characters
+/// in a block, and 3000 pasted in a cell, by hand on Windows. So on Windows the test is skipped, and says so in its name.
+void testWidgetsLongText(String description, WidgetTesterCallback callback) {
+  testWidgets(
+    Platform.isWindows ? '$description [skipped on Windows: 1 MB stack of flutter_tester]' : description,
+    callback,
+    skip: Platform.isWindows,
+  );
+}
 
 PageBody bodyOf(WidgetTester t) => t.widget<PageBody>(find.byType(PageBody));
 EditorState editorOf(WidgetTester t) => bodyOf(t).controller.editorState!;

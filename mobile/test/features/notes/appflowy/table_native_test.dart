@@ -99,7 +99,7 @@ void main() {
       expect(body().single.rows![1]['c2'], 'r1c2');
     });
 
-    testWidgets('a cell with a line break and a very long text is kept, cut at the limit', (tester) async {
+    testWidgetsLongText('a cell with a line break and a very long text is kept, cut at the limit', (tester) async {
       await open(tester, [table()]);
       await caretInCell(tester, 1, 0);
       await typeInto(tester, cellAt(tester, 1, 0), 'a\nb');
