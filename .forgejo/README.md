@@ -114,7 +114,7 @@ O Flutter não compila para Windows nem macOS a partir do runner Linux do PC, en
 público `JoaoVitor197843/pindrel` é um **espelho de push** do Forgejo: ele leva só o git (branches e tags), nunca issues, PRs nem releases.
 
 1. Em push na `main` que mexe no app: o GitHub só compila Windows, macOS e iOS (sem assinatura), para pegar quebra cedo.
-2. Em tag `v*`: o espelho leva a tag, o GitHub compila e publica `pindrel-app_<tag>_windows_amd64.zip` e `pindrel-app_<tag>_macos_universal.zip` numa release dele.
+2. Em tag `v*`: o espelho leva a tag, o GitHub compila e publica `pindrel-app_<tag>_windows_amd64_portable.zip`, `pindrel-app_<tag>_windows_amd64_installer.exe` (Inno Setup, `mobile/windows/installer/pindrel.iss`) e `pindrel-app_<tag>_macos_universal.zip` numa release dele.
 3. No Forgejo, o job `desktop` do `release-tag.yml` roda **depois** do `publish`, espera esses arquivos aparecerem (até 45 min cada) e os anexa à release (`github-assets.sh` + `release.sh upload`). Se o GitHub atrasar ou cair, só esse job falha (`continue-on-error`) e a release principal já está pública.
 4. Sem assinatura: o Windows mostra o SmartScreen na primeira execução, e o macOS exige "Abrir" pelo menu de contexto. O iOS só compila; sem conta Apple paga não há o que instalar.
 

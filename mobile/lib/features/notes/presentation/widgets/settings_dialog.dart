@@ -12,7 +12,7 @@ import 'ui.dart';
 
 enum _Unsaved { keep, discard, save }
 
-enum SettingsSection { general, power, account, trash, data, ai }
+enum SettingsSection { general, power, account, trash, data, device, ai }
 
 const _nav = {
   SettingsSection.general: 'Geral',
@@ -20,6 +20,7 @@ const _nav = {
   SettingsSection.account: 'Conta',
   SettingsSection.trash: 'Lixeira',
   SettingsSection.data: 'Importar/Exportar',
+  SettingsSection.device: 'Dados do aparelho',
   SettingsSection.ai: 'IA (opcional)',
 };
 
@@ -35,8 +36,12 @@ class SettingsDialog extends StatefulWidget {
     required this.onToast,
     this.email,
     this.onLogout,
+    this.onEraseAll,
   });
   final String? email;
+
+  /// Erases everything the app keeps on this device and starts over; the section is hidden without it.
+  final VoidCallback? onEraseAll;
   final VoidCallback? onLogout;
   final Workspace ws;
   final SettingsSection section;
@@ -114,6 +119,29 @@ class _SettingsDialogState extends State<SettingsDialog> {
       case _Unsaved.keep || null:
         break;
     }
+  }
+
+  Future<void> _confirmErase() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Apagar todos os dados?', style: AppText.serif(20)),
+        content: const Text(
+          'As notas deste aparelho (e a cópia local das contas), a sessão e os servidores pareados serão apagados para sempre. Isso não pode ser desfeito.',
+        ),
+        actions: [
+          TextButton(key: const Key('erase-cancel'), onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          FilledButton(
+            key: const Key('erase-confirm'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.offline),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Apagar tudo'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) widget.onEraseAll?.call();
   }
 
   Future<void> _copyAll(String what) async {
@@ -243,6 +271,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     padding: const EdgeInsets.all(8),
     children: [
       for (final e in _nav.entries)
+        if (e.key != SettingsSection.device || widget.onEraseAll != null)
         Material(
           color: !stacked && _section == e.key
               ? AppColors.accent.withValues(alpha: 0.45)
@@ -505,6 +534,30 @@ class _SettingsDialogState extends State<SettingsDialog> {
         const Text(
           'Importar arquivos .md e .txt chega em breve.',
           style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+        ),
+      ],
+      SettingsSection.device => [
+        Text('Dados do aparelho', style: AppText.serif(24)),
+        const SizedBox(height: 16),
+        const Text(
+          'Tudo o que o Pindrel guarda aqui: as notas deste aparelho e as de cada conta, a sessão, os servidores pareados e as preferências. Nada é apagado nos servidores.',
+          style: TextStyle(fontSize: 14, color: AppColors.textMuted, height: 1.5),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Desinstalar o app também apaga esses dados, a não ser que o sistema ofereça manter os dados e você aceite. Antes de apagar, exporte o que quiser guardar.',
+          style: TextStyle(fontSize: 14, color: AppColors.textMuted, height: 1.5),
+        ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlineTextButton(
+            key: const Key('erase-device'),
+            label: 'Apagar todos os dados deste aparelho',
+            danger: true,
+            icon: Icons.delete_forever_outlined,
+            onPressed: _confirmErase,
+          ),
         ),
       ],
       SettingsSection.ai => [

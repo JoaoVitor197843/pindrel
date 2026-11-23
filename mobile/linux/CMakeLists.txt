@@ -104,6 +104,7 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/com.pindrel.app.png"
   "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/com.pindrel.app.desktop"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/install-desktop.sh"
+  "${CMAKE_CURRENT_SOURCE_DIR}/runner/resources/uninstall-desktop.sh"
   DESTINATION "${CMAKE_INSTALL_PREFIX}" COMPONENT Runtime)
 
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"

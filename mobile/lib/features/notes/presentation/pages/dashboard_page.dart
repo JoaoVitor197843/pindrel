@@ -8,6 +8,7 @@ import '../../data/note_page.dart';
 import '../../data/palette.dart';
 import '../../data/workspace.dart';
 import '../widgets/motion.dart';
+import 'erase_device.dart';
 import '../widgets/notes_sidebar.dart';
 import '../widgets/page_card.dart';
 import '../widgets/palette_dialog.dart';
@@ -85,6 +86,7 @@ class _DashboardPageState extends State<DashboardPage> {
           email: widget.email,
           onLogout: widget.onLogout,
           onAccount: _account,
+          onEraseAll: () => eraseThisDevice(context),
           onToast: (m) => Toast.show(context, m),
         ),
       );

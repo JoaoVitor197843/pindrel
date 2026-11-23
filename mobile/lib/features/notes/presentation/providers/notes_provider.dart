@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../data/device_data.dart';
 import '../../data/notes_db.dart';
 import '../../data/workspace.dart';
 
@@ -30,3 +32,8 @@ final accountWorkspaceProvider = FutureProvider.autoDispose.family<Workspace, St
   ref.onDispose(ws.dispose);
   return ws;
 });
+
+/// What can be erased from this device. Tests replace it with a temporary folder.
+final deviceDataProvider = Provider<DeviceData>(
+  (ref) => DeviceData(directory: getApplicationSupportDirectory, clearSecure: () => const FlutterSecureStorage().deleteAll()),
+);

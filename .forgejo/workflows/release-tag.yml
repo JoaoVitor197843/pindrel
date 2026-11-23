@@ -85,8 +85,10 @@ jobs:
           for pair in x86_64-unknown-linux-musl:amd64 aarch64-unknown-linux-musl:arm64; do
             target=${pair%:*} arch=${pair#*:}
             cargo build --release --locked --target "$target"
+            # the program and, beside it, the installer: `sudo ./install.sh` makes the systemd service
             tar -czf "/tmp/assets/pindrel-gateway_${GITHUB_REF_NAME}_linux_${arch}.tar.gz" \
-              -C "target/$target/release" gateway
+              -C "target/$target/release" gateway \
+              -C "$PWD/installer/linux" install.sh uninstall.sh pindrel-gateway.service gateway.env.example
           done
 
       - name: Anexar à release
@@ -212,12 +214,14 @@ jobs:
       MIRROR_REPO: JoaoVitor197843/pindrel
     steps:
       - uses: actions/checkout@v4
-      - name: Windows e macOS (construídos no GitHub)
+      - name: Windows e macOS (construídos no GitHub, app e gateway)
         run: |
           mkdir -p /tmp/assets
           sh .forgejo/scripts/github-assets.sh "$MIRROR_REPO" "$GITHUB_REF_NAME" /tmp/assets \
-            "pindrel-app_${GITHUB_REF_NAME}_windows_amd64.zip" "pindrel-app_${GITHUB_REF_NAME}_macos_universal.zip"
-          sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*.zip
+            "pindrel-app_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-app_${GITHUB_REF_NAME}_windows_amd64_installer.exe" \
+            "pindrel-app_${GITHUB_REF_NAME}_macos_universal.zip" \
+            "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_installer.exe"
+          sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*
 
   # The public downloads page is the GitHub release: it gets a copy of everything the Forgejo release holds (notes and
   # files; the Windows and macOS zips are already there, they come from GitHub). It comes after `desktop` because that

@@ -21,10 +21,13 @@ Cada versão fica na página de **[Releases](https://github.com/JoaoVitor197843/
 | Arquivo | O que é |
 | --- | --- |
 | `pindrel_<versão>_android.apk` | app Android |
-| `pindrel-app_<versão>_windows_amd64.zip` | app Windows (descompacte e execute `Pindrel.exe`) |
+| `pindrel-app_<versão>_windows_amd64_installer.exe` | app Windows com instalador e desinstalador (instala só para você, sem administrador; aparece em "Aplicativos instalados") |
+| `pindrel-app_<versão>_windows_amd64_portable.zip` | app Windows portátil (descompacte e execute `Pindrel.exe`; para remover, apague a pasta) |
 | `pindrel-app_<versão>_macos_universal.zip` | app macOS (Apple Silicon e Intel) |
 | `pindrel-app_<versão>_linux_amd64.tar.gz` | app Linux |
-| `pindrel-gateway_<versão>_linux_amd64.tar.gz` e `..._arm64.tar.gz` | gateway para Linux (x86_64 e Raspberry Pi de 64 bits) |
+| `pindrel-gateway_<versão>_linux_amd64.tar.gz` e `..._arm64.tar.gz` | gateway para Linux (x86_64 e Raspberry Pi de 64 bits). Descompacte e rode `sudo ./install.sh` para instalar como serviço do systemd (`sudo ./uninstall.sh` remove; `--purge` apaga também a configuração) |
+| `pindrel-gateway_<versão>_windows_amd64_installer.exe` | gateway para Windows com instalador e desinstalador (pergunta o nome, a porta e onde está a API; pode iniciar com o Windows e ativar o HTTPS) |
+| `pindrel-gateway_<versão>_windows_amd64_portable.zip` | gateway para Windows portátil (edite `gateway.env` e rode `iniciar.cmd`) |
 
 Os apps **ainda não são assinados**: o Windows mostra o aviso do SmartScreen na primeira execução ("Mais informações" e "Executar assim mesmo"), e o macOS pede para abrir pelo menu de contexto (botão direito em "Abrir"). No Android, é preciso permitir a instalação de fontes desconhecidas.
 
