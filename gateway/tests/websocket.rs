@@ -14,7 +14,7 @@ const HANDSHAKE: &str = "GET /ws HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nU
 
 /// Opens a tunnel and returns the socket after the 101 head, plus the head.
 async fn open(addr: std::net::SocketAddr, request: &str) -> (TcpStream, String) {
-    let mut s = TcpStream::connect(addr).await.unwrap();
+    let mut s = TcpStream::connect(reach(addr)).await.unwrap();
     s.write_all(request.as_bytes()).await.unwrap();
     let mut head = Vec::new();
     let mut b = [0u8; 1];
