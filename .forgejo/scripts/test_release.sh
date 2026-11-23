@@ -4,6 +4,7 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
+. "$here/portable-env.sh" && portable_env "$work" # python3, UTF-8: see portable-env.sh
 python3 "$here/fake_forgejo.py" "$work/port" s3cret &
 server=$!
 trap 'kill $server 2>/dev/null; rm -rf "$work"' EXIT
@@ -37,7 +38,7 @@ id=$($R create v1.0.0 "$work/notes.md")
 check "create makes a draft release and prints its id" test "$id" = 1
 check "the draft is not public and not a pre-release" test "$(field 'd["1"]["draft"], d["1"]["prerelease"]')" = "True False"
 check "notes with quotes, backslashes, newlines and accents arrive intact" \
-  test "$(field 'd["1"]["body"] == open("'"$work"'/notes.md").read()')" = True
+  test "$(field 'd["1"]["body"] == open("'"$(native_path "$work")"'/notes.md", encoding="utf-8").read()')" = True
 check "create twice reuses the release" test "$($R create v1.0.0 "$work/notes.md")" = 1
 check "a tag with a dash is a pre-release" sh -c "$R create v1.1.0-rc1 '$work/notes.md' >/dev/null && test \"\$(curl -s http://127.0.0.1:$(cat "$work/port")/_state | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"2\"][\"prerelease\"])')\" = True"
 

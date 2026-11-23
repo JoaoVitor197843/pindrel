@@ -7,9 +7,18 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/state"
+. "$here/../.forgejo/scripts/portable-env.sh" && portable_env "$work" # python3, UTF-8: see portable-env.sh
 
 cp "$here/fake_docker.py" "$work/bin/docker"
 chmod +x "$work/bin/docker"
+
+# `flock` is util-linux: macOS and Git for Windows do not ship it, and update.sh needs the command to exist. Without it, a
+# stand-in that always gets the lock lets every test of the update flow run; the one test of two updates at once needs a
+# lock that really excludes, and is skipped there (see 12 below).
+if ! have_flock; then
+  printf '#!/bin/sh\nexit 0\n' >"$work/bin/flock"
+  chmod +x "$work/bin/flock"
+fi
 
 # the project tree stays outside the real repository: the script does `cd ..` from where it is
 mkdir -p "$work/proj/deploy"
@@ -152,12 +161,16 @@ reset A A B B 3; run
 check "três réplicas: todas na versão nova, sempre com 2+ servindo" test "$(api_images)" = "B B B" -a "$(min_serving)" -ge 2
 
 # 12. two updates at the same time: the second gives up without touching anything
-reset A A B B
-( exec 9>"$work/state/lock"; flock 9; sleep 3 ) &
-holder=$!
-sleep 0.5; run
-kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
-check "atualização concorrente é ignorada" test "$rc" = 0 -a "$(ups)" = 0 -a ! -s "$S/calls"
+if have_flock; then
+  reset A A B B
+  ( exec 9>"$work/state/lock"; flock 9; sleep 3 ) &
+  holder=$!
+  sleep 0.5; run
+  kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
+  check "atualização concorrente é ignorada" test "$rc" = 0 -a "$(ups)" = 0 -a ! -s "$S/calls"
+else
+  echo "PULADO - atualização concorrente é ignorada: este sistema não tem o flock do util-linux, e o teste precisa de um lock de verdade"
+fi
 
 # 13. compose files: default, or the environment's COMPOSE_FILE, or the .env's (server with its own tweaks)
 reset A A B B; run

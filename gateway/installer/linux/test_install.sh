@@ -5,6 +5,13 @@ set -u
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+# install.sh gives owners and modes (640, 750...) to what it installs, and this test reads them back: that only exists on a
+# file system with POSIX permissions and the GNU `stat` (Linux), not on Windows, where this installer has no use (it has its own).
+. "$here/../../../.forgejo/scripts/portable-env.sh"
+if ! posix_modes "$work"; then
+  echo "PULADO - este sistema de arquivos não guarda permissões POSIX (chmod 640 não volta como 640): o install.sh dá dono e modo aos arquivos, e é isso que o teste confere. Rode em Linux."
+  exit 0
+fi
 fails=0 total=0
 
 check() { # check <what> <command...>
