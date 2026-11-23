@@ -1,0 +1,20 @@
+#!/bin/sh
+# Refuses to push main or dev while their branch-specific files are not their own (compose.yml, .env.example, the debug
+# theme override). It reads what the push CARRIES (the commit), not the working tree, so a clean checkout of another branch
+# does not matter. Rules and reasons: .forgejo/scripts/check-branch-files.sh.
+# Turn it on once per clone: `make setup-clone` (git config core.hooksPath .githooks).
+root=$(git rev-parse --show-toplevel) || exit 0
+zero=0000000000000000000000000000000000000000
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main) variant=release ;;
+    refs/heads/dev) variant=dev ;;
+    *) continue ;;
+  esac
+  [ "$local_sha" = "$zero" ] && continue # deleting the branch: nothing is carried
+  if ! sh "$root/.forgejo/scripts/check-branch-files.sh" "$variant" "$local_sha"; then
+    echo "push de ${remote_ref#refs/heads/} RECUSADO: ele não leva os arquivos da variante $variant (veja acima)." >&2
+    exit 1
+  fi
+done
+exit 0

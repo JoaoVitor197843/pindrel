@@ -1,0 +1,31 @@
+# main and dev must differ in a few files (compose.yml, .env.example, the debug theme override): main requires the secrets and
+# ships the stub, dev has defaults and the override. A merge takes the other branch's version of a file that only one side
+# changed, so this checks, on every push, that each branch still holds ITS OWN files. Rules: .forgejo/scripts/check-branch-files.sh.
+# It also gates the release: the `images` job of release.yml runs the same check on main before asking for the images.
+name: branch-files
+
+on:
+  workflow_call:
+  push:
+    branches: [main, dev]
+
+jobs:
+  check:
+    runs-on: build
+    container:
+      image: ci-pc:1
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Testar a própria verificação
+        run: sh .forgejo/scripts/test_check_branch_files.sh
+
+      - name: Os arquivos de cada ramo são os dele
+        run: |
+          case "${GITHUB_REF_NAME:-}" in
+            main) variant=release ;;
+            dev) variant=dev ;;
+            *) echo "ramo ${GITHUB_REF_NAME:-?}: sem variante própria, nada a verificar"; exit 0 ;;
+          esac
+          sh .forgejo/scripts/check-branch-files.sh "$variant"

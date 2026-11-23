@@ -43,6 +43,9 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      # no image from a main that holds dev's files (default secrets, the debug override): see branch-files.yml
+      - name: Os arquivos da main são os da main
+        run: sh .forgejo/scripts/check-branch-files.sh release
       - name: Pedir o build das imagens ao GitHub
         env:
           GH_RELEASE_TOKEN: ${{ secrets.GH_RELEASE_TOKEN }}

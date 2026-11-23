@@ -1,3 +1,9 @@
-# the release branch keeps its own stub of the debug theme override; merges into it never replace it
-# (needs: git config merge.ours.driver true, in each clone)
+# main and dev keep their OWN version of these files (main: secrets required, debug stub; dev: defaults, debug override).
+# `merge=ours` keeps the version of the branch being merged INTO when both sides changed the file, but only in a clone that
+# has `git config merge.ours.driver true` (`make setup-clone`) and NOT when only one side changed it: git then takes that
+# side's version without asking. So the real guard is not here but in .forgejo/scripts/check-branch-files.sh, run by the
+# pre-push hook (.githooks), by the branch-files workflow and by the images job of release.yml.
+compose.yml merge=ours
+.env.example merge=ours
 web/src/lib/logo/debug.ts merge=ours
+web/src/lib/logo/debug.test.ts merge=ours
