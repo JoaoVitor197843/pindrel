@@ -457,7 +457,7 @@ async fn read_until_closed(s: &mut TcpStream, limit: Duration) -> Option<Vec<u8>
 async fn a_client_that_never_finishes_its_headers_is_dropped() {
     let a = Backend::start("a").await;
     let gw = gateway_with(&[&a], |c| c.header_timeout = Duration::from_millis(300)).await;
-    let mut s = TcpStream::connect(gw.addr).await.unwrap();
+    let mut s = TcpStream::connect(reach(gw.addr)).await.unwrap();
     s.write_all(b"GET /x HTTP/1.1\r\nHost: x\r\nX-Slow: ").await.unwrap(); // never ends the header block
     assert!(
         read_until_closed(&mut s, Duration::from_secs(3)).await.is_some(),
@@ -471,10 +471,10 @@ async fn the_connection_limit_holds_new_clients_until_one_leaves() {
     let a = Backend::start("a").await;
     let gw = gateway_with(&[&a], |c| c.max_connections = 2).await;
     let (c1, _c2) = (
-        TcpStream::connect(gw.addr).await.unwrap(),
-        TcpStream::connect(gw.addr).await.unwrap(),
+        TcpStream::connect(reach(gw.addr)).await.unwrap(),
+        TcpStream::connect(reach(gw.addr)).await.unwrap(),
     );
-    let mut c3 = TcpStream::connect(gw.addr).await.unwrap(); // the kernel accepts it, the gateway does not serve it yet
+    let mut c3 = TcpStream::connect(reach(gw.addr)).await.unwrap(); // the kernel accepts it, the gateway does not serve it yet
     c3.write_all(b"GET /x HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
     assert!(
         read_until_closed(&mut c3, Duration::from_millis(500)).await.is_none(),
@@ -502,7 +502,7 @@ async fn one_client_cannot_hold_all_the_connections_and_gets_its_slots_back() {
     let mut held = Vec::new();
     let mut refused = 0;
     for _ in 0..20 {
-        let mut s = TcpStream::connect(gw.addr).await.unwrap();
+        let mut s = TcpStream::connect(reach(gw.addr)).await.unwrap();
         match read_until_closed(&mut s, Duration::from_millis(100)).await {
             None => held.push(s),
             Some(_) => refused += 1,
@@ -513,7 +513,7 @@ async fn one_client_cannot_hold_all_the_connections_and_gets_its_slots_back() {
     drop(held.pop());
     let mut ok = false;
     for _ in 0..20 {
-        let mut s = TcpStream::connect(gw.addr).await.unwrap();
+        let mut s = TcpStream::connect(reach(gw.addr)).await.unwrap();
         s.write_all(b"GET /x HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
             .await
             .unwrap();
@@ -540,7 +540,7 @@ async fn a_declared_proxy_is_not_held_to_the_per_client_connection_limit() {
     .await;
     let mut held = Vec::new();
     for _ in 0..5 {
-        let mut s = TcpStream::connect(gw.addr).await.unwrap();
+        let mut s = TcpStream::connect(reach(gw.addr)).await.unwrap();
         s.write_all(b"GET /x HTTP/1.1\r\nHost: x\r\n\r\n").await.unwrap();
         let mut buf = [0u8; 12];
         time::timeout(Duration::from_secs(2), s.read_exact(&mut buf))
@@ -597,7 +597,7 @@ async fn shutdown_lets_in_flight_requests_finish_and_stops_accepting() {
         "the request that was running must complete"
     );
     assert!(t.elapsed() < Duration::from_secs(4));
-    assert!(TcpStream::connect(addr).await.is_err(), "nothing listens after shutdown");
+    assert!(TcpStream::connect(reach(addr)).await.is_err(), "nothing listens after shutdown");
 }
 
 #[tokio::test]

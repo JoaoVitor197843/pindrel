@@ -4,6 +4,7 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
+. "$here/portable-env.sh" && portable_env "$work" # python3, UTF-8: see portable-env.sh
 python3 "$here/fake_forgejo.py" "$work/fport" fg-token &
 p1=$!
 python3 "$here/fake_github_api.py" "$work/gport" gh-token &
@@ -46,7 +47,7 @@ check "and creates nothing there" test "$(gfield 'len(d)')" = 0
 
 tag_on_github v1.0.0
 check "copies the release when the tag is on GitHub" quiet $S v1.0.0
-check "the notes are the Forgejo ones, intact" test "$(rel v1.0.0 'r["body"] == open("'"$work"'/notes.md").read()')" = True
+check "the notes are the Forgejo ones, intact" test "$(rel v1.0.0 'r["body"] == open("'"$(native_path "$work")"'/notes.md", encoding="utf-8").read()')" = True
 check "it is a public release, not a pre-release" test "$(rel v1.0.0 'r["draft"], r["prerelease"]')" = "False False"
 check "the APK and the gateway arrive, with their .sha256" \
   test "$(rel v1.0.0 'sorted(a["name"] for a in r["assets"])')" = "['pindrel-gateway_v1.0.0_linux_arm64.tar.gz', 'pindrel-gateway_v1.0.0_linux_arm64.tar.gz.sha256', 'pindrel_v1.0.0_android.apk', 'pindrel_v1.0.0_android.apk.sha256']"

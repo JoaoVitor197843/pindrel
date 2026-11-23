@@ -4,6 +4,7 @@
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d)
+. "$here/portable-env.sh" && portable_env "$work" # python3, UTF-8: see portable-env.sh
 cat >"$work/fake_github.py" <<'PY'
 import json, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

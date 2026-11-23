@@ -171,13 +171,17 @@ async fn a_gateway_with_no_room_says_try_again_in_a_moment() {
     let addr = gw.addr;
     let first = tokio::spawn(async move { put(addr, "PUT", "/files/uploads/u/0", 1 << 20).await.status });
     time::sleep(Duration::from_millis(200)).await;
-    let busy = put(gw.addr, "PUT", "/files/uploads/u/1", 1 << 20).await;
+    // Just over the 64 KiB under which a body skips the budget, not 1 MiB: the gateway answers and closes while the client is
+    // still sending, and Windows throws away an answer it already got when the connection is reset under it (os error 10053
+    // before the client reads the 503). A body this size fits in the socket buffers, so the client has finished sending.
+    let waiting = 65 << 10;
+    let busy = put(gw.addr, "PUT", "/files/uploads/u/1", waiting).await;
     assert_eq!(busy.status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(busy.header("retry-after"), "1");
     assert_eq!(error_of(&busy).code, "server_busy");
     assert_eq!(first.await.unwrap(), StatusCode::OK);
     // once the room is back, the same request goes through
-    assert_eq!(put(gw.addr, "PUT", "/files/uploads/u/1", 1 << 20).await.status, StatusCode::OK);
+    assert_eq!(put(gw.addr, "PUT", "/files/uploads/u/1", waiting).await.status, StatusCode::OK);
     gw.shutdown().await;
 }
 
@@ -323,7 +327,7 @@ async fn a_download_streams_and_is_not_cut_by_the_time_to_first_byte_limit() {
     cfg.upstream_timeout = Duration::from_secs(1);
     let gw = server::start_with(cfg, None).await.unwrap();
     let started = Instant::now();
-    let mut s = TcpStream::connect(gw.addr).await.unwrap();
+    let mut s = TcpStream::connect(reach(gw.addr)).await.unwrap();
     s.write_all(b"GET /files/big HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
         .await
         .unwrap();
@@ -359,15 +363,19 @@ async fn a_piece_gets_a_long_window_to_arrive_and_other_bodies_do_not() {
     })
     .await;
     async fn slow(gw: SocketAddr, method: &str, path: &str) -> String {
-        let mut s = TcpStream::connect(gw).await.unwrap();
+        let mut s = TcpStream::connect(reach(gw)).await.unwrap();
         s.write_all(format!("{method} {path} HTTP/1.1\r\nhost: x\r\ncontent-length: 10\r\nconnection: close\r\n\r\nabcde").as_bytes())
             .await
             .unwrap();
-        time::sleep(Duration::from_millis(900)).await;
-        let _ = s.write_all(b"fghij").await;
-        let mut out = String::new();
-        let _ = s.read_to_string(&mut out).await;
-        out
+        // What the gateway says to a body that is too slow is read BEFORE the rest is written: writing to a socket the
+        // gateway already closed makes Windows throw away the answer it had received. A piece that still has time gets no
+        // answer yet, so the wait runs out and the rest is sent, as before.
+        let mut out = Vec::new();
+        if time::timeout(Duration::from_millis(900), s.read_to_end(&mut out)).await.is_err() {
+            let _ = s.write_all(b"fghij").await;
+            let _ = s.read_to_end(&mut out).await;
+        }
+        String::from_utf8_lossy(&out).into_owned()
     }
     let piece = slow(gw.addr, "PUT", "/files/uploads/u/0").await;
     assert!(piece.starts_with("HTTP/1.1 200") && piece.ends_with("abcdefghij"), "{piece}");

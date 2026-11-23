@@ -59,7 +59,7 @@ void main() {
     db.dispose();
   });
 
-  testWidgets('a paste over the limit of a cell is cut on the screen, not only when it is stored', (tester) async {
+  testWidgetsLongText('a paste over the limit of a cell is cut on the screen, not only when it is stored', (tester) async {
     await open(tester, [table()]);
     await paste(tester, cellAt(tester, 1, 1), words(3000));
     expect(cellAt(tester, 1, 1).delta!.length, maxCellText);
@@ -73,14 +73,14 @@ void main() {
     expect(body().single.cols![0].label.length, maxLabelText);
   });
 
-  testWidgets('a text block is held to the block limit', (tester) async {
+  testWidgetsLongText('a text block is held to the block limit', (tester) async {
     await open(tester, [Block('p', BlockType.paragraph, text: 'oi')]);
     await paste(tester, editorOf(tester).document.root.children.first, words(maxText + 500));
     expect(editorOf(tester).document.root.children.first.delta!.length, maxText);
     expect(body().first.text!.length, maxText);
   });
 
-  testWidgets('under the limit nothing is cut and the caret is not moved', (tester) async {
+  testWidgetsLongText('under the limit nothing is cut and the caret is not moved', (tester) async {
     await open(tester, [table()]);
     final cell = cellAt(tester, 1, 0);
     await paste(tester, cell, words(1500));
@@ -88,7 +88,7 @@ void main() {
     expect(editorOf(tester).selection!.start.offset, 1501);
   });
 
-  testWidgets('the markers count: bold text near the limit is cut so that the stored form fits', (tester) async {
+  testWidgetsLongText('the markers count: bold text near the limit is cut so that the stored form fits', (tester) async {
     await open(tester, [table()]);
     final es = editorOf(tester);
     final cell = cellAt(tester, 1, 0);

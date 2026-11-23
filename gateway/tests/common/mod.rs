@@ -24,6 +24,17 @@ use pindrel_gateway::{
 use prost::Message;
 use tokio::{io::AsyncReadExt, net::TcpListener, task::JoinHandle, time};
 
+/// Where a raw socket reaches a gateway: it listens on every interface and reports `0.0.0.0:port`, an address Linux lets a
+/// client connect to (it means "this machine") and Windows refuses (WSAEADDRNOTAVAIL, os error 10049). The HTTP client of
+/// these tests builds its URL from `127.0.0.1` already; the tests that open a plain `TcpStream` go through here.
+pub fn reach(addr: SocketAddr) -> SocketAddr {
+    if addr.ip().is_unspecified() {
+        SocketAddr::new(std::net::Ipv4Addr::LOCALHOST.into(), addr.port())
+    } else {
+        addr
+    }
+}
+
 #[derive(Clone, PartialEq, Message)]
 pub struct ErrorHttp {
     #[prost(string, tag = "1")]

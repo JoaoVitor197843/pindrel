@@ -140,7 +140,7 @@ async fn https(rig: &Rig, src: Option<Ipv4Addr>, method: &str, path: &str, heade
 /// One request on the plain port (where a page of the connection page lives), from the address `src`.
 async fn plain(rig: &Rig, src: Option<Ipv4Addr>, method: &str, path: &str, headers: &[(&str, &str)], body: &[u8]) -> (u16, String) {
     let mut s = match src {
-        None => TcpStream::connect(rig.gw.addr).await.unwrap(),
+        None => TcpStream::connect(reach(rig.gw.addr)).await.unwrap(),
         Some(ip) => {
             let socket = TcpSocket::new_v4().unwrap();
             socket.bind((ip, 0).into()).unwrap();

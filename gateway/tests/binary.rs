@@ -1,9 +1,11 @@
 //! The compiled `gateway` binary: configuration errors, healthcheck and signal handling.
+use std::{net::TcpStream, process::Command, time::Duration};
+// only the signal tests (unix: SIGTERM, SIGINT) read the log of the child, so only there are these used
+#[cfg(unix)]
 use std::{
     io::{BufRead, BufReader},
-    net::TcpStream,
-    process::{Command, Stdio},
-    time::{Duration, Instant},
+    process::Stdio,
+    time::Instant,
 };
 
 fn gateway() -> Command {
