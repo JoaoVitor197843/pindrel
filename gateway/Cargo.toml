@@ -13,6 +13,12 @@ path = "src/lib.rs"
 name = "gateway"
 path = "src/main.rs"
 
+# the tray icon of the Windows gateway (src/tray.rs): its own small program, built only with `--features tray`
+[[bin]]
+name = "pindrel-gateway-tray"
+path = "src/tray.rs"
+required-features = ["tray"]
+
 # Few, small dependencies on purpose: the whole process must stay in a few MB of RAM.
 [dependencies]
 bytes = "1"
@@ -42,7 +48,21 @@ tokio = { version = "1", default-features = false, features = ["rt", "net", "tim
 netdev = { version = "0.46", default-features = false }
 getrandom = "0.3"
 
+# only the tray icon uses it (Windows, feature `tray`); the version already in the tree through the network crates
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", default-features = false, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
 [features]
+tray = []
 tls = ["dep:rustls", "dep:tokio-rustls", "dep:rustls-pki-types", "hyper/http2", "hyper-util/http2", "hyper-util/server-auto"]
 selfcert = ["tls", "dep:rcgen", "dep:time", "dep:ring", "dep:qrcodegen"]
 
