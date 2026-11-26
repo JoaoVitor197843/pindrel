@@ -124,9 +124,11 @@ class PairedServer {
     if (json is! Map) return null;
     final h = json['hostPort'], f = json['fingerprint'], c = json['caPem'], n = json['name'];
     if (h is! String || f is! String || c is! String || n is! String) return null;
-    if (fingerprintOfPem(c) != f) return null; // a stored CA that is not the one it says it is is not used
+    // only the certificate the fingerprint names is kept: older versions stored whatever followed it too
+    final ca = firstCertificatePem(c);
+    if (ca == null || fingerprintOfPem(ca) != f) return null; // a stored CA that is not the one it says it is is not used
     final id = json['serverId'], label = json['label'];
-    return PairedServer(hostPort: h, fingerprint: f, caPem: c, name: n, serverId: id is String ? id : '', label: label is String ? cleanLabel(label) : '');
+    return PairedServer(hostPort: h, fingerprint: f, caPem: ca, name: n, serverId: id is String ? id : '', label: label is String ? cleanLabel(label) : '');
   }
 }
 
@@ -160,18 +162,39 @@ class MemoryPairedStore implements PairedStore {
   Future<void> forget(String hostPort) async => _items.remove(hostPort);
 }
 
-/// SHA-256 of the DER of the first certificate in [pem], as 64 lower-case hex digits; `null` if there is none.
-String? fingerprintOfPemOrNull(String pem) {
-  final m = RegExp(r'-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+)-----END CERTIFICATE-----').firstMatch(pem);
+final _certificateBlock = RegExp(r'-----BEGIN CERTIFICATE-----([A-Za-z0-9+/=\s]+)-----END CERTIFICATE-----');
+
+/// The DER of the first certificate in [pem]; `null` if there is none.
+List<int>? _firstCertificateDer(String pem) {
+  final m = _certificateBlock.firstMatch(pem);
   if (m == null) return null;
   try {
-    return sha256.convert(base64.decode(m.group(1)!.replaceAll(RegExp(r'\s'), ''))).toString();
+    return base64.decode(m.group(1)!.replaceAll(RegExp(r'\s'), ''));
   } on FormatException {
     return null;
   }
 }
 
+/// SHA-256 of the DER of the first certificate in [pem], as 64 lower-case hex digits; `null` if there is none.
+String? fingerprintOfPemOrNull(String pem) {
+  final der = _firstCertificateDer(pem);
+  return der == null ? null : sha256.convert(der).toString();
+}
+
 String fingerprintOfPem(String pem) => fingerprintOfPemOrNull(pem) ?? '';
+
+/// The first certificate of [pem] alone, rebuilt as PEM; `null` if there is none.
+///
+/// The fingerprint a person vouches for (the QR code, the six digits, the master code's proofs) covers the first
+/// certificate only, and TLS trusts every certificate of a PEM it is given. So nothing after the first one may ever be kept
+/// or trusted: somebody in between could pass the real CA along and append their own.
+String? firstCertificatePem(String pem) {
+  final der = _firstCertificateDer(pem);
+  if (der == null) return null;
+  final b64 = base64.encode(der);
+  final lines = [for (var i = 0; i < b64.length; i += 64) b64.substring(i, i + 64 > b64.length ? b64.length : i + 64)];
+  return '-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n';
+}
 
 sealed class PairingResult {
   const PairingResult();
@@ -230,45 +253,86 @@ const _maxCaBytes = 16 * 1024;
 /// The download itself is the one place where the certificate is not checked (there is nothing to check it against yet):
 /// that is safe because what comes back is only used if its SHA-256 equals the fingerprint the person scanned.
 Future<PairingResult> pair(PairingCode code, PairedStore store, {Duration timeout = pairingTimeout}) async {
-  final client = HttpClient()..connectionTimeout = timeout;
-  client.badCertificateCallback = (_, host, port) => host == code.host && port == code.port;
+  final http = _UncheckedHttp(code.host, code.port, timeout);
   try {
-    final request = await client.getUrl(code.baseUri.resolve('/server/ca.pem')).timeout(timeout);
-    final response = await request.close().timeout(timeout);
-    if (response.statusCode != 200) return const PairingFailed(PairingFailure.notACertificate);
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in response.timeout(timeout)) {
-      bytes.add(chunk);
-      if (bytes.length > _maxCaBytes) return const PairingFailed(PairingFailure.notACertificate);
-    }
-    final String pem;
-    try {
-      pem = utf8.decode(bytes.takeBytes());
-    } on FormatException {
-      return const PairingFailed(PairingFailure.notACertificate);
-    }
-    final fp = fingerprintOfPemOrNull(pem);
-    if (fp == null) return const PairingFailed(PairingFailure.notACertificate);
+    final (status, ca) = await http.ca();
+    if (status != 200 || ca == null) return const PairingFailed(PairingFailure.notACertificate);
+    final fp = fingerprintOfPem(ca);
     if (fp != code.fingerprint) return const PairingFailed(PairingFailure.fingerprintMismatch);
-    final server = PairedServer(hostPort: code.hostPort, fingerprint: fp, caPem: pem, name: code.name);
+    final server = PairedServer(hostPort: code.hostPort, fingerprint: fp, caPem: ca, name: code.name);
     await store.save(server);
     return Paired(server);
-  } on TimeoutException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on SocketException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on HandshakeException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on HttpException {
-    return const PairingFailed(PairingFailure.unreachable);
+  } on FormatException {
+    return const PairingFailed(PairingFailure.notACertificate);
+  } on Object catch (e) {
+    if (_isNetworkFailure(e)) return const PairingFailed(PairingFailure.unreachable);
+    rethrow;
   } finally {
-    client.close(force: true);
+    http.close();
   }
 }
 
+bool _isNetworkFailure(Object e) => e is TimeoutException || e is SocketException || e is HandshakeException || e is HttpException;
+
+/// HTTPS to one host and port whose certificate cannot be checked yet (nothing to check it against before pairing): what
+/// comes back counts only once a fingerprint the person vouched for matches. Answers are capped at [_maxCaBytes].
+class _UncheckedHttp {
+  _UncheckedHttp(this.host, this.port, this.timeout) : _client = _open(host, port, timeout);
+
+  final String host;
+  final int port;
+  final Duration timeout;
+  final HttpClient _client;
+
+  static HttpClient _open(String host, int port, Duration timeout) => HttpClient()
+    ..connectionTimeout = timeout
+    ..badCertificateCallback = (_, h, p) => h == host && p == port;
+
+  Uri _at(String path) => Uri(scheme: 'https', host: host, port: port, path: path);
+
+  /// Status and body. A body over the cap is a [FormatException].
+  Future<(int, String)> call(String method, String path, [String body = '']) => _send(_client, method, path, body);
+
+  Future<(int, String)> _send(HttpClient client, String method, String path, String body) async {
+    final request = await (method == 'GET' ? client.getUrl(_at(path)) : client.postUrl(_at(path))).timeout(timeout);
+    if (method == 'POST') {
+      request.headers.contentType = ContentType.text;
+      request.write(body);
+    }
+    final response = await request.close().timeout(timeout);
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in response.timeout(timeout)) {
+      bytes.add(chunk);
+      if (bytes.length > _maxCaBytes) throw const FormatException('answer too large');
+    }
+    return (response.statusCode, utf8.decode(bytes.takeBytes(), allowMalformed: true));
+  }
+
+  /// The same request on a new connection (the old one may have died while it sat idle).
+  Future<(int, String)> callFresh(String method, String path, [String body = '']) async {
+    final fresh = _open(host, port, timeout);
+    try {
+      return await _send(fresh, method, path, body);
+    } finally {
+      fresh.close(force: true);
+    }
+  }
+
+  /// The server's CA: the status and its first certificate alone, or `null` when the answer holds none.
+  Future<(int, String?)> ca() async {
+    final (status, pem) = await call('GET', '/server/ca.pem');
+    return (status, status == 200 ? firstCertificatePem(pem) : null);
+  }
+
+  void close() => _client.close(force: true);
+}
+
 /// An HTTP client for [server]: it trusts that server's CA and nothing else (no system roots), so it only talks to it.
+/// Only the first certificate of the stored PEM is trusted, the one its fingerprint names.
 http.Client clientFor(PairedServer server) {
-  final context = SecurityContext(withTrustedRoots: false)..setTrustedCertificatesBytes(Uint8List.fromList(utf8.encode(server.caPem)));
+  final context = SecurityContext(withTrustedRoots: false);
+  final ca = firstCertificatePem(server.caPem);
+  if (ca != null) context.setTrustedCertificatesBytes(Uint8List.fromList(utf8.encode(ca)));
   return IOClient(HttpClient(context: context));
 }
 
@@ -353,42 +417,20 @@ Future<PairingResult> pairWithDigits({
   String serverId = '',
 }) async {
   final rng = random ?? Random.secure();
-  final base = Uri(scheme: 'https', host: host, port: port);
   final hostPort = host.contains(':') ? '[$host]:$port' : '$host:$port';
-  final client = HttpClient()..connectionTimeout = timeout;
-  client.badCertificateCallback = (_, h, p) => h == host && p == port;
-
-  Future<(int, String)> call(String method, String path, [String body = '']) async {
-    final request = await (method == 'GET' ? client.getUrl(base.resolve(path)) : client.postUrl(base.resolve(path))).timeout(timeout);
-    if (method == 'POST') {
-      request.headers.contentType = ContentType.text;
-      request.write(body);
-    }
-    final response = await request.close().timeout(timeout);
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in response.timeout(timeout)) {
-      bytes.add(chunk);
-      if (bytes.length > _maxCaBytes) throw const FormatException('answer too large');
-    }
-    return (response.statusCode, utf8.decode(bytes.takeBytes(), allowMalformed: true));
-  }
-
-  PairingFailed? refusal(int status) => switch (status) {
-        429 => const PairingFailed(PairingFailure.busy),
-        _ => const PairingFailed(PairingFailure.protocol),
-      };
+  final http = _UncheckedHttp(host, port, timeout);
+  final call = http.call;
 
   try {
-    final (caStatus, pem) = await call('GET', '/server/ca.pem');
-    if (caStatus != 200) return const PairingFailed(PairingFailure.notACertificate);
-    final fp = fingerprintOfPemOrNull(pem);
-    if (fp == null) return const PairingFailed(PairingFailure.notACertificate);
+    final (caStatus, pem) = await http.ca();
+    if (caStatus != 200 || pem == null) return const PairingFailed(PairingFailure.notACertificate);
+    final fp = fingerprintOfPem(pem);
 
     final a = List<int>.generate(16, (_) => rng.nextInt(256));
     final (startStatus, startBody) = await call('POST', '/server/pair/start', 'c=${sha256.convert(a)}\nroom=$room\n');
     if (startStatus == 404) return const PairingFailed(PairingFailure.badRoom);
     if (startStatus == 429) return PairingFailed(startBody.contains('pairing_locked') ? PairingFailure.locked : PairingFailure.busy);
-    if (startStatus != 200) return refusal(startStatus)!;
+    if (startStatus != 200) return const PairingFailed(PairingFailure.protocol);
     final id = _field(startBody, 'id');
     final s = _unhex(_field(startBody, 'n'), 16);
     if (_unhex(id, 16) == null || s == null) return const PairingFailed(PairingFailure.protocol);
@@ -416,19 +458,10 @@ Future<PairingResult> pairWithDigits({
         return (await call('POST', '/server/pair/done', 'id=$id\n')).$1;
       } on Object {
         // The connection sat idle while the person compared the screens and may be dead: once more, on a new one.
-        final fresh = HttpClient()..connectionTimeout = timeout;
-        fresh.badCertificateCallback = (_, h, p) => h == host && p == port;
         try {
-          final request = await fresh.postUrl(base.resolve('/server/pair/done')).timeout(timeout);
-          request.headers.contentType = ContentType.text;
-          request.write('id=$id\n');
-          final response = await request.close().timeout(timeout);
-          await response.drain<void>().timeout(timeout);
-          return response.statusCode;
+          return (await http.callFresh('POST', '/server/pair/done', 'id=$id\n')).$1;
         } on Object {
           return null;
-        } finally {
-          fresh.close(force: true);
         }
       }
     }
@@ -440,18 +473,13 @@ Future<PairingResult> pairWithDigits({
     final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name, serverId: serverId);
     await store.save(server);
     return Paired(server);
-  } on TimeoutException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on SocketException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on HandshakeException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on HttpException {
-    return const PairingFailed(PairingFailure.unreachable);
   } on FormatException {
     return const PairingFailed(PairingFailure.protocol);
+  } on Object catch (e) {
+    if (_isNetworkFailure(e)) return const PairingFailed(PairingFailure.unreachable);
+    rethrow;
   } finally {
-    client.close(force: true);
+    http.close();
   }
 }
 
@@ -545,31 +573,14 @@ Future<PairingResult> pairWithMaster({
   final key = parseMasterCode(master);
   if (key == null) return const PairingFailed(PairingFailure.badCode);
   final rng = random ?? Random.secure();
-  final base = Uri(scheme: 'https', host: host, port: port);
   final hostPort = host.contains(':') ? '[$host]:$port' : '$host:$port';
-  final client = HttpClient()..connectionTimeout = timeout;
-  client.badCertificateCallback = (_, h, p) => h == host && p == port;
-
-  Future<(int, String)> call(String method, String path, [String body = '']) async {
-    final request = await (method == 'GET' ? client.getUrl(base.resolve(path)) : client.postUrl(base.resolve(path))).timeout(timeout);
-    if (method == 'POST') {
-      request.headers.contentType = ContentType.text;
-      request.write(body);
-    }
-    final response = await request.close().timeout(timeout);
-    final bytes = BytesBuilder(copy: false);
-    await for (final chunk in response.timeout(timeout)) {
-      bytes.add(chunk);
-      if (bytes.length > _maxCaBytes) throw const FormatException('answer too large');
-    }
-    return (response.statusCode, utf8.decode(bytes.takeBytes(), allowMalformed: true));
-  }
+  final http = _UncheckedHttp(host, port, timeout);
+  final call = http.call;
 
   try {
-    final (caStatus, pem) = await call('GET', '/server/ca.pem');
-    if (caStatus != 200) return const PairingFailed(PairingFailure.notACertificate);
-    final fp = fingerprintOfPemOrNull(pem);
-    if (fp == null) return const PairingFailed(PairingFailure.notACertificate);
+    final (caStatus, pem) = await http.ca();
+    if (caStatus != 200 || pem == null) return const PairingFailed(PairingFailure.notACertificate);
+    final fp = fingerprintOfPem(pem);
     final fpBytes = _unhex(fp, 32)!;
 
     final a = List<int>.generate(16, (_) => rng.nextInt(256));
@@ -595,17 +606,12 @@ Future<PairingResult> pairWithMaster({
     final server = PairedServer(hostPort: hostPort, fingerprint: fp, caPem: pem, name: name, serverId: serverId);
     await store.save(server);
     return Paired(server);
-  } on TimeoutException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on SocketException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on HandshakeException {
-    return const PairingFailed(PairingFailure.unreachable);
-  } on HttpException {
-    return const PairingFailed(PairingFailure.unreachable);
   } on FormatException {
     return const PairingFailed(PairingFailure.protocol);
+  } on Object catch (e) {
+    if (_isNetworkFailure(e)) return const PairingFailed(PairingFailure.unreachable);
+    rethrow;
   } finally {
-    client.close(force: true);
+    http.close();
   }
 }

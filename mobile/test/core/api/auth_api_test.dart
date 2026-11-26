@@ -2,15 +2,16 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/testing.dart';
-import 'package:mobile/core/api/api_client.dart';
-import 'package:mobile/shared/protos/auth.pb.dart';
 import 'package:http/http.dart' as http;
+import 'package:mobile/core/api/api_client.dart';
+import 'package:mobile/core/api/auth_api.dart';
+import 'package:mobile/shared/protos/auth.pb.dart';
 
 import '../../support/live_server.dart';
 
 void main() {
   stressTests();
-  test('Testa a chamada de api para o go', () async {
+  test('o AuthApi do app fala com o servidor Go de verdade (credenciais erradas)', () async {
     // The server decides how it is reached: plain HTTP, or HTTPS only (HTTP_MODE=redirect); with nothing running there is
     // nothing to test against, and that is said instead of failing.
     final live = await findLiveServer();
@@ -21,19 +22,11 @@ void main() {
     addTearDown(live.close);
     printOnFailure('servidor ao vivo: $live');
 
-    var bytes = LoginInput(
-      email: 'testemail@t.com',
-      password: 'testpassword1223',
+    final api = AuthApi(ApiClient(client: live.client, baseUrl: live.base.origin, cookies: MemoryCookieStore()));
+    await expectLater(
+      api.login('testemail@t.com', 'testpassword1223', sessionOnly: true),
+      throwsA(isA<AuthApiError>().having((e) => (e.status, e.code), 'status, code', (401, 'invalid_credentials'))),
     );
-    final response = await live.client.post(
-      live.base.resolve('/auth/login/'),
-      headers: {'Content-Type': 'application/x-protobuf'},
-      body: bytes.writeToBuffer(),
-    );
-    expect(response.statusCode, 401);
-    var message = ErrorHttp.fromBuffer(response.bodyBytes);
-    expect(message.code, 'invalid_credentials');
-    expect(message.message, 'Invalid email or password');
   });
 
   test('Testa a função auxiliar para guardar e adquirir cookies', () async {
@@ -68,7 +61,7 @@ void main() {
       email: 'testemail@t.com',
       password: 'testpassword1223',
     );
-    await apiClient.postProto('/login/', input);
+    await apiClient.send('POST', '/login/', body: input);
 
     expect(captured!.headers['Cookie'], 'refresh_token=cookie');
     expect(captured!.url.toString(), 'http://abc/login/');
@@ -94,7 +87,7 @@ void main() {
       email: 'testemail@t.com',
       password: 'testpassword1223',
     );
-    await apiClient.postProto('/login/', input);
+    await apiClient.send('POST', '/login/', body: input);
 
     expect(captured!.headers.containsKey('cookie'), false);
   });
@@ -113,7 +106,7 @@ void main() {
       baseUrl: 'http://abc',
       cookies: store,
     );
-    await apiClient.postProto('/login/', LoginInput());
+    await apiClient.send('POST', '/login/', body: LoginInput());
 
     expect(captured!.headers['Cookie'], 'refresh_token=r; outro=o');
   });
@@ -136,7 +129,7 @@ void main() {
       baseUrl: 'http://abc',
       cookies: store,
     );
-    await apiClient.postProto('/login/', LoginInput());
+    await apiClient.send('POST', '/login/', body: LoginInput());
 
     expect(await store.readAll(), {'refresh_token': 'abc.def', 'outro': 'x=y'});
   });
@@ -156,7 +149,7 @@ void main() {
       baseUrl: 'http://abc',
       cookies: store,
     );
-    await apiClient.postProto('/logout/', LoginInput());
+    await apiClient.send('POST', '/logout/', body: LoginInput());
 
     expect(await store.readAll(), isEmpty);
   });
@@ -181,7 +174,7 @@ void stressTests() {
       cookies: store,
     );
     await expectLater(
-      api.postProto('/auth/login/', LoginInput()),
+      api.send('POST', '/auth/login/', body: LoginInput()),
       throwsA(isA<SocketException>()),
     );
     expect(await store.readAll(), {'refresh_token': 'abc'});
@@ -201,7 +194,7 @@ void stressTests() {
       cookies: store,
     );
     await store.write('refresh_token', 'velho');
-    final res = await api.postProto('/auth/refresh/', LoginInput());
+    final res = await api.send('POST', '/auth/refresh/', body: LoginInput());
     expect(res.statusCode, 401);
     expect(await store.readAll(), isEmpty);
   });
@@ -229,8 +222,8 @@ void stressTests() {
       cookies: MemoryCookieStore(),
     );
     await Future.wait([
-      api.postProto('/a/', LoginInput()),
-      api.postProto('/b/', LoginInput(email: 'a@b.c', password: 'x' * 72)),
+      api.send('POST', '/a/', body: LoginInput()),
+      api.send('POST', '/b/', body: LoginInput(email: 'a@b.c', password: 'x' * 72)),
     ]);
     expect(bodies..sort(), [0, greaterThan(70)]);
   });

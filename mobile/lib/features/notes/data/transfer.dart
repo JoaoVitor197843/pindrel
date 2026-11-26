@@ -29,6 +29,33 @@ String _fence(String text) {
 
 String _cell(String s) => _oneLine(s).replaceAll('|', r'\|');
 
+const _entities = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+
+/// The web's `escapeHtml`: a title inside `<summary>` must not open or close any tag (the web unescapes it on import).
+String _escapeHtml(String s) => s.replaceAllMapped(RegExp('[&<>"\']'), (m) => _entities[m[0]]!);
+
+final _codeSpan = RegExp(r'`[^`\n]+`');
+final _underline = RegExp(r'(^|[^\w_])__(?=[^\s_])([^_\n]*?[^\s_])__(?![\w_])');
+final _highlight = RegExp(r'(^|[^\w=])==(?=[^\s=])([^=\n]*?[^\s=])==(?![\w=])');
+
+/// The web's `markdownMarks`: outside code spans, `__underline__` (Markdown reads it as bold) becomes `<u>` and
+/// `==highlight==` becomes `<mark>`; everything else is kept as typed.
+String _marks(String text) {
+  String tag(String part) => part
+      .replaceAllMapped(_underline, (m) => '${m[1]}<u>${m[2]}</u>')
+      .replaceAllMapped(_highlight, (m) => '${m[1]}<mark>${m[2]}</mark>');
+  final out = StringBuffer();
+  var at = 0;
+  for (final m in _codeSpan.allMatches(text)) {
+    out
+      ..write(tag(text.substring(at, m.start)))
+      ..write(m[0]);
+    at = m.end;
+  }
+  out.write(tag(text.substring(at)));
+  return out.toString();
+}
+
 String _quote(String text) => text.split('\n').map((l) => '> $l'.trimRight()).join('\n');
 
 String _mdBlock(Block b, bool includeSecure, Map<String, int> numbers, List<OutlineItem> titles) {
@@ -36,16 +63,16 @@ String _mdBlock(Block b, bool includeSecure, Map<String, int> numbers, List<Outl
     case BlockType.heading:
       final level = b.level ?? 2;
       return b.toggle
-          ? '<details><summary><h$level>${_oneLine(b.text ?? '')}</h$level></summary>\n\n${b.body ?? ''}\n\n</details>'
-          : '${'#' * level} ${_oneLine(b.text ?? '')}';
+          ? '<details><summary><h$level>${_escapeHtml(_oneLine(b.text ?? ''))}</h$level></summary>\n\n${_marks(b.body ?? '')}\n\n</details>'
+          : '${'#' * level} ${_marks(_oneLine(b.text ?? ''))}';
     case BlockType.paragraph:
-      return b.text ?? '';
+      return _marks(b.text ?? '');
     case BlockType.quote:
-      return _quote(b.text ?? '');
+      return _quote(_marks(b.text ?? ''));
     case BlockType.callout:
-      return '> [!${_alert[b.tone ?? CalloutTone.info]}]\n${_quote(b.text ?? '')}';
+      return '> [!${_alert[b.tone ?? CalloutTone.info]}]\n${_quote(_marks(b.text ?? ''))}';
     case BlockType.toggle:
-      return '<details><summary>${_oneLine(b.text ?? '')}</summary>\n\n${b.body ?? ''}\n\n</details>';
+      return '<details><summary>${_escapeHtml(_oneLine(b.text ?? ''))}</summary>\n\n${_marks(b.body ?? '')}\n\n</details>';
     case BlockType.divider:
       return '---';
     case BlockType.checklist:
@@ -54,7 +81,8 @@ String _mdBlock(Block b, bool includeSecure, Map<String, int> numbers, List<Outl
       final f = _fence(b.text ?? '');
       return '$f${b.lang == 'texto' ? '' : b.lang}\n${b.text ?? ''}\n$f';
     case BlockType.spoiler:
-      return '<details><summary>spoiler</summary>\n\n${b.text ?? ''}\n\n</details>';
+      // the class tells it from a toggle titled "spoiler" when the web imports the file
+      return '<details class="spoiler"><summary>spoiler</summary>\n\n${b.text ?? ''}\n\n</details>';
     case BlockType.secure:
       return includeSecure ? b.text ?? '' : '> [bloco seguro omitido]';
     case BlockType.table:
@@ -65,9 +93,9 @@ String _mdBlock(Block b, bool includeSecure, Map<String, int> numbers, List<Outl
     case BlockType.image:
       return (b.name ?? '').isNotEmpty ? '![${_oneLine(b.name!)}](${Uri.encodeFull(b.name!)})' : '';
     case BlockType.bullet:
-      return '${'  ' * (b.indent ?? 0)}- ${_oneLine(b.text ?? '')}';
+      return '${'  ' * (b.indent ?? 0)}- ${_marks(_oneLine(b.text ?? ''))}';
     case BlockType.numbered:
-      return '${'   ' * (b.indent ?? 0)}${numbers[b.id] ?? 1}. ${_oneLine(b.text ?? '')}';
+      return '${'   ' * (b.indent ?? 0)}${numbers[b.id] ?? 1}. ${_marks(_oneLine(b.text ?? ''))}';
     case BlockType.toc:
       return [for (final t in titles) '${'  ' * (t.level - 1)}- ${_oneLine(t.text)}'].join('\n');
     case BlockType.bookmark || BlockType.video || BlockType.audio || BlockType.pdf:

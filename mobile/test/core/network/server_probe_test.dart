@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -19,6 +21,25 @@ void main() {
   test('erro de rede é falso', () async {
     final client = MockClient((_) async => throw http.ClientException('x'));
     expect(await httpServerProbe(uri, client: client), isFalse);
+  });
+
+  test('um corpo sem fim não é lido: a resposta basta, e chega logo', () async {
+    final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => s.close(force: true));
+    s.listen((req) async {
+      final chunk = List.filled(64 * 1024, 120);
+      try {
+        for (var i = 0; i < 100000; i++) {
+          req.response.add(chunk);
+          await req.response.flush();
+        }
+      } catch (_) {
+        // the app hung up
+      }
+    });
+    final sw = Stopwatch()..start();
+    expect(await httpServerProbe(Uri.parse('http://127.0.0.1:${s.port}')), isTrue);
+    expect(sw.elapsed, lessThan(const Duration(seconds: 1)));
   });
 
   test('sem resposta no prazo é falso', () async {

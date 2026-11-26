@@ -93,10 +93,7 @@ class PageEditor extends ChangeNotifier {
     _release(fileIdsOf([gone]));
   }
 
-  bool _inUse(String fileId) {
-    if (blocks.any((b) => b.fileId == fileId)) return true;
-    return false;
-  }
+  bool _inUse(String fileId) => blocks.any((b) => b.fileId == fileId);
 
   void _release(List<String> ids) {
     for (final f in ids) {

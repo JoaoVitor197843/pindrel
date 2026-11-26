@@ -284,7 +284,7 @@ String _withoutLocal(String host) {
 class MdnsDiscovery implements ServerDiscovery {
   MdnsDiscovery({
     MdnsApi? api,
-    this.serviceType = plannyServiceType,
+    this.serviceType = pindrelServiceType,
     this.interval = const Duration(seconds: 5),
     this.scanTimeout = const Duration(seconds: 3),
     this.restartWhileEmpty = const Duration(seconds: 15),

@@ -117,6 +117,23 @@ void main() {
       expect(md, contains('[Site](https://a.com)'));
       expect(pageToMarkdown(p, ws.tags, includeSecure: true), contains('segredo'));
     });
+    test('markdown: o spoiler leva a classe que o separa de uma alternância chamada "spoiler" (a web lê assim)', () {
+      p.content = [Block('s', BlockType.spoiler, text: 'fim')];
+      expect(pageToMarkdown(p, ws.tags), contains('<details class="spoiler"><summary>spoiler</summary>\n\nfim\n\n</details>'));
+    });
+    test('markdown como a web: sublinhado e marca-texto viram tags fora do código, e o título de uma alternância é escapado', () {
+      p.content = [
+        Block('a', BlockType.paragraph, text: 'um __sub__ e ==marca== e `__código__` e snake__case__x'),
+        Block('b', BlockType.bullet, text: '__item__'),
+        Block('t', BlockType.toggle, text: 'Tom & <Jerry> </summary>', body: '==dentro=='),
+        Block('h', BlockType.heading, text: 'a<b', toggle: true, level: 1, body: 'x'),
+      ];
+      final md = pageToMarkdown(p, ws.tags);
+      expect(md, contains('um <u>sub</u> e <mark>marca</mark> e `__código__` e snake__case__x'));
+      expect(md, contains('- <u>item</u>'));
+      expect(md, contains('<details><summary>Tom &amp; &lt;Jerry&gt; &lt;/summary&gt;</summary>\n\n<mark>dentro</mark>\n\n</details>'));
+      expect(md, contains('<details><summary><h1>a&lt;b</h1></summary>'));
+    });
     test('texto simples e JSON', () {
       expect(pageToText(p, ws.tags), startsWith('MINHA PÁGINA'));
       expect(pageToText(p, ws.tags), isNot(contains('segredo')));

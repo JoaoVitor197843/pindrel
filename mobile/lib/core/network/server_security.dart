@@ -1,6 +1,7 @@
 import 'package:http/http.dart' as http;
 
 import 'pairing.dart';
+import 'server_probe.dart';
 
 /// What a server says about its secure side on `GET /server/info/` (read over the plain port, so it is only a pointer: the
 /// pairing digits are what the person trusts).
@@ -37,9 +38,9 @@ class ServerLookupFailed implements Exception {
 Future<TlsOffer?> fetchTlsOffer(Uri base, {http.Client? client, Duration timeout = offerTimeout}) async {
   final c = client ?? http.Client();
   try {
-    final http.Response r;
+    final http.BaseResponse r;
     try {
-      r = await c.get(base.resolve('/server/info/')).timeout(timeout);
+      r = await headersOf(c, base.resolve('/server/info/'), timeout);
     } catch (_) {
       throw const ServerLookupFailed(PairingFailure.unreachable);
     }

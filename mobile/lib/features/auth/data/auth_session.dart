@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import '../../../core/api/api_client.dart';
 import '../../../core/api/auth_api.dart';
@@ -12,10 +11,10 @@ import 'server_trust.dart';
 /// How a server's [AuthApi] is built. Tests swap it for one over a fake client.
 typedef AuthApiFactory = Future<AuthApi> Function(Uri server, CookieStore cookies);
 
-/// The ordinary one: the client that trusts the CA this device paired with for that server (or the system roots).
-AuthApiFactory authApiFactory(PairedStore paired, [void Function(http.Client)? onClient]) => (server, cookies) async {
+/// The ordinary one: the client that trusts the CA this device paired with for that server (or the system roots). Each
+/// [AuthApi] owns its client: [AuthSession] closes it once it is no longer used.
+AuthApiFactory authApiFactory(PairedStore paired) => (server, cookies) async {
   final client = await clientForUri(server, paired);
-  onClient?.call(client);
   return AuthApi(ApiClient(client: client, baseUrl: server.origin, cookies: cookies));
 };
 
@@ -75,8 +74,17 @@ class AuthSession extends ChangeNotifier {
     _timer = Timer(life < minRenew ? minRenew : life, () => unawaited(_renew()));
   }
 
+  /// [api] becomes the session's; the one it replaces is closed (a request of the old session still running fails, and
+  /// nothing of the old session counts any more).
+  void _use(AuthApi api) {
+    if (!identical(_api, api)) _api?.close();
+    _api = api;
+  }
+
   void _signOutLocal({bool byServer = false}) {
     _epoch++;
+    _api?.close();
+    _api = null;
     _timer?.cancel();
     _token = null;
     _user = null;
@@ -100,15 +108,23 @@ class AuthSession extends ChangeNotifier {
   }
 
   /// Asks for a new access token; false when it could not be had. Callers share one request.
-  Future<bool> _renew() => _renewing ??= () async {
+  Future<bool> _renew() {
+    final api = _api;
+    // signed out meanwhile (a request refused while the person left): nothing to renew with
+    if (api == null) return Future.value(false);
+    return _renewing ??= _renewWith(api);
+  }
+
+  Future<bool> _renewWith(AuthApi api) async {
     final epoch = _epoch;
     try {
-      final t = await _api!.refresh();
-      if (epoch != _epoch) return false;
+      final t = await api.refresh();
+      // signed out, or another sign-in replaced this session meanwhile: the answer is not this session's
+      if (epoch != _epoch || !identical(_api, api)) return false;
       _adopt(t);
       return true;
     } on AuthApiError catch (e) {
-      if (epoch != _epoch) return false;
+      if (epoch != _epoch || !identical(_api, api)) return false;
       if (e.isRefusal) {
         _signOutLocal(byServer: true);
       } else {
@@ -120,7 +136,7 @@ class AuthSession extends ChangeNotifier {
     } finally {
       _renewing = null;
     }
-  }();
+  }
 
   /// Whether this device kept a session (the cookie may still be good). Never throws.
   Future<bool> get remembered async => (await _readNote()) != null;
@@ -155,12 +171,16 @@ class AuthSession extends ChangeNotifier {
     }
     _set(AuthStatus.checking);
     final epoch = _epoch;
+    AuthApi? api;
     try {
-      final api = await _factory(server, cookies);
+      api = await _factory(server, cookies);
       final t = await api.refresh();
       final user = await api.me(t.accessToken);
-      if (epoch != _epoch) return false;
-      _api = api;
+      if (epoch != _epoch) {
+        api.close();
+        return false;
+      }
+      _use(api);
       _cookies = cookies;
       _server = server;
       _user = user;
@@ -168,10 +188,12 @@ class AuthSession extends ChangeNotifier {
       _set(AuthStatus.signedIn);
       return true;
     } on AuthApiError catch (e) {
+      api?.close();
       if (e.isRefusal) await _forgetNote();
       if (epoch == _epoch) _set(AuthStatus.out);
       return false;
     } catch (_) {
+      api?.close();
       if (epoch == _epoch) _set(AuthStatus.out);
       return false;
     }
@@ -182,10 +204,17 @@ class AuthSession extends ChangeNotifier {
     final epoch = _epoch;
     final cookies = MemoryCookieStore();
     final api = await _factory(server, cookies);
-    final t = await api.login(email, password, sessionOnly: !keepSignedIn);
-    final user = await api.me(t.accessToken);
-    if (epoch != _epoch) throw const AuthApiError(0, 'cancelled');
-    _api = api;
+    final Tokens t;
+    final Account user;
+    try {
+      t = await api.login(email, password, sessionOnly: !keepSignedIn);
+      user = await api.me(t.accessToken);
+      if (epoch != _epoch) throw const AuthApiError(0, 'cancelled');
+    } catch (_) {
+      api.close();
+      rethrow;
+    }
+    _use(api);
     _cookies = cookies;
     _server = server;
     _user = user;
@@ -202,17 +231,26 @@ class AuthSession extends ChangeNotifier {
   }
 
   /// Creates the account. It does not sign in: the server only creates it.
-  Future<Account> register(Uri server, String email, String username, String password) async =>
-      (await _factory(server, MemoryCookieStore())).register(email, username, password);
+  Future<Account> register(Uri server, String email, String username, String password) async {
+    final api = await _factory(server, MemoryCookieStore());
+    try {
+      return await api.register(email, username, password);
+    } finally {
+      api.close();
+    }
+  }
 
   /// Ends the session. The device is signed out even when the server cannot be reached.
   Future<void> logout() async {
     final api = _api, token = _token;
+    _api = null; // kept open until the server was told
     _signOutLocal();
     try {
       await api?.logout(token);
     } catch (_) {
       // the cookie could not be revoked now; this device no longer uses it
+    } finally {
+      api?.close();
     }
   }
 
@@ -238,6 +276,8 @@ class AuthSession extends ChangeNotifier {
     if (_disposed) return;
     _disposed = true;
     _timer?.cancel();
+    _api?.close();
+    _api = null;
     super.dispose();
   }
 }

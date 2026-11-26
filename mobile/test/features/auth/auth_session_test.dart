@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:mobile/core/api/auth_api.dart';
 import 'package:mobile/features/auth/data/auth_session.dart';
 import 'package:mobile/features/auth/data/server_trust.dart';
@@ -180,6 +181,80 @@ void main() {
       t.server.overrides.clear();
       await Future<void>.delayed(const Duration(milliseconds: 200));
       expect(t.server.refreshes, greaterThanOrEqualTo(1));
+    });
+  });
+
+  group('conexões', () {
+    // each client holds a socket pool; a session must not leave one behind for every sign-in, sign-up or start
+    test('criar a conta e um login recusado não deixam conexão aberta', () async {
+      final t = setup();
+      await t.session.register(home, 'bia@casa.local', 'bia', 'senha1234');
+      await expectLater(t.session.login(home, 'ana@casa.local', 'errada', keepSignedIn: true), throwsA(isA<AuthApiError>()));
+      expect(t.server.clients, hasLength(2));
+      expect(t.server.openClients, 0);
+    });
+
+    test('a sessão fica com uma só; trocar de conta fecha a anterior; sair e descartar fecham a última', () async {
+      final t = setup();
+      t.server.accounts['bia@casa.local'] = (id: 'id-2', username: 'bia', password: 'senha1234');
+      await t.session.login(home, 'ana@casa.local', 'senha1234', keepSignedIn: true);
+      expect(t.server.openClients, 1);
+      await t.session.login(home, 'bia@casa.local', 'senha1234', keepSignedIn: true);
+      expect(t.server.openClients, 1);
+      expect(t.server.clients.last.closed, isFalse);
+      await t.session.logout();
+      expect(t.server.openClients, 0);
+      expect(t.server.requests.last, 'POST /auth/logout/', reason: 'the server is told before the client closes');
+      await t.session.login(home, 'ana@casa.local', 'senha1234', keepSignedIn: true);
+      t.session.dispose();
+      expect(t.server.openClients, 0);
+    });
+
+    test('ao abrir o app: a sessão restaurada fica com uma; uma recusada ou sem rede, nenhuma', () async {
+      final t = setup();
+      await t.session.login(home, 'ana@casa.local', 'senha1234', keepSignedIn: true);
+      final again = AuthSession(store: t.store, apiFactory: t.server.factory);
+      addTearDown(again.dispose);
+      expect(await again.restore(), isTrue);
+      expect(t.server.openClients, 2); // the first session's and the restored one's
+      t.server.overrides['/auth/refresh/'] = (_) => throw http.ClientException('sem rede');
+      final offline = AuthSession(store: t.store, apiFactory: t.server.factory);
+      addTearDown(offline.dispose);
+      expect(await offline.restore(), isFalse);
+      t.server.overrides['/auth/refresh/'] = (_) => http.Response('', 401);
+      final refused = AuthSession(store: t.store, apiFactory: t.server.factory);
+      addTearDown(refused.dispose);
+      expect(await refused.restore(), isFalse);
+      expect(t.server.openClients, 2);
+    });
+
+    test('a sessão que o servidor encerra fecha a conexão; um login cancelado por uma saída também', () async {
+      final t = setup(expiresIn: 1, minRenew: const Duration(milliseconds: 20));
+      await t.session.login(home, 'ana@casa.local', 'senha1234', keepSignedIn: true);
+      t.server.cookieValid = false;
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      expect(t.session.endedByServer, isTrue);
+      expect(t.server.openClients, 0);
+
+      t.server.gate = Completer<void>();
+      final late = t.session.login(home, 'ana@casa.local', 'senha1234', keepSignedIn: true);
+      await Future<void>.delayed(Duration.zero);
+      await t.session.logout();
+      t.server.gate!.complete();
+      t.server.gate = null;
+      await expectLater(late, throwsA(isA<AuthApiError>()));
+      expect(t.server.openClients, 0);
+    });
+
+    test('uma chamada recusada durante a saída não quebra (sem cliente para renovar)', () async {
+      final t = setup();
+      await t.session.login(home, 'ana@casa.local', 'senha1234', keepSignedIn: true);
+      final running = t.session.call((token) async {
+        await t.session.logout();
+        throw const AuthApiError(401, 'unauthorized');
+      });
+      await expectLater(running, throwsA(isA<AuthApiError>()));
+      expect(t.server.openClients, 0);
     });
   });
 

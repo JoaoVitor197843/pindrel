@@ -68,9 +68,9 @@ void main() {
       expect(db.settings().textScale, 1.3);
       final again = Workspace(db);
       expect(again.settings.textScale, 1.3, reason: 'a workspace opened later reads it');
-      again.dispose();
       db.saveSettings(const Settings());
       expect(db.settings().textScale, 1.0);
+      again.dispose(); // it owns the database it was given: this closes it
     });
 
     test('a step each way lands on the same sizes, and the same size is not written twice', () {

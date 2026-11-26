@@ -69,6 +69,32 @@ class FakeAuthServer {
     return _err(404, 'not_found');
   }
 
-  AuthApiFactory get factory =>
-      (server, cookies) async => AuthApi(ApiClient(client: MockClient(handle), baseUrl: server.origin, cookies: cookies));
+  /// Every HTTP client the session was given, to check it closes the ones it no longer uses.
+  final clients = <TrackedClient>[];
+  int get openClients => clients.where((c) => !c.closed).length;
+
+  AuthApiFactory get factory => (server, cookies) async {
+    final client = TrackedClient(MockClient(handle));
+    clients.add(client);
+    return AuthApi(ApiClient(client: client, baseUrl: server.origin, cookies: cookies));
+  };
+}
+
+/// A client that remembers whether it was closed.
+class TrackedClient extends http.BaseClient {
+  TrackedClient(this._inner);
+  final http.Client _inner;
+  bool closed = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) {
+    if (closed) throw http.ClientException('client closed', request.url);
+    return _inner.send(request);
+  }
+
+  @override
+  void close() {
+    closed = true;
+    _inner.close();
+  }
 }

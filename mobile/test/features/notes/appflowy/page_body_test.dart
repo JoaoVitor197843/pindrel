@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/theme/app_theme.dart';
 import 'package:mobile/features/notes/data/blocks.dart';
-import 'package:mobile/features/notes/data/note_page.dart';
 import 'package:mobile/features/notes/data/notes_db.dart';
 import 'package:mobile/features/notes/data/page_editor.dart';
 import 'package:mobile/features/notes/data/workspace.dart';
@@ -272,16 +271,81 @@ void main() {
       final again = ws.contentOf(pid)!;
       expect([for (final b in again) b.toJson()], before);
     });
+  });
 
-    test('o NotePage de uma página sem blocos abre com um parágrafo para o cursor', () {
-      final doc = blocksToDocumentForTest(const []);
-      expect(doc, 1);
+  group('Tab', () {
+    // what the editor does on Tab with the caret where it is
+    Future<void> tab(WidgetTester t) async {
+      final indent = bodyOf(t).controller.commandShortcuts.firstWhere((e) => e.key == 'indent');
+      indent.handler(editorOf(t));
+      await t.pumpAndSettle();
+      bodyOf(t).controller.flush();
+    }
+
+    testWidgets('aninha um item de lista sob o anterior, e o nível é guardado', (tester) async {
+      await open(tester, [Block('a', BlockType.bullet, text: 'um', indent: 0), Block('b', BlockType.bullet, text: 'dois', indent: 0)]);
+      await caretAt(tester, 1);
+      await tab(tester);
+      expect(editorOf(tester).document.root.children.length, 1);
+      expect([for (final b in body()) (b.id, b.indent)], [('a', 0), ('b', 1)]);
+    });
+
+    testWidgets('não aninha o que a página não guarda aninhado: parágrafo, tarefa, nem um item além do nível 3', (tester) async {
+      await open(tester, [
+        Block('p', BlockType.paragraph, text: 'um'),
+        Block('q', BlockType.paragraph, text: 'dois'),
+        Block('c', BlockType.checklist, items: [ChecklistItem(id: 'i1', text: 'x'), ChecklistItem(id: 'i2', text: 'y')]),
+        Block('l', BlockType.bullet, text: 'item'),
+      ]);
+      for (final at in [1, 3, 4]) {
+        await caretAt(tester, at);
+        await tab(tester);
+        expect(editorOf(tester).document.root.children.length, 5, reason: 'Tab at $at nested a node');
+      }
+      // a list item under a paragraph would be stored at the first level: it stays there on screen too
+      expect(body().last.indent, 0);
+    });
+
+    testWidgets('um item no nível 3 não desce para um 4º que não existe', (tester) async {
+      await open(tester, [
+        Block('a', BlockType.bullet, text: '0', indent: 0),
+        Block('b', BlockType.bullet, text: '1', indent: 1),
+        Block('c', BlockType.bullet, text: '2', indent: 2),
+        Block('d', BlockType.bullet, text: '3', indent: 3),
+        Block('e', BlockType.bullet, text: '3 também', indent: 3),
+      ]);
+      editorOf(tester).selection = Selection.collapsed(Position(path: [0, 0, 0, 1]));
+      await tester.pumpAndSettle();
+      await tab(tester);
+      expect([for (final b in body()) b.indent], [0, 1, 2, 3, 3]);
+      expect(editorOf(tester).getNodeAtPath([0, 0, 0, 1])?.attributes['bid'], 'e');
+    });
+
+    testWidgets('um item com filhos só desce quando o mais fundo deles ainda cabe no nível 3', (tester) async {
+      await open(tester, [
+        Block('p', BlockType.bullet, text: 'antes', indent: 0),
+        Block('a', BlockType.bullet, text: '0', indent: 0),
+        Block('b', BlockType.bullet, text: '1', indent: 1),
+        Block('c', BlockType.bullet, text: '2', indent: 2),
+        Block('d', BlockType.bullet, text: '3', indent: 3),
+      ]);
+      await caretAt(tester, 1);
+      await tab(tester);
+      // `d` would land on a 4th level that the page cannot keep, and come back as a sibling of `c`
+      expect([for (final b in body()) (b.id, b.indent)], [('p', 0), ('a', 0), ('b', 1), ('c', 2), ('d', 3)]);
+      expect(editorOf(tester).document.root.children.length, 2);
+    });
+
+    testWidgets('um item com filhos desce junto com eles quando todos cabem', (tester) async {
+      await open(tester, [
+        Block('p', BlockType.numbered, text: 'antes', indent: 0),
+        Block('a', BlockType.numbered, text: '0', indent: 0),
+        Block('b', BlockType.numbered, text: '1', indent: 1),
+        Block('c', BlockType.numbered, text: '2', indent: 2),
+      ]);
+      await caretAt(tester, 1);
+      await tab(tester);
+      expect([for (final b in body()) (b.id, b.indent)], [('p', 0), ('a', 1), ('b', 2), ('c', 3)]);
     });
   });
 }
-
-int blocksToDocumentForTest(List<Block> b) => b.isEmpty ? 1 : b.length;
-
-// keeps the analyzer from flagging NotePage as unused when the page model changes
-// ignore: unused_element
-NotePage? _unused;

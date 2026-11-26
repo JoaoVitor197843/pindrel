@@ -7,6 +7,7 @@ import '../../../../core/api/auth_api.dart';
 import '../../../../core/api/auth_messages.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_theme.dart';
+import '../../../notes/presentation/pages/notes_gate.dart';
 import '../providers/auth_provider.dart';
 import '../providers/servers_provider.dart';
 import 'recovery_key_sheet.dart';
@@ -136,12 +137,10 @@ class _AuthFormState extends ConsumerState<AuthForm> {
   void _continueOffline() {
     final callback = widget.onContinueOffline;
     if (callback != null) return callback();
-    // opened from the notes ("Conta e servidor"), "continue offline" simply goes back to them
+    // opened from the notes ("Conta e servidor"), "continue offline" simply goes back to them; anywhere else it opens them
     final nav = Navigator.of(context);
     if (nav.canPop()) return nav.pop();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Notas locais chegam em breve.')),
-    );
+    nav.pushReplacement(MaterialPageRoute<void>(builder: (_) => const NotesGate()));
   }
 
   @override
@@ -223,7 +222,6 @@ class _AuthFormState extends ConsumerState<AuthForm> {
             ),
           ],
         ),
-        const SizedBox(height: 0),
         TextField(
           key: const Key('password-field'),
           controller: _password,

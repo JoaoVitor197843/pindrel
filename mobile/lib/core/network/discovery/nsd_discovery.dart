@@ -59,7 +59,7 @@ class PluginNsdApi implements NsdApi {
 class NsdDiscovery implements ServerDiscovery {
   NsdDiscovery({
     this.api = const PluginNsdApi(),
-    this.serviceType = plannyServiceType,
+    this.serviceType = pindrelServiceType,
     this.restartWhileEmpty = const Duration(seconds: 15),
     this.maxRestartDelay = const Duration(minutes: 5),
     this.lostGrace = ServerTable.defaultLostGrace,

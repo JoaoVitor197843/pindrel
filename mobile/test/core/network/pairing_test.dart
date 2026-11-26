@@ -196,6 +196,42 @@ void main() {
       await impostor.close(force: true);
     });
 
+    test('um intermediário que junta a CA dele DEPOIS da verdadeira não passa a ser confiável', () async {
+      // the fingerprint is taken of the first certificate only: whatever follows it must never be trusted
+      final bundle = '${fixture('good-ca.pem')}\n${fixture('other-ca.pem')}';
+      server = await serve(caPem: bundle);
+      final store = MemoryPairedStore();
+      expect(await pair(codeFor(server.port, goodFp), store), isA<Paired>());
+      final saved = (await store.find('127.0.0.1:${server.port}'))!;
+      expect(RegExp('BEGIN CERTIFICATE').allMatches(saved.caPem).length, 1);
+      expect(fingerprintOfPem(saved.caPem), goodFp);
+      final impostor = await serve(certs: 'other');
+      final client = clientFor(saved);
+      await expectLater(client.get(Uri.parse('https://127.0.0.1:${impostor.port}/server/info/')), throwsA(isA<HandshakeException>()));
+      expect((await client.get(Uri.parse('https://127.0.0.1:${server.port}/server/info/'))).body, 'ok');
+      client.close();
+      await impostor.close(force: true);
+    });
+
+    test('um pareamento guardado antes com várias CAs só confia na primeira', () async {
+      server = await serve();
+      final impostor = await serve(certs: 'other');
+      final old = PairedServer(
+        hostPort: '127.0.0.1:${server.port}',
+        fingerprint: goodFp,
+        caPem: '${fixture('good-ca.pem')}\n${fixture('other-ca.pem')}',
+        name: 'Casa',
+      );
+      final loaded = PairedServer.fromJson(old.toJson())!;
+      expect(RegExp('BEGIN CERTIFICATE').allMatches(loaded.caPem).length, 1);
+      for (final client in [clientFor(old), clientFor(loaded)]) {
+        await expectLater(client.get(Uri.parse('https://127.0.0.1:${impostor.port}/server/info/')), throwsA(isA<HandshakeException>()));
+        expect((await client.get(Uri.parse('https://127.0.0.1:${server.port}/server/info/'))).body, 'ok');
+        client.close();
+      }
+      await impostor.close(force: true);
+    });
+
     test('o cliente pareado não usa as raízes do sistema: um endereço qualquer é recusado', () async {
       server = await serve();
       final store = MemoryPairedStore();
