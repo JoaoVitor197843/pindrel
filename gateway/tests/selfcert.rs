@@ -230,6 +230,8 @@ async fn a_changed_address_or_an_old_certificate_is_renewed_without_a_restart() 
     gw.shutdown().await;
 }
 
+// file modes are a unix idea; on Windows the ACL of the folder decides
+#[cfg(unix)]
 #[tokio::test]
 async fn the_private_keys_are_readable_only_by_their_owner() {
     use std::os::unix::fs::PermissionsExt;
@@ -269,11 +271,12 @@ async fn files_given_by_hand_are_picked_up_when_they_change_and_a_broken_renewal
     })
     .unwrap();
     assert!(!r.refresh().unwrap(), "nothing changed");
+    let in_use = r.leaf().expect("a certificate is in use");
     // a half-written renewal
     time::sleep(Duration::from_millis(1100)).await; // mtime granularity
     fs::write(&cert, "-----BEGIN CERTIFICATE-----\ngarbage").unwrap();
     assert!(r.refresh().is_err());
-    assert!(r.serial_hint() > 0, "the certificate in use was lost");
+    assert_eq!(r.leaf(), Some(in_use.clone()), "the certificate in use was lost");
     // the real renewal arrives
     time::sleep(Duration::from_millis(1100)).await;
     let (b, d2) = (Backend::start("b").await, tmp());
@@ -283,6 +286,7 @@ async fn files_given_by_hand_are_picked_up_when_they_change_and_a_broken_renewal
     fs::write(&cert, new_leaf).unwrap();
     fs::write(&key, new_key).unwrap();
     assert!(r.refresh().unwrap(), "the new files were not noticed");
+    assert_ne!(r.leaf(), Some(in_use), "and the new certificate is the one in use");
     gw.shutdown().await;
 }
 

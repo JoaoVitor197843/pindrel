@@ -50,6 +50,9 @@ pub async fn start(cfg: Config) -> io::Result<Running> {
 
 /// Like `start`, with the local network given (tests use one that contains loopback).
 pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Running> {
+    if let Some(why) = cfg.unsupported() {
+        return Err(io::Error::new(io::ErrorKind::Unsupported, why));
+    }
     warn_if_few_descriptors(&cfg);
     let listener = TcpListener::bind(("0.0.0.0", cfg.port)).await?;
     let addr = listener.local_addr()?;
@@ -118,10 +121,6 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
     #[cfg(feature = "tls")]
     if let Some(t) = app.cfg.tls.clone() {
         start_tls(&app, &t, rx.clone()).await?;
-    }
-    #[cfg(not(feature = "tls"))]
-    if app.cfg.tls.is_some() {
-        eprintln!("TLS_PORT is set but this build has no TLS (build with --features tls)");
     }
 
     let (closed_tx, closed) = oneshot::channel();

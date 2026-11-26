@@ -84,15 +84,70 @@ async fn http2_over_tls_reaches_the_replica_with_method_path_and_body() {
     gw.shutdown().await;
 }
 
+/// Sends `n` GETs at once over one HTTP/2 connection; returns each answer's status and `x-seen-host`.
+async fn h2_gets(port: u16, path: &str, n: usize) -> Vec<(StatusCode, String)> {
+    let io = TokioIo::new(tls_stream(port, &[b"h2"]).await);
+    let (send, conn) = hyper::client::conn::http2::handshake(TokioExecutor::new(), io).await.unwrap();
+    tokio::spawn(conn);
+    let tasks: Vec<_> = (0..n)
+        .map(|_| {
+            let mut send = send.clone();
+            let uri = format!("https://localhost:{port}{path}");
+            tokio::spawn(async move {
+                // an empty body: the HEADERS frame ends the stream, and no content-length is sent
+                let req = Request::builder().uri(uri).body(http_body_util::Empty::<Bytes>::new()).unwrap();
+                let resp = send.send_request(req).await.unwrap();
+                let host = resp
+                    .headers()
+                    .get("x-seen-host")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                (resp.status(), host)
+            })
+        })
+        .collect();
+    let mut out = Vec::new();
+    for t in tasks {
+        out.push(t.await.unwrap());
+    }
+    out
+}
+
 #[tokio::test]
-async fn http1_over_tls_still_works_and_the_plain_port_is_unchanged() {
+async fn http2_requests_reach_the_replica_with_the_host_the_client_used() {
+    // HTTP/2 has no Host header (the name travels as `:authority`): the replica must still see the one the client used,
+    // as it does over HTTP/1.1, not the replica's own address
+    let a = Backend::start("a").await;
+    let port = free_port();
+    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port))).await;
+    let got = h2_gets(port, "/x", 1).await;
+    assert_eq!(got, [(StatusCode::OK, format!("localhost:{port}"))]);
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn http2_gets_do_not_wait_for_the_budget_of_bodies() {
     let a = Backend::start("a").await;
     let port = free_port();
     let gw = gateway_with(&[&a], |c| {
         c.tls = Some(tls_cfg(port));
-        c.http_mode = pindrel_gateway::config::HttpMode::Full; // the default would send the plain port to HTTPS
+        c.body_budget = 1 << 20; // room for one full body
+        c.body_queue = Duration::from_millis(100);
     })
     .await;
+    // eight slow GETs at once on one connection: none of them holds a body
+    for (status, _) in h2_gets(port, "/slow", 8).await {
+        assert_eq!(status, StatusCode::OK);
+    }
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn http1_over_tls_still_works_and_the_plain_port_is_unchanged() {
+    let a = Backend::start("a").await;
+    let port = free_port();
+    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port))).await;
     let mut s = tls_stream(port, &[b"http/1.1"]).await;
     s.write_all(b"GET /x HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .await

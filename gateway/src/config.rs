@@ -22,8 +22,9 @@ pub struct TlsConfig {
 }
 
 /// What the plain-HTTP port does when TLS is on. `Redirect`: only the public bootstrap routes answer (`/server/info/`,
-/// `/server/ca.pem`, `/server/connect/`, and a landing page at `/`); other GETs are sent to HTTPS and anything that could
-/// carry a password or a note (POST, WebSocket) is refused, so nothing private travels in clear. `Full` (the default): the
+/// `/server/ca.pem`, `/server/ca.crt`, `/server/connect/`, the pairing room of a page, and a landing page at `/`); other
+/// GETs are sent to HTTPS and anything that could carry a password or a note (POST, WebSocket) is refused, so nothing
+/// private travels in clear. `Full` (the default): the
 /// plain port answers everything as if TLS were off, so a client that has no HTTPS side keeps working; clients that know
 /// the HTTPS side prefer it (the `tls` entry of the mDNS record and `x-pindrel-tls`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,10 +124,7 @@ impl Config {
         }
     }
 
-    pub fn from_env() -> Result<Self, Vec<String>> {
-        Self::from_lookup(|k| std::env::var(k).ok())
-    }
-
+    /// `get` answers a setting by name: the environment, or the settings file under it (see `main`).
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Result<Self, Vec<String>> {
         let get = |k: &str| get(k).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         let mut errs = Vec::new();
@@ -174,6 +172,10 @@ impl Config {
                 0
             }
         });
+        if tls_port.is_some_and(|p| p != 0 && p == port) {
+            // would pass `--check` (what the installers run) and then fail to bind at start
+            errs.push(format!("TLS_PORT: {port} is already GATEWAY_PORT; the two need different ports"));
+        }
         let tls_cert = get("TLS_CERT_FILE");
         let tls_key = get("TLS_KEY_FILE");
         let tls_dir = get("TLS_DIR");
@@ -269,6 +271,19 @@ impl Config {
             file_finish_timeout: Duration::from_secs(file_finish_timeout),
             ..Self::new(Vec::new())
         })
+    }
+
+    /// What these settings ask for that this build cannot do. Checked apart from `from_lookup` because it depends on the
+    /// build, not on the settings: a gateway built without HTTPS used to pass `--check` and then serve plain HTTP only.
+    pub fn unsupported(&self) -> Option<&'static str> {
+        let tls = self.tls.as_ref()?;
+        if !cfg!(feature = "tls") {
+            Some("TLS_PORT is set but this build has no HTTPS (build with --features selfcert)")
+        } else if tls.auto_dir.is_some() && !cfg!(feature = "selfcert") {
+            Some("TLS_AUTO needs a build with --features selfcert")
+        } else {
+            None
+        }
     }
 }
 
@@ -391,6 +406,28 @@ mod tests {
     }
 
     #[test]
+    fn https_settings_are_refused_by_a_build_that_cannot_serve_them() {
+        let plain = load(&[("UPSTREAMS", "127.0.0.1:1")]).unwrap();
+        assert_eq!(plain.unsupported(), None);
+        let files = load(&[
+            ("UPSTREAMS", "127.0.0.1:1"),
+            ("TLS_PORT", "8443"),
+            ("TLS_CERT_FILE", "/c.pem"),
+            ("TLS_KEY_FILE", "/k.pem"),
+        ])
+        .unwrap();
+        assert_eq!(files.unsupported().is_none(), cfg!(feature = "tls"));
+        let auto = load(&[
+            ("UPSTREAMS", "127.0.0.1:1"),
+            ("TLS_PORT", "8443"),
+            ("TLS_AUTO", "true"),
+            ("TLS_DIR", "/d"),
+        ])
+        .unwrap();
+        assert_eq!(auto.unsupported().is_none(), cfg!(feature = "selfcert"));
+    }
+
+    #[test]
     fn the_pairing_limits_have_defaults_and_bounds() {
         let c = load(&[("UPSTREAMS", "127.0.0.1:1")]).unwrap();
         assert_eq!(c.max_pairings, 6, "six people at once unless told otherwise");
@@ -412,6 +449,21 @@ mod tests {
             let errs = load(&[("UPSTREAMS", "127.0.0.1:1"), ("TLS_PORT", port)]).unwrap_err();
             assert!(errs.iter().any(|e| e.starts_with("TLS_PORT")), "{port}: {errs:?}");
         }
+    }
+
+    #[test]
+    fn the_secure_port_cannot_be_the_plain_one() {
+        let files = [
+            ("TLS_CERT_FILE", "/c.pem"),
+            ("TLS_KEY_FILE", "/k.pem"),
+            ("UPSTREAMS", "127.0.0.1:1"),
+        ];
+        let errs = load(&[files[0], files[1], files[2], ("TLS_PORT", "8080")]).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].starts_with("TLS_PORT") && errs[0].contains("GATEWAY_PORT"), "{errs:?}");
+        let errs = load(&[files[0], files[1], files[2], ("GATEWAY_PORT", "9000"), ("TLS_PORT", "9000")]).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(load(&[files[0], files[1], files[2], ("TLS_PORT", "8443")]).is_ok());
     }
 
     #[test]

@@ -19,8 +19,8 @@ use governor::{
     Quota, RateLimiter,
 };
 
-/// Hard cap on tracked clients per limiter, so a flood of source addresses cannot grow the table forever
-/// (about 60 bytes each: this is the number that bounds the gateway's memory, see `MAX_TRACKED_BYTES` in the tests).
+/// Hard cap on tracked clients per limiter, so a flood of source addresses cannot grow the table forever (this is the
+/// number that bounds the gateway's memory, see `memory_per_client_stays_small` in the tests).
 const MAX_TRACKED: usize = 16_384;
 
 /// Longest `Retry-After` we ever announce.
@@ -131,7 +131,8 @@ impl<C: Clock> Limiter<C> {
             .map_err(|not_until| not_until.wait_time_from(self.inner.clock().now()).min(MAX_RETRY_AFTER))
     }
 
-    pub fn allow(&self, ip: IpAddr) -> bool {
+    #[cfg(test)]
+    fn allow(&self, ip: IpAddr) -> bool {
         self.check(ip).is_ok()
     }
 
@@ -200,7 +201,7 @@ impl Drop for ConnGuard {
     }
 }
 
-/// The three limits applied at the entry point (same numbers the Go middleware used).
+/// The limits applied at the entry point (login, register and the general one use the numbers of the Go middleware).
 pub struct Limiters {
     pub login: Limiter,
     pub register: Limiter,

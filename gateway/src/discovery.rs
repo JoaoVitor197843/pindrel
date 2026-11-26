@@ -182,6 +182,9 @@ impl Registry {
                 return;
             }
         }
+        if self.is_self(&server) {
+            return; // never listed anyway; keeping it would only take a place in memory and in the saved file
+        }
         {
             let mut f = self.found.lock().unwrap();
             if f.len() >= MAX_LIVE && !f.contains_key(&fullname) {
@@ -516,6 +519,11 @@ mod tests {
         other.id = "def".into();
         r.upsert("o".into(), other);
         assert_eq!(r.list().iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Other"]);
+        assert_eq!(
+            r.snapshot().iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
+            ["Other"],
+            "this gateway is not remembered (nor saved to the file) either"
+        );
     }
 
     #[test]
@@ -571,6 +579,7 @@ mod tests {
         let r = Registry::new(1, vec![]);
         r.upsert("a".into(), srv("A", "192.168.1.9", 8080));
         r.remove("a");
+        r.remove("never-existed");
         assert!(r.list().is_empty(), "not announced and not verified yet");
         r.set_verified("A", vec!["192.168.1.9".into()]);
         assert_eq!(r.list(), [srv("A", "192.168.1.9", 8080)]);
@@ -687,14 +696,5 @@ mod tests {
         let r = Duration::from_secs(15);
         assert_eq!(next_wait(r, false), Duration::from_secs(15));
         assert_eq!(next_wait(r, true), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn remove_forgets_a_server() {
-        let r = Registry::new(1, vec![]);
-        r.upsert("x".into(), srv("X", "10.0.0.1", 2));
-        r.remove("x");
-        r.remove("never-existed");
-        assert!(r.list().is_empty());
     }
 }

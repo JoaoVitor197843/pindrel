@@ -40,6 +40,13 @@ fn same_path(a: &str, b: &str) -> bool {
     n(a) == n(b)
 }
 
+/// A path as a single-quoted PowerShell string. The per-user install lives under the user's folder, and a name such as
+/// `D'Ávila` would otherwise end the string early.
+#[allow(dead_code)]
+fn ps_quoted(path: &str) -> String {
+    format!("'{}'", path.replace('\'', "''"))
+}
+
 #[cfg(not(windows))]
 fn main() {
     eprintln!("pindrel-gateway-tray only exists for Windows ({SUPPORT_URL})");
@@ -52,7 +59,7 @@ fn main() {
 
 #[cfg(windows)]
 mod win {
-    use super::{port_in_env, same_path, status_text, SUPPORT_URL};
+    use super::{port_in_env, ps_quoted, same_path, status_text, SUPPORT_URL};
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};
     use std::ptr::{null, null_mut};
@@ -244,9 +251,9 @@ mod win {
 
     unsafe fn restart(hwnd: HWND) {
         let cmd = format!(
-            "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"& '{}'; Start-Sleep -Seconds 1; & '{}'\"",
-            script("stop-gateway.ps1"),
-            script("start-gateway.ps1")
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"& {}; Start-Sleep -Seconds 1; & {}\"",
+            ps_quoted(&script("stop-gateway.ps1")),
+            ps_quoted(&script("start-gateway.ps1"))
         );
         if !run_hidden(&cmd) {
             fail(hwnd, "Não foi possível reiniciar o gateway (o PowerShell não abriu).");
@@ -468,6 +475,15 @@ mod tests {
         assert_eq!(status_text(true, Some(8080)), "Pindrel Gateway: rodando (porta 8080)");
         assert_eq!(status_text(true, None), "Pindrel Gateway: rodando");
         assert_eq!(status_text(false, Some(8080)), "Pindrel Gateway: parado");
+    }
+
+    #[test]
+    fn a_quote_in_a_path_does_not_end_the_powershell_string() {
+        assert_eq!(ps_quoted(r"C:\Program Files\x.ps1"), r"'C:\Program Files\x.ps1'");
+        assert_eq!(
+            ps_quoted(r"C:\Users\D'Ávila\AppData\Local\Programs\x.ps1"),
+            r"'C:\Users\D''Ávila\AppData\Local\Programs\x.ps1'"
+        );
     }
 
     #[test]

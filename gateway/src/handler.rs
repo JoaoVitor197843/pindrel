@@ -38,7 +38,8 @@ pub struct App {
 impl App {
     pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
         let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
-        let budget_kib = cfg.body_budget / 1024;
+        // rounded up like each share (`proxy`), so a budget of one body always holds that body
+        let budget_kib = cfg.body_budget.div_ceil(1024);
         #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
         let max_pairings = cfg.max_pairings;
         let pool = Pool::new(cfg.upstreams.clone());
@@ -244,13 +245,9 @@ where
         app.cfg.upstream_timeout
     };
     // A body is held whole in memory before it is passed on, so the bytes held at once across all requests have a budget.
-    // Small bodies (a login, a note) skip it; a body of unknown length counts as a full one. The share is kept until the
-    // request is done.
-    let declared = parts
-        .headers
-        .get(header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse::<u64>().ok());
+    // No body (a GET; on HTTP/2 a request whose headers end the stream) and small bodies (a login, a note) skip it; a body
+    // of unknown length counts as a full one. The share is kept until the request is done.
+    let declared = if body.is_end_stream() { Some(0) } else { body.size_hint().upper() };
     let _held = match declared {
         Some(n) if n <= SMALL_BODY => None,
         _ => {
@@ -286,15 +283,42 @@ where
     // The request may have been processed, so only the ones that change nothing are replayed, and only once: a request
     // that kills replicas must not be able to walk through all of them.
     let mut replays_left = usize::from(matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS));
+    // HTTP/2 carries the host as `:authority`, not as a header; without this the replica would see its own address
+    let authority = if parts.headers.contains_key(header::HOST) {
+        None
+    } else {
+        parts.uri.authority().map(|a| match a.port() {
+            Some(p) => format!("{}:{p}", a.host()),
+            None => a.host().to_string(),
+        })
+    };
+    // what the client named in `Connection` is for this hop only (RFC 9110, 7.6.1)
+    let nominated: Vec<String> = parts
+        .headers
+        .get_all(header::CONNECTION)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .map(|t| t.trim().to_ascii_lowercase())
+        .filter(|t| !t.is_empty())
+        .collect();
     for target in app.pool.rotation() {
         let mut b = Request::builder()
             .method(parts.method.clone())
             .uri(format!("http://{target}{path_and_query}"));
         for (k, v) in &parts.headers {
             // the client address replaces whatever X-Forwarded-For the client sent: the gateway is the edge
-            if k != header::CONTENT_LENGTH && !CLIENT_ADDRESS.contains(&k.as_str()) && !HOP_BY_HOP.contains(&k.as_str()) {
+            let name = k.as_str();
+            if k != header::CONTENT_LENGTH
+                && !CLIENT_ADDRESS.contains(&name)
+                && !HOP_BY_HOP.contains(&name)
+                && !nominated.iter().any(|n| n == name)
+            {
                 b = b.header(k, v);
             }
+        }
+        if let Some(host) = &authority {
+            b = b.header(header::HOST, host.as_str());
         }
         let out = match b
             .header("x-forwarded-for", client_ip.to_string())
@@ -368,9 +392,14 @@ where
 }
 
 /// The host of the request without its port, only when it is something a host can be (letters, digits, dots, dashes, or an
-/// IPv6 address in brackets). It ends up in a redirect and in a page, so anything else is refused.
+/// IPv6 address in brackets). It ends up in a redirect and in a page, so anything else is refused. HTTP/2 has no `Host`
+/// header: there the host is the authority of the URI.
 pub(crate) fn clean_host<B>(req: &Request<B>) -> Option<String> {
-    let raw = req.headers().get(header::HOST)?.to_str().ok()?.trim();
+    let raw = match req.headers().get(header::HOST) {
+        Some(v) => v.to_str().ok()?,
+        None => req.uri().authority()?.as_str(),
+    }
+    .trim();
     let host = if let Some(rest) = raw.strip_prefix('[') {
         let end = rest.find(']')?;
         let v6 = &rest[..end];
@@ -730,7 +759,25 @@ pub(crate) fn lan_peer(ip: IpAddr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::lan_peer;
+    use super::{clean_host, lan_peer};
+    use hyper::Request;
+
+    #[test]
+    fn the_host_comes_from_the_header_or_from_the_authority_of_an_http2_request() {
+        let host = |uri: &str, header: Option<&str>| {
+            let mut b = Request::builder().uri(uri);
+            if let Some(h) = header {
+                b = b.header("host", h);
+            }
+            clean_host(&b.body(()).unwrap())
+        };
+        assert_eq!(host("/x", Some("Casa.LAN:8080")).as_deref(), Some("casa.lan"));
+        // HTTP/2: no Host header, the name is in the URI
+        assert_eq!(host("https://casa.lan:8443/server/connect/", None).as_deref(), Some("casa.lan"));
+        assert_eq!(host("https://[fd00::5]:8443/", None).as_deref(), Some("[fd00::5]"));
+        assert_eq!(host("https://user@casa.lan/", None), None, "user info is not a host");
+        assert_eq!(host("/x", None), None);
+    }
 
     #[test]
     fn only_addresses_of_the_local_network_count() {

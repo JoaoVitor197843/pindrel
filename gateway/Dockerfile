@@ -14,7 +14,7 @@ ARG FEATURES=selfcert
 RUN apk add --no-cache musl-dev zig
 ENV ZIG_GLOBAL_CACHE_DIR=/tmp/zig-global ZIG_LOCAL_CACHE_DIR=/tmp/zig-local
 # The compiler and archiver the arm64 build uses (see cross/zigcc-aarch64).
-COPY cross/zigcc-aarch64 cross/zigar /usr/local/bin/
+COPY cross/zigcc cross/zigcc-aarch64 cross/zigar /usr/local/bin/
 ENV CC_aarch64_unknown_linux_musl=/usr/local/bin/zigcc-aarch64 AR_aarch64_unknown_linux_musl=/usr/local/bin/zigar
 WORKDIR /app
 # .cargo/config.toml carries the flags of the aarch64 target (static + pic + rust-lld). The x86_64 target gets

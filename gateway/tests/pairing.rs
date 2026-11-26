@@ -144,7 +144,7 @@ async fn plain(rig: &Rig, src: Option<Ipv4Addr>, method: &str, path: &str, heade
         Some(ip) => {
             let socket = TcpSocket::new_v4().unwrap();
             socket.bind((ip, 0).into()).unwrap();
-            socket.connect(rig.gw.addr).await.unwrap()
+            socket.connect(reach(rig.gw.addr)).await.unwrap()
         }
     };
     s.write_all(&request(method, path, headers, body)).await.unwrap();

@@ -117,6 +117,26 @@ fn a_config_file_that_cannot_be_read_stops_the_start() {
 }
 
 #[test]
+fn a_config_flag_without_a_file_stops_the_start_instead_of_being_ignored() {
+    let out = gateway().arg("--config").env("UPSTREAMS", "127.0.0.1:1").output().unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--config"));
+}
+
+#[test]
+fn healthcheck_reads_the_port_from_the_settings_file_too() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); // stands in for a running gateway
+    let port = listener.local_addr().unwrap().port();
+    let dir = std::env::temp_dir().join(format!("pindrel-health-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("gateway.env");
+    std::fs::write(&file, format!("GATEWAY_PORT={port}\n")).unwrap();
+    let status = gateway().arg("healthcheck").arg("--config").arg(&file).status().unwrap();
+    assert!(status.success(), "the port of the file was not the one checked");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn check_validates_the_settings_and_starts_nothing() {
     let port = free_port();
     let ok = gateway()
@@ -134,4 +154,26 @@ fn check_validates_the_settings_and_starts_nothing() {
     let bad = gateway().arg("--check").env("GATEWAY_PORT", "0").output().unwrap();
     assert!(!bad.status.success());
     assert!(String::from_utf8_lossy(&bad.stderr).contains("UPSTREAMS"));
+}
+
+#[test]
+fn https_settings_pass_the_check_only_where_the_build_can_serve_them() {
+    // a release built without HTTPS used to pass this and then serve plain HTTP only, with a line in the log
+    let dir = std::env::temp_dir().join(format!("gw-check-tls-{}", std::process::id()));
+    let out = gateway()
+        .arg("--check")
+        .env("UPSTREAMS", "127.0.0.1:1")
+        .env("TLS_PORT", "8443")
+        .env("TLS_AUTO", "true")
+        .env("TLS_DIR", &dir)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    if cfg!(feature = "selfcert") {
+        assert!(out.status.success(), "{err}");
+    } else {
+        assert!(!out.status.success());
+        assert!(err.contains("--features selfcert"), "{err}");
+    }
+    assert!(!dir.exists(), "--check creates nothing");
 }

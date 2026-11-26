@@ -76,17 +76,3 @@ pub async fn accept_loop(app: Arc<App>, listener: TcpListener, config: Arc<Serve
     }
     drop(listener);
 }
-
-/// The private IPv4 addresses of this machine, for the pairing codes printed at start.
-pub fn lan_addresses() -> Vec<std::net::Ipv4Addr> {
-    if_addrs::get_if_addrs()
-        .map(|v| {
-            v.into_iter()
-                .filter_map(|i| match i.ip() {
-                    std::net::IpAddr::V4(ip) if !ip.is_loopback() && ip.is_private() => Some(ip),
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}

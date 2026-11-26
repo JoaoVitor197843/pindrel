@@ -3,7 +3,7 @@ name = "pindrel-gateway"
 version = "0.1.0"
 edition = "2021"
 license = "AGPL-3.0-only"
-description = "Front-facing process of a Pindrel deployment: load balancer, rate limiter and mDNS announcer/discovery"
+description = "Front-facing process of a Pindrel deployment: load balancer, rate limiter, mDNS announcer/discovery, optional HTTPS with its own CA and device pairing"
 
 [lib]
 name = "pindrel_gateway"

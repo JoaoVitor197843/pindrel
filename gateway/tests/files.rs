@@ -208,6 +208,61 @@ async fn small_bodies_do_not_wait_for_the_budget() {
     gw.shutdown().await;
 }
 
+/// A request written by hand: a GET with no `Content-Length` at all, the way browsers send it.
+async fn bare_get(gw: SocketAddr, path: &str) -> String {
+    let mut s = TcpStream::connect(reach(gw)).await.unwrap();
+    s.write_all(format!("GET {path} HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n").as_bytes())
+        .await
+        .unwrap();
+    let mut out = Vec::new();
+    let _ = s.read_to_end(&mut out).await;
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[tokio::test]
+async fn requests_without_a_body_never_wait_for_the_budget() {
+    // A GET holds nothing in memory: if it took a share, a handful of slow page loads would turn every other request
+    // into a 503 while the budget sat unused.
+    let r = replica(|_| async {
+        time::sleep(Duration::from_millis(600)).await;
+        ok("done")
+    })
+    .await;
+    let gw = gateway_for(&r, |c| {
+        c.body_budget = 1 << 20; // room for exactly one full body
+        c.body_queue = Duration::from_millis(100);
+    })
+    .await;
+    let addr = gw.addr;
+    let all: Vec<_> = (0..6)
+        .map(|i| tokio::spawn(async move { bare_get(addr, &format!("/page/{i}")).await }))
+        .collect();
+    for t in all {
+        let answer = t.await.unwrap();
+        assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
+    }
+    assert!(r.peak.load(Ordering::SeqCst) >= 2, "they ran side by side");
+    gw.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_body_as_big_as_the_whole_budget_fits_even_when_it_is_not_whole_kibibytes() {
+    // the budget is counted in KiB: a budget of 1 000 000 bytes must still hold a body of 1 000 000 bytes
+    let r = replica(|req| async move {
+        let _ = req.into_body().collect().await;
+        ok("done")
+    })
+    .await;
+    let gw = gateway_for(&r, |c| {
+        c.max_body = 1_000_000;
+        c.body_budget = 1_000_000;
+        c.body_queue = Duration::from_millis(200);
+    })
+    .await;
+    assert_eq!(put(gw.addr, "PUT", "/files/uploads/u/0", 1_000_000).await.status, StatusCode::OK);
+    gw.shutdown().await;
+}
+
 #[tokio::test]
 async fn a_body_over_the_limit_is_refused_and_gives_its_room_back() {
     let r = replica(|req| async move {

@@ -1,0 +1,3 @@
+#!/bin/sh
+# CC_x86_64_unknown_linux_musl of the release job, built on a glibc machine (see zigcc).
+exec "$(dirname "$0")/zigcc" x86_64-linux-musl "$@"

@@ -6,7 +6,7 @@
 //! server certificate can change (new address, yearly renewal) without asking anyone again.
 use std::{
     fs, io,
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -50,24 +50,35 @@ pub fn fingerprint_of_pem(pem: &str) -> io::Result<String> {
 
 /// Everything this machine is known by: it is what the certificate has to cover, and what decides a renewal.
 pub fn wanted_names(extra: &[String]) -> Vec<String> {
-    let mut names = vec!["localhost".to_string(), "127.0.0.1".into(), "::1".into()];
     let host = gethostname::gethostname().to_string_lossy().to_string();
+    let ifaces = if_addrs::get_if_addrs()
+        .map(|v| {
+            v.into_iter()
+                .filter_map(|i| match i.ip() {
+                    IpAddr::V4(ip) if !ip.is_loopback() && (ip.is_private() || ip.is_link_local()) => Some(ip),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    choose_names(&host, extra, crate::discovery::lan_ip(), ifaces)
+}
+
+/// The fixed names, the machine's name, the names the administrator gave and the LAN address go first, the other
+/// interfaces last: a machine with one bridge per docker network can have more addresses than `MAX_SANS`, and the cap must
+/// drop one of those, never what devices actually use. Sorted, so the same names always compare equal.
+fn choose_names(host: &str, extra: &[String], lan: Option<IpAddr>, ifaces: Vec<Ipv4Addr>) -> Vec<String> {
+    let mut names = vec!["localhost".to_string(), "127.0.0.1".into(), "::1".into()];
     if !host.is_empty() && host.len() <= 63 && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.') {
-        names.push(host);
-    }
-    if let Ok(ifaces) = if_addrs::get_if_addrs() {
-        for i in ifaces {
-            if let IpAddr::V4(ip) = i.ip() {
-                if !ip.is_loopback() && (ip.is_private() || ip.is_link_local()) {
-                    names.push(ip.to_string());
-                }
-            }
-        }
+        names.push(host.to_string());
     }
     names.extend(extra.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
-    names.sort();
-    names.dedup();
+    names.extend(lan.map(|ip| ip.to_string()));
+    names.extend(ifaces.iter().map(Ipv4Addr::to_string));
+    let mut seen = std::collections::HashSet::new();
+    names.retain(|n| seen.insert(n.clone()));
     names.truncate(MAX_SANS);
+    names.sort();
     names
 }
 
@@ -140,13 +151,6 @@ fn permitted_dns(names: &[String]) -> Vec<String> {
     dns
 }
 
-fn private_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
-        IpAddr::V6(v) => v.is_loopback() || (v.segments()[0] & 0xffc0) == 0xfe80 || (v.segments()[0] & 0xfe00) == 0xfc00,
-    }
-}
-
 /// Drops the names the CA cannot vouch for (a certificate with one of them would be refused as a whole by every client).
 fn within_ca(names: Vec<String>, dir: &Path) -> Vec<String> {
     let allowed: Vec<String> = fs::read_to_string(dir.join("ca.names"))
@@ -156,7 +160,7 @@ fn within_ca(names: Vec<String>, dir: &Path) -> Vec<String> {
         .into_iter()
         .filter(|n| {
             let ok = match n.parse::<IpAddr>() {
-                Ok(ip) => private_ip(ip),
+                Ok(ip) => crate::handler::lan_peer(ip),
                 Err(_) => allowed.is_empty() || allowed.iter().any(|a| n == a || n.ends_with(&format!(".{a}"))),
             };
             if !ok {
@@ -250,4 +254,34 @@ pub fn ensure(s: &AutoSettings) -> io::Result<Issued> {
         leaf_key_pem,
         ca_pem,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn many_interfaces_never_push_out_the_names_devices_use() {
+        // one bridge per docker network: more addresses than a certificate takes, and all sorting before "localhost"
+        let bridges: Vec<Ipv4Addr> = (0..60).map(|i| Ipv4Addr::new(172, 17 + i / 16, (i % 16) * 16, 1)).collect();
+        let lan: IpAddr = "192.168.1.5".parse().unwrap();
+        let names = choose_names("casa", &["nas.lan".into()], Some(lan), bridges);
+        assert_eq!(names.len(), MAX_SANS);
+        for must in ["localhost", "127.0.0.1", "::1", "casa", "nas.lan", "192.168.1.5"] {
+            assert!(names.contains(&must.to_string()), "{must} was dropped: {names:?}");
+        }
+        assert!(names.is_sorted(), "a stable order, so the same names compare equal");
+    }
+
+    #[test]
+    fn an_odd_machine_name_is_left_out_and_a_name_counts_once() {
+        let lan: IpAddr = "192.168.1.5".parse().unwrap();
+        let names = choose_names(
+            "my laptop",
+            &[" 192.168.1.5 ".into(), "".into(), "localhost".into()],
+            Some(lan),
+            vec!["192.168.1.5".parse().unwrap()],
+        );
+        assert_eq!(names, ["127.0.0.1", "192.168.1.5", "::1", "localhost"]);
+    }
 }
