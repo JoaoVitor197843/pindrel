@@ -14,7 +14,7 @@ import (
 
 const claimUploadForFinish = `-- name: ClaimUploadForFinish :one
 UPDATE uploads SET state = 'finishing', updated_at = now()
-WHERE id = $1 AND user_id = $2 AND state = 'open'
+WHERE id = $1 AND user_id = $2 AND (state = 'open' OR (state = 'finishing' AND updated_at < now() - interval '20 minutes'))
 RETURNING id, user_id, size, chunk_size, chunk_count, received, name, encrypted, state, created_at, updated_at, expires_at
 `
 
@@ -23,7 +23,9 @@ type ClaimUploadForFinishParams struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-// Exactly one request wins the right to join the pieces.
+// Exactly one request wins the right to join the pieces. A claim older than 20 minutes (a finish is cut at 10, the
+// gateway gives up at 10) belongs to a replica that died or was stopped while joining: it is taken over, otherwise the
+// upload would answer upload_busy until it expired a day later.
 func (q *Queries) ClaimUploadForFinish(ctx context.Context, arg ClaimUploadForFinishParams) (Upload, error) {
 	row := q.db.QueryRow(ctx, claimUploadForFinish, arg.ID, arg.UserID)
 	var i Upload

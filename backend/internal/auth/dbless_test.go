@@ -166,3 +166,46 @@ func TestIsTokenRefused(t *testing.T) {
 		t.Error("revoked and invalid tokens are refused")
 	}
 }
+
+// noAccountDB answers every lookup with "no such row": an e-mail nobody registered.
+type noAccountDB struct{ downDB }
+
+func (noAccountDB) QueryRow(context.Context, string, ...any) pgx.Row { return noRow{} }
+
+type noRow struct{}
+
+func (noRow) Scan(...any) error { return pgx.ErrNoRows }
+
+// An unknown e-mail while every Argon2 slot is busy answers busy, as a real account would, and the next attempt works:
+// a quick 401 there would tell which accounts exist, and the old lazily computed dummy hash panicked for good.
+func TestService_Login_UnknownEmailWhileBusyIsBusyToo(t *testing.T) {
+	resetArgon(t)
+	auth.SetArgonLimits(1, 20*time.Millisecond)
+	svc := auth.NewService(db.New(noAccountDB{}), true)
+	release := auth.HoldArgonSlots()
+	for range 2 {
+		if _, err := svc.Login(context.Background(), "ninguem@casa.local", testPassword, dblessSecret, time.Minute, time.Hour); !errors.Is(err, auth.ErrServerBusy) {
+			release()
+			t.Fatalf("busy: err = %v, want ErrServerBusy", err)
+		}
+	}
+	release()
+	if _, err := svc.Login(context.Background(), "ninguem@casa.local", testPassword, dblessSecret, time.Minute, time.Hour); !errors.Is(err, auth.ErrInvalidCredentials) {
+		t.Fatalf("after the slots are free: err = %v, want ErrInvalidCredentials", err)
+	}
+}
+
+// The constant dummy hash must cost what a real one costs today: same parameters as a fresh HashPassword.
+func TestDummyHashUsesTodaysParameters(t *testing.T) {
+	fresh, err := auth.HashPassword("xK9#mQ2$vL-qualquer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := func(h string) string { p := strings.Split(h, "$"); return strings.Join(p[:4], "$") }
+	if params(auth.DummyHash) != params(fresh) {
+		t.Fatalf("dummy hash parameters %s, a real hash has %s: regenerate it with HashPassword", params(auth.DummyHash), params(fresh))
+	}
+	if ok, err := auth.VerifyPassword(auth.DummyHash, "pindrel-dummy-password-for-timing"); !ok || err != nil {
+		t.Fatalf("dummy hash does not verify: ok=%v err=%v", ok, err)
+	}
+}

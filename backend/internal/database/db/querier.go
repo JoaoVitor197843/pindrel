@@ -11,7 +11,9 @@ import (
 )
 
 type Querier interface {
-	// Exactly one request wins the right to join the pieces.
+	// Exactly one request wins the right to join the pieces. A claim older than 20 minutes (a finish is cut at 10, the
+	// gateway gives up at 10) belongs to a replica that died or was stopped while joining: it is taken over, otherwise the
+	// upload would answer upload_busy until it expired a day later.
 	ClaimUploadForFinish(ctx context.Context, arg ClaimUploadForFinishParams) (Upload, error)
 	ClearFileOrphan(ctx context.Context, arg ClearFileOrphanParams) (int64, error)
 	CountFilesWithHash(ctx context.Context, sha256 []byte) (int64, error)
@@ -43,6 +45,7 @@ type Querier interface {
 	// Everything a user holds: finished files plus uploads still open (their size is already promised).
 	QuotaUsed(ctx context.Context, userID uuid.UUID) (int64, error)
 	ReopenUpload(ctx context.Context, arg ReopenUploadParams) error
+	// two logouts with the same cookie at once: both passed the revocation check, the second must not be a 500
 	RevokeToken(ctx context.Context, arg RevokeTokenParams) error
 	UploadExists(ctx context.Context, id uuid.UUID) (bool, error)
 }

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"pindrel/internal/database/db"
 	"pindrel/internal/validator"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,15 +22,10 @@ var (
 
 const pgUniqueViolation = "23505"
 
-// dummyHash is verified when the e-mail does not exist so that login takes the same time (one
-// Argon2) whether or not the account exists. Computed once, on first use, to keep startup cheap.
-var dummyHash = sync.OnceValue(func() string {
-	h, err := HashPassword("pindrel-dummy-password-for-timing")
-	if err != nil {
-		panic(err)
-	}
-	return h
-})
+// dummyHash is verified when the e-mail does not exist so that login takes the same time (one Argon2) whether or not the
+// account exists. A constant made with HashPassword and today's parameters (a test checks they still match): computing it
+// lazily went through the Argon2 slots, and a start under load could make it panic for good (sync.OnceValue replays it).
+const dummyHash = "19456$2$1$32$HQweZofwh1VWmNn3cIisbQ$ww88IoxG+xfSwbVq0k87Mae5U3Dk3dK4fipSSUbfwmI"
 
 type Service struct {
 	repo                *db.Queries
@@ -72,7 +66,10 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			_, _ = VerifyPassword(dummyHash(), password)
+			// busy must look the same as for a real account, or the 503 would tell which e-mails exist
+			if _, err := VerifyPassword(dummyHash, password); errors.Is(err, ErrServerBusy) {
+				return nil, ErrServerBusy
+			}
 			return nil, ErrInvalidCredentials
 		}
 		return nil, err

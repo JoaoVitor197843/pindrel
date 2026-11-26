@@ -1,7 +1,7 @@
 ﻿# Starts and stops the Pindrel server on Windows: the bundled PostgreSQL (when server.env says EMBEDDED_POSTGRES=true) and
 # pindrel-server.exe. The installer's shortcuts and the portable folder (iniciar.cmd, parar.cmd) all go through it.
 #   -Action start  in the background, hidden: starts the database, then the server; a server that dies at once is tried
-#                  again a few times, and a message says why if it never comes up. It leaves after ~20 s (a PowerShell left
+#                  again a few times, and a message says why if it never comes up. It leaves after ~35 s (a PowerShell left
 #                  waiting next to the server would hold ~80 MB: measured with the gateway's script).
 #   -Action run    in this window (the portable folder): creates server.env on the first run, stops the database at the end.
 #   -Action stop   stops the server and the database.
@@ -169,6 +169,18 @@ function Get-BundledMajor {
   throw "não foi possível ler a versão do PostgreSQL em $PgBin ($($r.Text))"
 }
 
+# The encoding initdb must give the cluster's own databases. initdb writes the path of its share folder into an SQL command
+# (COPY ... FROM '<pgsql>\share\sql_features.txt') in the ANSI code page, so with an accent in that path (a portable folder
+# in C:\Users\João\Downloads) a UTF8 cluster refuses the bytes and initdb fails. The cluster then takes the ANSI encoding;
+# the Pindrel database itself is always created in UTF8 (createdb from template0).
+function Get-ClusterEncoding {
+  if ($PgBin -notmatch '[^\x00-\x7F]') { return 'UTF8' }
+  $acp = [string](Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Nls\CodePage' -ErrorAction SilentlyContinue).ACP
+  if ($acp -match '^(125[0-8]|874|866)$') { return "WIN$acp" }
+  if ($acp -eq '65001') { return 'UTF8' }
+  throw "o PostgreSQL não consegue criar o banco a partir de uma pasta com acentos neste Windows (página de código $acp). Mova a pasta do Pindrel Server para um caminho sem acentos (por exemplo C:\PindrelServer)."
+}
+
 # Creates the database the first time (initdb, the settings, the database itself). A cluster of another major version is
 # never touched: its files only open with that version, and pg_upgrade is a step a person must choose.
 function Initialize-Database($s) {
@@ -184,12 +196,16 @@ function Initialize-Database($s) {
   foreach ($k in 'DB_USER', 'DB_PASSWORD', 'DB_NAME', 'DB_PORT') {
     if (-not $s[$k]) { throw "falta $k no server.env" }
   }
+  $encoding = Get-ClusterEncoding
+  if ($encoding -ne 'UTF8' -and $s['DB_NAME'] -eq 'postgres') {
+    throw "com o Pindrel Server numa pasta com acentos, DB_NAME não pode ser postgres. Use outro nome no server.env."
+  }
   # a folder without PG_VERSION is the leftover of a first start that failed half-way: initdb needs it empty
   if (Test-Path -LiteralPath $PgData) { Remove-Item -LiteralPath $PgData -Recurse -Force }
   $pw = Join-Path $Data 'pg-password.tmp'
   [IO.File]::WriteAllText($pw, $s['DB_PASSWORD'])
   try {
-    $r = Invoke-Native (Join-Path $PgBin 'initdb.exe') @('-D', $PgData, '-U', $s['DB_USER'], "--pwfile=$pw", '-E', 'UTF8', '--locale=C', '--auth=scram-sha-256')
+    $r = Invoke-Native (Join-Path $PgBin 'initdb.exe') @('-D', $PgData, '-U', $s['DB_USER'], "--pwfile=$pw", '-E', $encoding, '--locale=C', '--auth=scram-sha-256')
   } finally {
     Remove-Item -LiteralPath $pw -Force -ErrorAction SilentlyContinue
   }
@@ -212,7 +228,7 @@ function Initialize-Database($s) {
   if ($s['DB_NAME'] -ne 'postgres') {
     $env:PGPASSWORD = $s['DB_PASSWORD']
     try {
-      $r = Invoke-Native (Join-Path $PgBin 'createdb.exe') @('-h', '127.0.0.1', '-p', $s['DB_PORT'], '-U', $s['DB_USER'], $s['DB_NAME'])
+      $r = Invoke-Native (Join-Path $PgBin 'createdb.exe') @('-h', '127.0.0.1', '-p', $s['DB_PORT'], '-U', $s['DB_USER'], '-E', 'UTF8', '-T', 'template0', '--locale=C', $s['DB_NAME'])
     } finally {
       Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
     }
@@ -302,8 +318,9 @@ function Invoke-Action {
         if (-not (Test-Path -LiteralPath $Exe)) { return 0 }
         $p = Start-Process -FilePath $Exe -ArgumentList '--config', "`"$Conf`"" -WorkingDirectory $Data -WindowStyle Hidden -PassThru `
           -RedirectStandardOutput (Join-Path $Data 'server.out.log') -RedirectStandardError $Log
-        # up for 20 s: it started (it tries the database for ~25 s before giving up, so a dead database shows up here too)
-        if (-not $p.WaitForExit(20000)) { return 0 }
+        # up for 35 s: it started. Its database wait is up to ~23 s (database.Connect: 5 tries of a 3 s ping, 2 s apart),
+        # so a database that never answers shows up here too, with the message, instead of after this script left
+        if (-not $p.WaitForExit(35000)) { return 0 }
         if (Test-Path -LiteralPath $Flag) { return 0 }
         Start-Sleep -Seconds 4
       }

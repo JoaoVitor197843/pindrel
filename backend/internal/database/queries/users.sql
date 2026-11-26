@@ -25,7 +25,9 @@ INSERT INTO revoked_tokens (
     expires_at
 ) VALUES (
     $1, $2, $3
-);
+)
+-- two logouts with the same cookie at once: both passed the revocation check, the second must not be a 500
+ON CONFLICT (token_id) DO NOTHING;
 
 -- name: IsTokenRevoked :one
 SELECT EXISTS (
