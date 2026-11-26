@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mobile/features/auth/data/server_trust.dart';
 
 class BrokenStore implements KeyValueStore {
@@ -136,5 +137,10 @@ void main() {
       await trust.forget('Casa');
       expect(trust.trustOf('Casa', 'aaa'), Trust.unknown);
     });
+  });
+
+  test('o armazenamento seguro usa o chaveiro antigo do macOS (o de proteção de dados exige perfil de provisionamento)', () {
+    // with the plugin's default every call failed on a Mac and the session note went to the plain file
+    expect((appSecureStorage.mOptions as MacOsOptions).usesDataProtectionKeychain, isFalse);
   });
 }

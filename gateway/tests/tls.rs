@@ -267,3 +267,59 @@ async fn an_unreadable_certificate_stops_the_start_with_a_clear_error() {
     c.tls = Some(cfg);
     assert!(pindrel_gateway::server::start_with(c, None).await.is_err());
 }
+
+/// `MAX_CONNECTIONS_PER_IP` is for the whole gateway: connections held on the plain port count on the TLS port too
+/// (each listener had its own budget, so TLS on meant twice the connections, and the memory, a client could hold).
+#[tokio::test]
+async fn the_per_client_connection_limit_covers_both_ports() {
+    let a = Backend::start("a").await;
+    let port = free_port();
+    let gw = gateway_with(&[&a], |c| {
+        c.tls = Some(tls_cfg(port));
+        c.max_connections_per_ip = 2;
+        c.header_timeout = Duration::from_secs(10);
+    })
+    .await;
+    let held = [
+        TcpStream::connect(reach(gw.addr)).await.unwrap(),
+        TcpStream::connect(reach(gw.addr)).await.unwrap(),
+    ];
+    time::sleep(Duration::from_millis(200)).await;
+    let tcp = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let refused = time::timeout(
+        Duration::from_secs(3),
+        TlsConnector::from(client_config(&[b"h2"])).connect(ServerName::try_from("localhost").unwrap(), tcp),
+    )
+    .await
+    .expect("the TLS port neither served nor closed the connection");
+    assert!(refused.is_err(), "a third connection of the same client was served on the TLS port");
+    drop(held);
+    time::sleep(Duration::from_millis(200)).await;
+    let (status, backend, _, _) = h2_request(port, "GET", "/x", "").await;
+    assert_eq!((status, backend.as_str()), (StatusCode::OK, "a"), "the slots came back");
+    gw.shutdown().await;
+}
+
+/// The small HTTP/2 windows (64 KiB a stream) still carry a whole file piece and more, at once on several streams.
+#[tokio::test]
+async fn http2_bodies_larger_than_the_window_arrive_whole() {
+    let a = Backend::start("a").await;
+    let port = free_port();
+    let gw = gateway_with(&[&a], |c| c.tls = Some(tls_cfg(port))).await;
+    const { assert!(pindrel_gateway::tls::H2_STREAM_WINDOW <= 64 * 1024) };
+    let piece: String = (0..512 * 1024).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
+    let mut jobs = Vec::new();
+    for _ in 0..3 {
+        let piece = piece.clone();
+        jobs.push(tokio::spawn(
+            async move { h2_request(port, "PUT", "/files/uploads/x/0", &piece).await },
+        ));
+    }
+    for j in jobs {
+        let (status, _, body, _) = j.await.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body.len(), piece.len());
+        assert!(body == piece, "the body arrived changed");
+    }
+    gw.shutdown().await;
+}

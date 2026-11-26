@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/http/httptest"
@@ -832,3 +833,69 @@ func last(s []string) string {
 }
 
 var _ = db.File{}
+
+// A piece that takes longer to arrive than the server's write timeout still gets its answer. The real server runs with
+// ReadTimeout and WriteTimeout of 10 s and the handler widens the read side for a slow line; the write side used to stay
+// at headers + 10 s, so the piece was stored and its 204 lost, and the client sent it again forever.
+func TestDB_SlowPieceStillGetsItsAnswer(t *testing.T) {
+	e := newEnv(t, nil)
+	u := e.user()
+	up, _ := e.create(u, 100, "lento.bin", false)
+	piece := bytes.Repeat([]byte{7}, 100)
+
+	srv := httptest.NewUnstartedServer(e.router)
+	srv.Config.ReadTimeout = 300 * time.Millisecond
+	srv.Config.WriteTimeout = 300 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	body, feed := io.Pipe()
+	go func() {
+		for _, b := range piece {
+			time.Sleep(10 * time.Millisecond) // ~1 s for the whole piece, past both timeouts
+			if _, err := feed.Write([]byte{b}); err != nil {
+				return
+			}
+		}
+		feed.Close()
+	}()
+	req, _ := http.NewRequest(http.MethodPut, srv.URL+"/files/uploads/"+up.UploadId+"/0", body)
+	req.ContentLength = int64(len(piece))
+	req.Header.Set("X-Test-User", u.String())
+	req.Header.Set("X-Chunk-Sha256", hexSum(piece))
+	res, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("the piece was sent but its answer was lost: %v", err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNoContent {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+}
+
+// A replica that dies while joining leaves the upload claimed. A fresh claim still answers upload_busy (another request
+// may be joining right now), but one older than any finish can last is taken over instead of blocking for a day.
+func TestDB_StaleFinishClaimIsTakenOver(t *testing.T) {
+	e := newEnv(t, nil)
+	u := e.user()
+	data := bytes.Repeat([]byte{3}, 100)
+	up, _ := e.create(u, int64(len(data)), "orfao.bin", false)
+	if rec := e.put(u, up.UploadId, 0, data); rec.Code != http.StatusNoContent {
+		t.Fatalf("put: %d", rec.Code)
+	}
+	claim := func(age string) {
+		t.Helper()
+		if _, err := e.pool.Exec(context.Background(), "UPDATE uploads SET state = 'finishing', updated_at = now() - $2::interval WHERE id = $1", up.UploadId, age); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claim("1 minute")
+	if _, rec := e.finish(u, up.UploadId); rec.Code != http.StatusConflict || errCode(rec) != "upload_busy" {
+		t.Fatalf("a recent claim: %d %q, want 409 upload_busy", rec.Code, errCode(rec))
+	}
+	claim("1 hour")
+	f, rec := e.finish(u, up.UploadId)
+	if f == nil || f.Size != int64(len(data)) {
+		t.Fatalf("a stale claim was not taken over: %d %q", rec.Code, errCode(rec))
+	}
+}

@@ -139,6 +139,7 @@ INSERT INTO revoked_tokens (
 ) VALUES (
     $1, $2, $3
 )
+ON CONFLICT (token_id) DO NOTHING
 `
 
 type RevokeTokenParams struct {
@@ -147,6 +148,7 @@ type RevokeTokenParams struct {
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 }
 
+// two logouts with the same cookie at once: both passed the revocation check, the second must not be a 500
 func (q *Queries) RevokeToken(ctx context.Context, arg RevokeTokenParams) error {
 	_, err := q.db.Exec(ctx, revokeToken, arg.TokenID, arg.UserID, arg.ExpiresAt)
 	return err

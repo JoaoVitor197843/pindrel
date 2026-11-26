@@ -83,12 +83,26 @@ type Tx = IDBPTransaction<Schema, ['pages', 'bodies', 'secrets', 'media', 'meta'
 
 export class NotesStore {
   #db: IDBPDatabase<Schema>
+  /** Set once another tab, with a newer Pindrel, took this database over (it needs a newer schema). */
+  upgradedElsewhere = false
+  /** Runs before the connection is handed over: what is still pending must be written first, it is the last chance. */
+  onversionchange: () => Promise<void> = async () => {}
 
   private constructor(db: IDBPDatabase<Schema>) {
     this.#db = db
   }
 
+  async #handOver() {
+    this.upgradedElsewhere = true
+    try {
+      await this.onversionchange()
+    } finally {
+      this.#db.close()
+    }
+  }
+
   static async open(name = LOCAL_DB): Promise<NotesStore> {
+    let store: NotesStore | undefined
     const db = await openDB<Schema>(name, VERSION, {
       upgrade(db, oldVersion, _newVersion, tx) {
         if (oldVersion < 1) {
@@ -107,12 +121,15 @@ export class NotesStore {
           if (oldVersion >= 1) void backfill(bodies).then(() => backfill(secrets))
         }
       },
-      // another tab asked for a newer schema: let it, this one reopens on its next load
+      // Another tab asked for a newer schema. Its open waits until this connection closes, so whatever this tab still
+      // has to write goes first (just closing lost every edit made here from then on, with only a vague error).
       blocking() {
-        db.close()
+        if (store) void store.#handOver()
+        else db.close()
       },
     })
-    return new NotesStore(db)
+    store = new NotesStore(db)
+    return store
   }
 
   /** The database of one account. */
@@ -169,8 +186,14 @@ export class NotesStore {
 
   /** The excerpts of vault pages, which are kept with their bodies and not in the list. */
   async loadVaultExcerpts(): Promise<Map<string, string>> {
-    const all = await this.#db.getAll('secrets')
-    return new Map(all.flatMap((s) => (s.kind === 'page' ? [[s.pageId, s.excerpt] as const] : [])))
+    // One vault page at a time, and only the page records (`p:`): `getAll` held every vault body and every secure
+    // block's text in memory at once just to read the excerpts.
+    const out = new Map<string, string>()
+    const range = IDBKeyRange.bound(pageKey(''), pageKey('\uffff'))
+    for (let c = await this.#db.transaction('secrets').store.openCursor(range); c; c = await c.continue()) {
+      if (c.value.kind === 'page') out.set(c.value.pageId, c.value.excerpt)
+    }
+    return out
   }
 
   /** Everything in one transaction: either the whole batch is on disk or none of it. */

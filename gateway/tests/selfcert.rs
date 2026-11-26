@@ -244,6 +244,27 @@ async fn the_private_keys_are_readable_only_by_their_owner() {
     gw.shutdown().await;
 }
 
+/// A power cut between writing a public file and renaming it leaves a world-readable `*.tmp`. The keys must not be
+/// written through such a leftover (their temp file used to be the same one, and `mode` does not change a file that
+/// exists already).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_leftover_world_readable_temp_file_does_not_leak_into_a_key() {
+    use std::os::unix::fs::PermissionsExt;
+    let (a, dir, port) = (Backend::start("a").await, tmp(), free_port());
+    for leftover in ["ca.tmp", "server.tmp", "ca.key.tmp", "server.key.tmp"] {
+        let p = dir.path().join(leftover);
+        fs::write(&p, "meio arquivo").unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let gw = gateway_with(&[&a], |c| c.tls = Some(auto(port, dir.path(), Duration::ZERO))).await;
+    for f in ["ca.key", "server.key"] {
+        let mode = fs::metadata(dir.path().join(f)).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "{f} is {mode:o}");
+    }
+    gw.shutdown().await;
+}
+
 #[tokio::test]
 async fn damaged_files_are_replaced_instead_of_stopping_the_gateway() {
     let (a, dir, port) = (Backend::start("a").await, tmp(), free_port());

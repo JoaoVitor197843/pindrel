@@ -18,10 +18,15 @@ class MemoryKeyValueStore implements KeyValueStore {
   Future<void> write(String key, String value) async => data[key] = value;
 }
 
+/// The secure storage every part of the app uses. On macOS the legacy keychain: the data protection one (the plugin's
+/// default) needs the `keychain-access-groups` entitlement and a provisioning profile, and without them every call
+/// failed, so the session note (with its refresh cookie) went to the plain file instead.
+const appSecureStorage = FlutterSecureStorage(mOptions: MacOsOptions(usesDataProtectionKeychain: false));
+
 /// On the device's secure storage. By default a device where it does not work (no keyring) simply remembers nothing; with
 /// [throwOnError] the failure is passed on, so something else (see `DurableKeyValueStore`) can take over.
 class SecureKeyValueStore implements KeyValueStore {
-  const SecureKeyValueStore([this._storage = const FlutterSecureStorage(), this.throwOnError = false]);
+  const SecureKeyValueStore([this._storage = appSecureStorage, this.throwOnError = false]);
 
   final FlutterSecureStorage _storage;
   final bool throwOnError;

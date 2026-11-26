@@ -28,6 +28,8 @@ Cada versão fica na página de **[Releases](https://github.com/JoaoVitor197843/
 | `pindrel-gateway_<versão>_linux_amd64.tar.gz` e `..._arm64.tar.gz` | gateway para Linux (x86_64 e Raspberry Pi de 64 bits). Descompacte e rode `sudo ./install.sh` para instalar como serviço do systemd (`sudo ./uninstall.sh` remove; `--purge` apaga também a configuração) |
 | `pindrel-gateway_<versão>_windows_amd64_installer.exe` | gateway para Windows com instalador e desinstalador (pergunta o nome, a porta e onde está a API; pode iniciar com o Windows e ativar o HTTPS) |
 | `pindrel-gateway_<versão>_windows_amd64_portable.zip` | gateway para Windows portátil (edite `gateway.env` e rode `iniciar.cmd`) |
+| `pindrel-server_<versão>_windows_amd64_installer.exe` | servidor (API e web) para Windows com o PostgreSQL embutido, ou um que já existe; instalador e desinstalador, pode iniciar com o Windows |
+| `pindrel-server_<versão>_windows_amd64_portable.zip` | servidor para Windows portátil (rode `iniciar.cmd`; os dados ficam na pasta `dados`) |
 
 Os apps **ainda não são assinados**: o Windows mostra o aviso do SmartScreen na primeira execução ("Mais informações" e "Executar assim mesmo"), e o macOS pede para abrir pelo menu de contexto (botão direito em "Abrir"). No Android, é preciso permitir a instalação de fontes desconhecidas.
 
@@ -46,8 +48,8 @@ O contrato de mensagens entre as partes fica em [`shared/protos/`](./shared/prot
 
 Na tela de login, os dois clientes têm uma aba superior para escolher (e, no futuro, adicionar) um servidor:
 
-- **Mobile:** descobre sozinho, por mDNS (`_pindrel._tcp`), os servidores da rede atual (com o plugin `nsd` no Android, iOS e macOS, e com um cliente mDNS próprio no Linux e no Windows) e sorteia um deles, testando se ele responde antes de entrar. A lista acompanha a rede **ao vivo**. Se o servidor escolhido sai da rede, ele **não some**: continua escolhido, a bolinha ao lado do nome passa de verde para vermelha, e ele aparece em "Desconectados". Quando volta, a bolinha volta a ser verde. Com o app em segundo plano, a busca é pausada.
-- **Web:** o servidor padrão **é sempre o embutido** (o mesmo que serve a página). Como navegadores não fazem mDNS, a lista dos outros servidores da rede vem do **gateway**, em `GET /server/discover/`. A aba da web ainda não foi implementada.
+- **Mobile:** descobre sozinho, por mDNS (`_pindrel._tcp`), os servidores da rede atual (com o plugin `nsd` no Android, iOS e macOS, e com um cliente mDNS próprio no Linux e no Windows) e mostra quantos encontrou; a pessoa escolhe (um servidor nunca aberto antes é pareado primeiro, conferindo seis dígitos). A lista acompanha a rede **ao vivo**. Se o servidor escolhido sai da rede, ele **não some**: continua escolhido, a bolinha ao lado do nome passa de verde para vermelha, e ele aparece em "Desconectados". Quando volta, a bolinha volta a ser verde. Com o app em segundo plano, a busca é pausada.
+- **Web:** o servidor padrão **é sempre o embutido** (o mesmo que serve a página). Como navegadores não fazem mDNS, a lista dos outros servidores da rede vem do **gateway**, em `GET /server/discover/`; também dá para adicionar um servidor pelo endereço.
 
 **mDNS e gateway:** quem anuncia o servidor na rede é o **gateway**, e não cada instância da API. Ele anuncia só na interface da rede local, resolve conflito de nomes (`Pindrel`, `Pindrel (2)`...), avisa quando sai e, como o Wi-Fi perde muitos pacotes multicast, refaz a busca de tempos em tempos e **lembra** dos servidores já vistos. Sem o gateway (um `docker compose up` simples) não há anúncio na rede. O mDNS só funciona com o gateway na **rede do host**: um container em rede bridge não enxerga a LAN.
 
@@ -100,10 +102,10 @@ docker compose -f compose.yml -f compose.lb.yml up -d --build --scale pindrel=2
 
 O que muda com o overlay:
 
-- O **gateway** (imagem `scratch` de ~2,5 MB, limite de 16 MB de RAM) fica na **rede do host**, porque o mDNS precisa enxergar a LAN, e escuta na porta `PORT` (padrão 8080).
+- O **gateway** (imagem `scratch` de ~2,5 MB, limite de 48 MB de RAM) fica na **rede do host**, porque o mDNS precisa enxergar a LAN, e escuta na porta `PORT` (padrão 8080).
 - As réplicas da API deixam de publicar a porta na rede e publicam só em `127.0.0.1:9000-9099` (uma porta por réplica, até 100).
 - As réplicas passam a rodar com `IN_APP_RATE_LIMIT=false`: quem limita é o gateway.
-- O limite real de réplicas é o Postgres (`max_connections=20`): com o pool padrão (`DB_MAX_CONNS=4`) cabem cerca de 8 réplicas.
+- O limite real de réplicas é o Postgres (`max_connections=20`): com o pool padrão (`DB_MAX_CONNS=4`) cabem cerca de 5 réplicas com todas as conexões em uso.
 
 No Docker Desktop (Windows e macOS) os containers rodam numa VM e não enxergam a LAN; lá o gateway deve rodar como binário nativo (veja o [README do gateway](./gateway/README.md)).
 

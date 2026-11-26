@@ -4,7 +4,14 @@
 //! Browsers open WebSockets with HTTP/1.1 upgrades even over TLS, so this is what `/ws/sync` needs. (WebSocket over
 //! HTTP/2 and HTTP/3, RFC 8441 and 9220, is not offered by any browser or server tested; a request that did not arrive
 //! as an HTTP/1.1 upgrade is refused with 426.)
-use std::{net::IpAddr, sync::Arc, time::Duration};
+use std::{
+    net::IpAddr,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -143,7 +150,7 @@ where
     error(StatusCode::BAD_GATEWAY, "bad_gateway", "no replica available")
 }
 
-/// Copies both ways until one side closes, goes quiet for `idle`, or the gateway stops.
+/// Copies both ways until one side closes, nothing crosses in either direction for `idle`, or the gateway stops.
 async fn join<A, B>(a: A, b: B, idle: Duration, mut stop: watch::Receiver<bool>)
 where
     A: AsyncRead + AsyncWrite + Unpin,
@@ -151,8 +158,9 @@ where
 {
     let (mut ar, mut aw) = tokio::io::split(a);
     let (mut br, mut bw) = tokio::io::split(b);
-    let mut up = Box::pin(copy_idle(&mut ar, &mut bw, idle));
-    let mut down = Box::pin(copy_idle(&mut br, &mut aw, idle));
+    let activity = Activity::new();
+    let mut up = Box::pin(copy_idle(&mut ar, &mut bw, idle, &activity));
+    let mut down = Box::pin(copy_idle(&mut br, &mut aw, idle, &activity));
     // the close handshake is a frame each way: when one direction ends the other gets a moment to deliver its last bytes
     tokio::select! {
         _ = &mut up => { let _ = time::timeout(Duration::from_secs(5), &mut down).await; }
@@ -161,25 +169,57 @@ where
     }
 }
 
-async fn copy_idle<R, W>(from: &mut R, to: &mut W, idle: Duration)
+/// When a tunnel last carried a byte, either way. One clock for both directions: a browser cannot send pings, so a
+/// channel where only the server talks would otherwise be closed for the silence of the client's side.
+struct Activity {
+    start: time::Instant,
+    last_ms: AtomicU64,
+}
+
+impl Activity {
+    fn new() -> Self {
+        Self {
+            start: time::Instant::now(),
+            last_ms: AtomicU64::new(0),
+        }
+    }
+
+    fn touch(&self) {
+        self.last_ms.store(self.start.elapsed().as_millis() as u64, Ordering::Relaxed);
+    }
+
+    fn quiet_for(&self) -> Duration {
+        self.start
+            .elapsed()
+            .saturating_sub(Duration::from_millis(self.last_ms.load(Ordering::Relaxed)))
+    }
+}
+
+async fn copy_idle<R, W>(from: &mut R, to: &mut W, idle: Duration, activity: &Activity)
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
     let mut buf = vec![0u8; BUFFER];
-    loop {
-        let read = from.read(&mut buf);
+    'copy: loop {
         let n = if idle.is_zero() {
-            read.await
+            from.read(&mut buf).await
         } else {
-            match time::timeout(idle, read).await {
-                Ok(r) => r,
-                Err(_) => break,
+            // a read cut by the timer loses nothing (`read` is cancel safe): wait again for what is left of the silence
+            loop {
+                let left = idle.saturating_sub(activity.quiet_for());
+                if left.is_zero() {
+                    break 'copy;
+                }
+                if let Ok(r) = time::timeout(left, from.read(&mut buf)).await {
+                    break r;
+                }
             }
         };
         match n {
             Ok(0) | Err(_) => break,
             Ok(n) => {
+                activity.touch();
                 if to.write_all(&buf[..n]).await.is_err() {
                     break;
                 }

@@ -227,8 +227,12 @@ jobs:
           sh .forgejo/scripts/github-assets.sh "$MIRROR_REPO" "$GITHUB_REF_NAME" /tmp/assets \
             "pindrel-app_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-app_${GITHUB_REF_NAME}_windows_amd64_installer.exe" \
             "pindrel-app_${GITHUB_REF_NAME}_macos_universal.zip" \
-            "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_installer.exe" \
-            "pindrel-server_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-server_${GITHUB_REF_NAME}_windows_amd64_installer.exe"
+            "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_installer.exe"
+          # The server's job on GitHub is continue-on-error (new, not tried on a real Windows yet): its files are
+          # wanted but never hold back the others. They are made in the same run, so a short wait is enough.
+          WAIT_SECS=900 sh .forgejo/scripts/github-assets.sh "$MIRROR_REPO" "$GITHUB_REF_NAME" /tmp/assets \
+            "pindrel-server_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-server_${GITHUB_REF_NAME}_windows_amd64_installer.exe" \
+            || echo "sem os arquivos do servidor para Windows nesta release: o job server-windows do GitHub não os publicou"
           sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*
 
   # The public downloads page is the GitHub release: it gets a copy of everything the Forgejo release holds (notes and
@@ -236,6 +240,8 @@ jobs:
   # one waits until the tag and the GitHub build exist; here too a failure takes nothing back.
   github-release:
     needs: desktop
+    # runs even when `desktop` failed (GitHub late or down): the release of the Forgejo is copied with what it has
+    if: ${{ !cancelled() }}
     runs-on: build
     container:
       image: ci-pc:1

@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -135,5 +136,47 @@ func TestPortableSettingsAreAccepted(t *testing.T) {
 	}
 	if _, err := withSettings(t, text); err != nil {
 		t.Fatalf("%v\n%s", err, text)
+	}
+}
+
+// The start script follows the server long enough to see it give up on a database that never answers; otherwise the
+// person is told nothing (the script already left). Pinned to database.Connect, whose numbers can change.
+func TestStartFollowsLongerThanTheDatabaseWait(t *testing.T) {
+	num := func(src, pattern string) int {
+		t.Helper()
+		m := regexp.MustCompile(pattern).FindStringSubmatch(src)
+		if m == nil {
+			t.Fatalf("pattern %q not found", pattern)
+		}
+		n, _ := strconv.Atoi(m[1])
+		return n
+	}
+	pg := string(read(t, "../../internal/database/postgres.go"))
+	attempts := num(pg, `Connect\(ctx, cfg, (\d+)\)`)
+	ping := num(pg, `WithTimeout\(ctx, (\d+)\*time\.Second\)`)
+	pause := num(pg, `time\.After\((\d+) \* time\.Second\)`)
+	worst := (attempts*ping + (attempts-1)*pause) * 1000
+	follow := num(string(read(t, "pindrel-server.ps1")), `WaitForExit\((\d+)\)\) \{ return 0 \}`)
+	if follow < worst+5000 {
+		t.Fatalf("the script follows the server for %d ms, but its database wait can take %d ms", follow, worst)
+	}
+}
+
+// With an accent in the folder of the programs, initdb cannot make a UTF8 cluster (it writes that path into an SQL
+// command in the ANSI code page), so the cluster may be WIN125x. The Pindrel database itself must still be UTF8 and C,
+// which only a createdb from template0 with both given can promise.
+func TestPindrelDatabaseIsAlwaysUTF8(t *testing.T) {
+	src := string(read(t, "pindrel-server.ps1"))
+	createdb := regexp.MustCompile(`createdb\.exe'\) @\(([^)]*)\)`).FindStringSubmatch(src)
+	if createdb == nil {
+		t.Fatal("createdb call not found")
+	}
+	for _, want := range []string{`'-E', 'UTF8'`, `'-T', 'template0'`, `'--locale=C'`} {
+		if !strings.Contains(createdb[1], want) {
+			t.Errorf("createdb lacks %s: %s", want, createdb[1])
+		}
+	}
+	if !strings.Contains(src, `'-E', $encoding`) || !strings.Contains(src, "function Get-ClusterEncoding") {
+		t.Error("initdb no longer takes the encoding that suits the folder of the programs")
 	}
 }

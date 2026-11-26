@@ -626,7 +626,9 @@ var
   Up: Boolean;
 begin
   Port := ConfiguredPort;
-  Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + ExpandConstant('{app}\start-gateway.ps1') + '"',
+  // as the person, never as the elevated installer: what the gateway creates in the data folder (log, id, certificates)
+  // would belong to the administrators, and the shortcut that starts it at the next logon could not write there
+  ExecAsOriginalUser('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + ExpandConstant('{app}\start-gateway.ps1') + '"',
     '', SW_HIDE, ewNoWait, Rc);
   Up := Exec('powershell.exe', '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\wait-up.ps1') + '" ' + IntToStr(Port) +
     ' "' + ExpandConstant('{app}\gateway.exe') + '" 15', '', SW_HIDE, ewWaitUntilTerminated, Rc) and (Rc = 0);
@@ -652,6 +654,11 @@ begin
   try
     if not ForceDirectories(DataDir('')) then
       RaiseException('não foi possível criar a pasta dos dados ' + DataDir(''));
+    // For all users the folder is in ProgramData, where people can read but not change what the installer made, and the
+    // gateway runs as whoever logs on: the local users may change it (so every account of this computer can read the
+    // CA key too: the all-users mode is for a computer whose accounts trust each other).
+    if IsAdminInstallMode then
+      Exec('icacls.exe', '"' + DataDir('') + '" /grant *S-1-5-32-545:(OI)(CI)M', '', SW_HIDE, ewWaitUntilTerminated, Rc);
     WriteConfig;
     WriteScripts;
     if WizardIsTaskSelected('firewall') then
@@ -671,7 +678,7 @@ begin
     else
     begin
       if WizardIsTaskSelected('tray') and (not WizardSilent) then
-        Exec(ExpandConstant('{app}\pindrel-gateway-tray.exe'), '--data "' + DataDir('') + '"', '', SW_SHOW, ewNoWait, Rc);
+        ExecAsOriginalUser(ExpandConstant('{app}\pindrel-gateway-tray.exe'), '--data "' + DataDir('') + '"', '', SW_SHOW, ewNoWait, Rc);
       if WizardIsTaskSelected('startnow') and (not WizardSilent) then
         StartAndReport;
     end;

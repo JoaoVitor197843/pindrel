@@ -5,7 +5,7 @@
   import { fillSample } from './lib/sample'
   import { selection } from './lib/stores/servers.svelte'
   import { auth } from './lib/stores/auth.svelte'
-  import { Nav } from './lib/stores/nav.svelte'
+  import { Nav, noteIdFrom } from './lib/stores/nav.svelte'
   import { Workspace } from './lib/stores/workspace.svelte'
   import { NotesStore } from './lib/storage/notesStore'
   import { toast } from './lib/stores/toast.svelte'
@@ -29,7 +29,18 @@
   /** A saved session is being turned back into a live one: neither the login nor the panel may flash meanwhile. */
   let restoring = $state(false)
 
+  /** The panel's address for a mode, keeping the page that is open (`/notes/:id`). */
+  const panelUrl = (mode: 'local' | 'conta') => `${nav.noteId ? `/notes/${nav.noteId}` : '/'}?tela=painel&modo=${mode}`
+
   window.addEventListener('popstate', () => {
+    // Back from the account panel to the login while still signed in: the session, the account's notes and their
+    // saving would stay alive under a login screen, and "Continuar sem login" there would run local mode with the
+    // account's session. The session decides: the panel stays (leaving is "Sair da conta").
+    if (!inPanel() && openAccountId && auth.status === 'in') {
+      history.replaceState(null, '', panelUrl('conta'))
+      preview = true
+      return
+    }
     preview = inPanel()
     if (preview && isLocal() && !ws.local) goLocal()
     if (preview && isAccount()) {
@@ -66,13 +77,18 @@
   }
 
   function continueLocal() {
-    history.pushState(null, '', '/?tela=painel&modo=local')
+    // local mode never talks to the server: a session still open here ends first
+    if (auth.status === 'in') {
+      if (openAccountId) leaveAccount()
+      void auth.logout()
+    }
+    history.pushState(null, '', panelUrl('local'))
     preview = true
     goLocal()
   }
 
   function signedIn(user: Account) {
-    history.pushState(null, '', '/?tela=painel&modo=conta')
+    history.pushState(null, '', panelUrl('conta'))
     preview = true
     enterAccount(user)
   }
@@ -101,8 +117,10 @@
 
   const ws = new Workspace()
   if (inPanel() && isLocal()) goLocal()
-  // A device that had a session turns it back into one before anything shows. Local mode never asks the server.
-  if (!isLocal() && (isAccount() || (auth.remembered && location.pathname === '/' && !inPanel()))) {
+  // A device that had a session turns it back into one before anything shows (a link to one of its pages too). Local
+  // mode never asks the server.
+  const restorable = location.pathname === '/' || noteIdFrom(location.pathname) !== null
+  if (!isLocal() && (isAccount() || (auth.remembered && restorable && !inPanel()))) {
     restoring = true
     void auth.restore().then((ok) => {
       restoring = false

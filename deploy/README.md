@@ -5,7 +5,7 @@ O Pi **puxa** as versões novas: nada entra nele de fora, e ele não compila nad
 ```
 push na main ─▶ testes no Forgejo ─▶ (todos verdes) ─▶ GitHub Actions ─▶ imagens amd64+arm64 no Docker Hub
                                                           │
-            timer do systemd no Pi (a cada 5 min) ◀───────┘  docker compose pull → up --wait → rollback
+            timer do systemd no Pi (a cada minuto) ◀───────┘  docker compose pull → up --wait → rollback
 ```
 
 ## O que faz cada peça

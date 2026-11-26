@@ -86,17 +86,25 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// The temporary file a write goes through, named after the whole file name: `ca.key`, `ca.pem` and `ca.names` used to
+/// share `ca.tmp`, so a public file left half-written (0644) by a power cut became the file a private key went through.
+fn temp_of(path: &Path) -> std::path::PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    path.with_file_name(format!("{name}.tmp"))
+}
+
 fn write_private(path: &Path, data: &str) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::{io::Write, os::unix::fs::OpenOptionsExt};
-        let tmp = path.with_extension("tmp");
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        let tmp = temp_of(path);
+        // `mode` only applies to a file that does not exist yet: a leftover keeps whatever it had, so it goes first
+        match fs::remove_file(&tmp) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        let mut f = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
         f.write_all(data.as_bytes())?;
         f.sync_all()?;
         fs::rename(tmp, path)
@@ -108,7 +116,7 @@ fn write_private(path: &Path, data: &str) -> io::Result<()> {
 }
 
 fn write_public(path: &Path, data: &str) -> io::Result<()> {
-    let tmp = path.with_extension("tmp");
+    let tmp = temp_of(path);
     fs::write(&tmp, data)?;
     fs::rename(tmp, path)
 }

@@ -43,6 +43,8 @@ class _AccountGateState extends ConsumerState<AccountGate> {
 
   void _onSession() {
     if (_leaving || _session.status != AuthStatus.out || !mounted) return;
+    // a screen that is no longer on top (erasing the device signs out under its "Apagando..." screen) does not navigate
+    if (ModalRoute.of(context)?.isCurrent == false) return;
     _leave(message: _session.endedByServer ? 'Sua sessão terminou. Entre de novo.' : null);
   }
 

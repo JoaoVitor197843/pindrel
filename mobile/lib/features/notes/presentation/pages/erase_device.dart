@@ -20,9 +20,13 @@ Future<void> eraseThisDevice(BuildContext context) async {
   try {
     // the server may be slow or gone: the device is signed out at once, telling the server must not hold this up
     await container.read(authSessionProvider).logout().timeout(const Duration(seconds: 3), onTimeout: () {});
-    container.invalidate(workspaceProvider); // closes the database of the device's notes
-    await Future<void>.delayed(const Duration(milliseconds: 50)); // and the ones of accounts, whose screen is gone
+    // every notes database is closed before its file is deleted (Windows refuses to delete an open file)
+    for (final ws in [...container.read(openWorkspacesProvider)]) {
+      ws.dispose();
+    }
     await container.read(deviceDataProvider).erase();
+    // the next reader opens a fresh file instead of the closed one (without an AppRestart above, as in tests)
+    container.invalidate(workspaceProvider);
   } catch (e) {
     if (navigator.mounted) {
       unawaited(navigator.pushAndRemoveUntil(

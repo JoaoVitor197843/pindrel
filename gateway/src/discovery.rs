@@ -5,7 +5,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, RwLock,
     },
     time::Duration,
 };
@@ -129,11 +129,13 @@ pub struct Registry {
     found: Mutex<HashMap<String, Server>>,
     memory: Mutex<Memory>,
     own_port: u16,
-    own_ips: Vec<String>,
+    /// This machine's own LAN address and the LAN itself; both change when the machine joins another network (see
+    /// `set_lan`).
+    own_ips: RwLock<Vec<String>>,
     own_id: String,
     /// Announced addresses outside it (a VPN such as Tailscale, docker bridges) are dropped: mDNS does not
     /// cross them, so nobody on this LAN could use them.
-    lan: Option<Lan>,
+    lan: RwLock<Option<Lan>>,
     searches: AtomicU64,
     /// Woken when a server stops being announced, so it is checked right away.
     pub lost: Notify,
@@ -145,9 +147,9 @@ impl Registry {
             found: Mutex::new(HashMap::new()),
             memory: Mutex::new(Memory::default()),
             own_port,
-            own_ips,
+            own_ips: RwLock::new(own_ips),
             own_id: String::new(),
-            lan: None,
+            lan: RwLock::new(None),
             searches: AtomicU64::new(0),
             lost: Notify::new(),
         }
@@ -163,17 +165,33 @@ impl Registry {
         &self.own_id
     }
 
-    pub fn with_lan(mut self, lan: Option<Lan>) -> Self {
-        self.lan = lan;
+    pub fn with_lan(self, lan: Option<Lan>) -> Self {
+        *self.lan.write().unwrap() = lan;
         self
     }
 
+    /// The LAN as it is now.
+    pub fn lan(&self) -> Option<Lan> {
+        *self.lan.read().unwrap()
+    }
+
+    /// The machine joined another network (or its first one, after starting before it): announcements are filtered by
+    /// the new subnet, and its own new address is recognised as itself.
+    pub fn set_lan(&self, lan: Option<Lan>) {
+        *self.lan.write().unwrap() = lan;
+        *self.own_ips.write().unwrap() = lan.map(|l| vec![l.ip.to_string()]).unwrap_or_default();
+    }
+
     fn is_self(&self, s: &Server) -> bool {
-        (!s.id.is_empty() && s.id == self.own_id) || (s.port == self.own_port && s.ips.iter().any(|i| self.own_ips.contains(i)))
+        if !s.id.is_empty() && s.id == self.own_id {
+            return true;
+        }
+        let own = self.own_ips.read().unwrap();
+        s.port == self.own_port && s.ips.iter().any(|i| own.contains(i))
     }
 
     pub fn upsert(&self, fullname: String, mut server: Server) {
-        if let Some(lan) = &self.lan {
+        if let Some(lan) = self.lan() {
             // our own address is not "another host" for `allows`, but it must reach `is_self`
             server
                 .ips
@@ -185,6 +203,10 @@ impl Registry {
         if self.is_self(&server) {
             return; // never listed anyway; keeping it would only take a place in memory and in the saved file
         }
+        // the saved file refuses a server with more addresses than this, and with it every server remembered
+        let mut seen = std::collections::HashSet::new();
+        server.ips.retain(|ip| seen.insert(ip.clone()));
+        server.ips.truncate(crate::proto::MAX_ADDRESSES);
         {
             let mut f = self.found.lock().unwrap();
             if f.len() >= MAX_LIVE && !f.contains_key(&fullname) {
@@ -372,6 +394,44 @@ pub fn start(
     Ok(d)
 }
 
+/// Moves the announcement to the machine's new LAN address: the record of the old address is withdrawn and the new one
+/// announced, on the new interface only (as `start` does). With `MDNS_INTERFACES` the interfaces are the person's choice
+/// and stay as they are. Without a LAN the record follows every interface's address, as when it started without one.
+pub fn move_announcement(
+    d: &ServiceDaemon,
+    me: &Announce<'_>,
+    ifaces: &[String],
+    old: Option<IpAddr>,
+    new: Option<IpAddr>,
+) -> Result<(), String> {
+    let Announce { name, id, port, tls_port } = *me;
+    let e = |e: mdns_sd::Error| e.to_string();
+    let _ = d.unregister(&format!("{name}.{SERVICE_TYPE}"));
+    if ifaces.is_empty() {
+        match old {
+            Some(ip) => d.disable_interface(IfKind::Addr(ip)).map_err(e)?,
+            None => d.disable_interface(IfKind::All).map_err(e)?,
+        }
+        match new {
+            Some(ip) => d.enable_interface(IfKind::Addr(ip)).map_err(e)?,
+            None => d.enable_interface(IfKind::All).map_err(e)?,
+        }
+        d.disable_interface(IfKind::IPv6).map_err(e)?;
+    }
+    let host = format!("{}.local.", gethostname::gethostname().to_string_lossy());
+    let tls_text = tls_port.to_string();
+    let mut props = vec![("name", name), ("id", id)];
+    if tls_port != 0 {
+        props.push(("tls", tls_text.as_str()));
+    }
+    let info = match new {
+        Some(ip) => ServiceInfo::new(SERVICE_TYPE, name, &host, ip, port, &props[..]),
+        None => ServiceInfo::new(SERVICE_TYPE, name, &host, "", port, &props[..]).map(|i| i.enable_addr_auto()),
+    }
+    .map_err(e)?;
+    d.register(info).map_err(e)
+}
+
 /// How long to wait before restarting the search: often while nobody else is known (the first
 /// answers may have been lost), rarely afterwards.
 pub fn next_wait(refresh: Duration, others_known: bool) -> Duration {
@@ -478,6 +538,40 @@ mod tests {
         assert_eq!(r.list()[0].ips, ["192.168.1.9"]);
         r.upsert("y".into(), srv("Y", "100.101.1.3", 8200));
         assert_eq!(r.list().len(), 1, "a server reachable only outside the LAN is not listed");
+    }
+
+    /// A device announcing more addresses than the saved file allows used to make that file unreadable at the next
+    /// start, and with it every remembered server.
+    #[test]
+    fn a_server_with_too_many_addresses_keeps_the_first_ones_and_the_saved_list_still_reads() {
+        let r = Registry::new(1, vec![]).with_lan(Some(lan()));
+        let mut s = srv("Muitos", "192.168.1.100", 8200);
+        s.ips.extend((101..130).map(|i| format!("192.168.1.{i}")));
+        s.ips.push("192.168.1.100".into());
+        r.upsert("m".into(), s);
+        let kept = r.found.lock().unwrap()["m"].clone();
+        assert_eq!(kept.ips.len(), crate::proto::MAX_ADDRESSES);
+        assert_eq!(kept.ips[0], "192.168.1.100", "the announced order is kept");
+        let back = crate::proto::parse_discovered_servers(&crate::proto::discovered_servers(&[kept]));
+        assert!(back.is_some_and(|b| b.len() == 1), "the saved list must read back");
+    }
+
+    /// A gateway that started before its network (a logon shortcut, Wi-Fi still connecting) or moved to another one
+    /// filters announcements by the LAN it is on now and still hides itself at its new address.
+    #[test]
+    fn the_lan_can_change_while_the_gateway_runs() {
+        let r = Registry::new(8200, vec![]);
+        r.upsert("x".into(), srv("X", "100.101.1.2", 8200));
+        assert_eq!(r.list().len(), 1, "with no LAN known nothing is filtered");
+        r.set_lan(Some(lan()));
+        r.upsert("y".into(), srv("Y", "100.101.1.3", 8200));
+        assert!(r.list().iter().all(|s| s.name != "Y"), "a server outside the new LAN is not listed");
+        r.upsert("me".into(), srv("Me", &lan().ip.to_string(), 8200));
+        assert!(
+            r.list().iter().all(|s| s.name != "Me"),
+            "its own new address is recognised as itself"
+        );
+        assert_eq!(r.lan(), Some(lan()));
     }
 
     fn cand(ip: &str, physical: bool) -> Candidate {

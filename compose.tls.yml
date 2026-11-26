@@ -3,8 +3,9 @@
 # On a host that runs the released images (the Raspberry Pi) the same file goes after compose.registry.yml: it only sets
 # environment and memory, the gateway image already carries the TLS code (the Dockerfile builds it for amd64 and arm64).
 # The gateway creates a CA and its server certificate on the first start (kept in the `gateway-data` volume: keep it, or
-# every paired device has to pair again), serves HTTP/1.1 and HTTP/2 on TLS_PORT and turns the plain port into a
-# page that explains how to connect securely (see CLAUDE.md, "TLS"). Open http://<this machine>:${PORT:-8080}/ to start.
+# every paired device has to pair again) and serves HTTP/1.1 and HTTP/2 on TLS_PORT. The plain port keeps answering as
+# before (HTTP_MODE=full); http://<this machine>:${PORT:-8080}/server/connect/ explains how to connect securely and pair
+# a device (with HTTP_MODE=redirect the plain port serves only that page and its certificate; see CLAUDE.md, "TLS").
 services:
   gateway:
     # 1000 open WebSockets measured 28 MiB; compose.lb.yml now has the same 48m cap

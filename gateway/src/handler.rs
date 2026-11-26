@@ -28,6 +28,10 @@ pub struct App {
     pub ws_stop: tokio::sync::watch::Sender<bool>,
     /// Room for request bodies held in memory, in KiB (see `Config::body_budget`).
     pub(crate) body_budget: Arc<tokio::sync::Semaphore>,
+    /// Open connections, shared by the plain and the TLS listener: `MAX_CONNECTIONS` and `MAX_CONNECTIONS_PER_IP` are
+    /// for the whole gateway (with a budget per listener, TLS on meant twice both, and twice the memory they bound).
+    pub(crate) conn_slots: Arc<tokio::sync::Semaphore>,
+    pub(crate) conn_per_ip: Arc<crate::limiter::ConnLimit>,
     /// Public CA certificate (PEM) and its SHA-256 fingerprint, when the gateway keeps its own CA (`TLS_AUTO`).
     pub ca: RwLock<Option<(String, String)>>,
     /// The session of the pairing by six digits (see `pairing`).
@@ -38,6 +42,7 @@ pub struct App {
 impl App {
     pub fn new(cfg: Config, registry: Arc<Registry>, address: Option<String>) -> Self {
         let (cfg_ws, cfg_ws_ip) = (cfg.max_websockets, cfg.max_websockets_per_ip);
+        let (cfg_conns, cfg_conns_ip) = (cfg.max_connections, cfg.max_connections_per_ip);
         // rounded up like each share (`proxy`), so a budget of one body always holds that body
         let budget_kib = cfg.body_budget.div_ceil(1024);
         #[cfg_attr(not(feature = "selfcert"), allow(unused_variables))]
@@ -58,6 +63,8 @@ impl App {
             ws_per_ip: crate::limiter::ConnLimit::new(cfg_ws_ip),
             ws_stop: tokio::sync::watch::channel(false).0,
             body_budget: Arc::new(tokio::sync::Semaphore::new(budget_kib)),
+            conn_slots: Arc::new(tokio::sync::Semaphore::new(cfg_conns)),
+            conn_per_ip: crate::limiter::ConnLimit::new(cfg_conns_ip),
             ca: RwLock::new(None),
             #[cfg(feature = "selfcert")]
             pairing: crate::pairing::Pairing::new(max_pairings),
@@ -170,10 +177,10 @@ where
         return Ok(crate::websocket::tunnel(&app, ip, secure || via_proxy, &mut req).await);
     }
     let path = req.uri().path();
+    // a tunnel, or a peer outside the private ranges (a port forwarded on the router): the internet, as far as we know
+    let off_lan = off_lan(via_proxy, peer.ip());
     // the CA and the page that explains it are for the people on the network of this server, never for a tunnel or the internet
-    if (matches!(path, "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") || path.starts_with("/server/pair/"))
-        && (via_proxy || !lan_peer(peer.ip()))
-    {
+    if (matches!(path, "/server/ca.pem" | "/server/ca.crt" | "/server/connect/") || path.starts_with("/server/pair/")) && off_lan {
         return Ok(error(StatusCode::NOT_FOUND, "not_found", "not found"));
     }
     #[cfg(feature = "selfcert")]
@@ -197,8 +204,8 @@ where
     }
     if req.method() == Method::GET && path == "/server/discover/" {
         // the list is the map of the LAN (names, private addresses): only for clients that are on it, never for
-        // whoever reaches a tunnel
-        if via_proxy {
+        // whoever reaches a tunnel or a forwarded port
+        if off_lan {
             return Ok(error(StatusCode::NOT_FOUND, "not_found", "not found"));
         }
         let mut r = reply(
@@ -220,10 +227,10 @@ where
             return Ok(rate_limited(wait));
         }
     }
-    Ok(proxy(&app, ip, via_proxy, secure, req).await)
+    Ok(proxy(&app, ip, via_proxy, off_lan, secure, req).await)
 }
 
-async fn proxy<B>(app: &App, client_ip: IpAddr, via_proxy: bool, secure: bool, req: Request<B>) -> Response<Body>
+async fn proxy<B>(app: &App, client_ip: IpAddr, via_proxy: bool, off_lan: bool, secure: bool, req: Request<B>) -> Response<Body>
 where
     B: HttpBody<Data = Bytes> + Send + 'static,
     B::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -375,7 +382,7 @@ where
                     p.headers
                         .insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, header::HeaderValue::from_static(exposed));
                 }
-                if !via_proxy && parts.method == Method::GET && parts.uri.path() == "/server/info/" {
+                if !off_lan && parts.method == Method::GET && parts.uri.path() == "/server/info/" {
                     let address = app.address.read().ok().and_then(|a| a.clone());
                     if let Some(v) = address.and_then(|a| header::HeaderValue::from_str(&a).ok()) {
                         p.headers.insert(ADDRESS_HEADER, v);
@@ -743,6 +750,12 @@ fn public_ca_routes<B>(app: &App, req: &Request<B>) -> Response<Body> {
 
 /// Is the peer on the local network of this machine (loopback, private, link-local, unique-local)? `100.64.0.0/10` (carrier
 /// grade NAT, where VPNs such as Tailscale live) is not.
+/// Whether a request may come from outside the LAN: through a declared proxy (a tunnel), or from an address outside the
+/// private ranges (a port forwarded on the router). The map of the LAN and the LAN address are never given to those.
+pub(crate) fn off_lan(via_proxy: bool, peer: IpAddr) -> bool {
+    via_proxy || !lan_peer(peer)
+}
+
 pub(crate) fn lan_peer(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v) => v.is_loopback() || v.is_private() || v.is_link_local(),
@@ -759,7 +772,7 @@ pub(crate) fn lan_peer(ip: IpAddr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_host, lan_peer};
+    use super::{clean_host, lan_peer, off_lan};
     use hyper::Request;
 
     #[test]
@@ -810,6 +823,19 @@ mod tests {
             "0.0.0.0",
         ] {
             assert!(!lan_peer(bad.parse().unwrap()), "{bad}");
+        }
+    }
+
+    /// A forwarded port reaches the gateway straight from the internet, with no proxy declared: the map of the LAN
+    /// (`/server/discover/`) and `x-pindrel-address` used to be served to it.
+    #[test]
+    fn a_peer_outside_the_private_ranges_is_off_the_lan_even_without_a_proxy() {
+        for public in ["203.0.113.7", "8.8.8.8", "100.64.1.2", "2001:db8::1"] {
+            assert!(off_lan(false, public.parse().unwrap()), "{public}");
+        }
+        for private in ["192.168.1.20", "10.0.0.5", "127.0.0.1", "fd00::5"] {
+            assert!(!off_lan(false, private.parse().unwrap()), "{private}");
+            assert!(off_lan(true, private.parse().unwrap()), "{private} through a declared proxy");
         }
     }
 }

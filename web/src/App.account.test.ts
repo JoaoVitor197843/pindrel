@@ -145,6 +145,28 @@ describe('App — conta', () => {
     expect(await screen.findByRole('heading', { name: 'Minhas páginas' })).toBeTruthy()
   })
 
+  it('o botão Voltar do navegador não leva ao login com a sessão ainda aberta', async () => {
+    // before: the login showed while the account, its notes and its session stayed alive behind it, and "Continuar sem
+    // login" from there ran local mode with the account's session
+    render(App)
+    await signIn()
+    await screen.findByRole('heading', { name: 'Minhas páginas' })
+    history.pushState(null, '', '/')
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    await waitFor(() => expect(location.search).toBe('?tela=painel&modo=conta'))
+    expect(screen.queryByRole('heading', { name: 'Bem-vindo de volta' })).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Minhas páginas' })).toBeTruthy()
+  })
+
+  it('o link de uma página abre a sessão lembrada, e a página continua no endereço', async () => {
+    data.set('pindrel:account', '1')
+    history.replaceState(null, '', '/notes/n105')
+    render(App)
+    await waitFor(() => expect(calls).toContain('/auth/refresh/'))
+    await waitFor(() => expect(`${location.pathname}${location.search}`).toBe('/notes/n105?tela=painel&modo=conta'))
+    expect(screen.queryByRole('heading', { name: 'Bem-vindo de volta' })).toBeNull()
+  })
+
   it('o cookie que não vale mais manda para o login e esquece o aparelho', async () => {
     data.set('pindrel:account', '1')
     server({ '/auth/refresh/': () => err(401, 'invalid_refresh_token') })

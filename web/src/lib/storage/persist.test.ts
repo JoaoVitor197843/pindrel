@@ -168,6 +168,36 @@ describe('notes in IndexedDB', () => {
     expect(made.id).not.toBe(again.pages[1].id)
   })
 
+  it('two tabs on the same database never give two new pages the same id', async () => {
+    // nothing tells one tab what the other wrote: the old counter, raised only when the list loaded, made the second
+    // tab reuse the first tab's id and its page replaced the other one on disk
+    const a = await start()
+    const b = await start()
+    const one = a.newPage('Da aba A')
+    a.touch(one.id)
+    await a.persist!.flush()
+    const two = b.newPage('Da aba B')
+    b.touch(two.id)
+    await b.persist!.flush()
+    expect(two.id).not.toBe(one.id)
+    expect((await raw('pages')).map((p) => p.title).sort()).toEqual(['Da aba A', 'Da aba B'])
+  })
+
+  it('a newer Pindrel opening the database in another tab gets what this tab had not written yet', async () => {
+    const ws = await start()
+    const page = ws.newPage('Escrita antes da atualização')
+    ws.touch(page.id) // still waiting for the 400 ms of the debounce
+    // the other tab, with a newer schema: its open waits until this tab lets go
+    const newer = await openDB(name, 99)
+    try {
+      const titles = (await newer.getAll('pages')).map((p: { title: string }) => p.title)
+      expect(titles).toContain('Escrita antes da atualização')
+    } finally {
+      newer.close()
+    }
+    expect(ws.persist!.store.upgradedElsewhere).toBe(true)
+  })
+
   it('a page made while the list is still loading is not lost', async () => {
     const first = await start()
     first.newPage('já salva')
@@ -220,6 +250,24 @@ describe('notes in IndexedDB', () => {
     expect(seen).toEqual([1])
     await again.persist!.flush()
     await vi.waitFor(() => expect(again.pages[0].content).toBeNull())
+  })
+
+  it('an export with a body that cannot be read is not made, and the bodies that were read go again', async () => {
+    // before: the page went out as its excerpt (Markdown) or as nothing (JSON), under "Exportação pronta"
+    const ws = await start()
+    ws.newPage('Legível').content!.push(para('a', 'um'))
+    ws.newPage('Ilegível').content!.push(para('b', 'dois'))
+    for (const p of ws.pages) ws.touch(p.id)
+    const again = await restart(ws)
+    const broken = again.pages.find((p) => p.title === 'Ilegível')!.id
+    const real = again.persist!.store.loadBody.bind(again.persist!.store)
+    vi.spyOn(again.persist!.store, 'loadBody').mockImplementation((id: string) => (id === broken ? Promise.reject(new Error('boom')) : real(id)))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const made = vi.fn(() => 'arquivo')
+    expect(await again.withBodies(made)).toBeNull()
+    expect(made).not.toHaveBeenCalled()
+    await again.persist!.flush()
+    await vi.waitFor(() => expect(again.pages.every((p) => p.content === null)).toBe(true))
   })
 
   it('a browser without IndexedDB leaves the notes working in memory', async () => {
@@ -281,6 +329,30 @@ describe('what is kept apart', () => {
     expect(p.content).toEqual([para('a', 'conta 0412')])
     again.unlockVault('abcd')
     await vi.waitFor(() => expect(p.excerpt).toBe('conta 0412'))
+  })
+
+  it('the excerpts of the vault come from the page records only, never from a read of every secret', async () => {
+    const ws = await start()
+    ws.unlockVault('abcd')
+    for (const text of ['primeira 01', 'segunda 02']) {
+      const page = ws.addVaultEntry()!
+      page.content!.push(para('a', text))
+      ws.touch(page.id)
+    }
+    const normal = ws.newPage('Comum')
+    normal.content!.push({ id: 's', type: 'secure', text: 'segredo de bloco' } as Block)
+    ws.touch(normal.id)
+    await ws.persist!.flush()
+    const store = await NotesStore.open(name)
+    try {
+      const all = vi.spyOn(IDBObjectStore.prototype, 'getAll')
+      const excerpts = await store.loadVaultExcerpts()
+      expect([...excerpts.values()].sort()).toEqual(['primeira 01', 'segunda 02'])
+      expect(all).not.toHaveBeenCalled()
+      all.mockRestore()
+    } finally {
+      store.close()
+    }
   })
 
   it('pictures go to the media store as a Blob and come back as one', async () => {

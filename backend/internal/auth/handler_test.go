@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -426,6 +427,36 @@ func TestDB_Handler_Logout_Success(t *testing.T) {
 	handler.Logout(rec2, req2)
 
 	requireError(t, rec2, http.StatusUnauthorized, "unauthorized")
+}
+
+// Two logouts with the same cookie at once (a double tap, two tabs) both pass the revocation check before either writes:
+// the second insert of the same token id must not turn into a 500.
+func TestDB_Handler_Logout_SameCookieTwiceAtOnce(t *testing.T) {
+	handler, repo, cleanup := setupTest(t, true)
+	defer cleanup()
+	u := registerUser(t, handler, repo, "logout-twice")
+	for round := 0; round < 5; round++ {
+		_, refresh := loginUser(t, handler, u)
+		const n = 8
+		recs := make([]*httptest.ResponseRecorder, n)
+		var wg sync.WaitGroup
+		for i := range n {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+				req.AddCookie(refresh)
+				recs[i] = httptest.NewRecorder()
+				handler.Logout(recs[i], req)
+			}()
+		}
+		wg.Wait()
+		for _, rec := range recs {
+			if rec.Code != http.StatusNoContent && rec.Code != http.StatusUnauthorized {
+				t.Fatalf("round %d: a logout answered %d (%s)", round, rec.Code, rec.Body.String())
+			}
+		}
+	}
 }
 
 func TestHandler_Logout_NoToken(t *testing.T) {

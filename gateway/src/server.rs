@@ -1,11 +1,16 @@
 //! Wires everything together: listener, background tasks, graceful shutdown.
-use std::{io, net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    io,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioIo, TokioTimer};
 use tokio::{
     net::TcpListener,
-    sync::{oneshot, watch, Semaphore},
+    sync::{oneshot, watch},
     task::JoinHandle,
     time,
 };
@@ -15,7 +20,6 @@ use crate::{
     discovery::{self, Lan, Registry},
     handler::{handle, App},
     identity, known,
-    limiter::ConnLimit,
 };
 
 pub struct Running {
@@ -45,11 +49,15 @@ impl Running {
 
 /// Binds `0.0.0.0:cfg.port` (0 = any free port) and starts serving.
 pub async fn start(cfg: Config) -> io::Result<Running> {
-    start_with(cfg, Lan::detect()).await
+    start_inner(cfg, Lan::detect(), true).await
 }
 
-/// Like `start`, with the local network given (tests use one that contains loopback).
+/// Like `start`, with the local network given (tests use one that contains loopback) and kept for the whole run.
 pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Running> {
+    start_inner(cfg, local_net, false).await
+}
+
+async fn start_inner(cfg: Config, local_net: Option<Lan>, follow_lan: bool) -> io::Result<Running> {
     if let Some(why) = cfg.unsupported() {
         return Err(io::Error::new(io::ErrorKind::Unsupported, why));
     }
@@ -90,7 +98,11 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
     let (tx, rx) = watch::channel(false);
 
     if remember {
-        tokio::spawn(known::run(registry, local_net, known_file, known_interval, rx.clone()));
+        tokio::spawn(known::run(registry.clone(), known_file, known_interval, rx.clone()));
+    }
+    if follow_lan {
+        let announce = app.cfg.mdns.then(|| mdns.clone()).flatten();
+        tokio::spawn(follow_the_lan(app.clone(), registry, addr.port(), local_net, announce, rx.clone()));
     }
 
     // keeps the list of live replicas fresh
@@ -135,10 +147,60 @@ pub async fn start_with(cfg: Config, local_net: Option<Lan>) -> io::Result<Runni
     })
 }
 
+/// How often the gateway looks at the network again. A machine that started before its Wi-Fi came up (a logon
+/// shortcut), or got a new address from DHCP, would otherwise hand out and announce the old one until a restart.
+const LAN_CHECK: Duration = Duration::from_secs(30);
+
+/// Follows the machine's LAN: the address handed out (`x-pindrel-address`, the connection page), the subnet that
+/// filters announcements, and the mDNS record move with it.
+async fn follow_the_lan(
+    app: Arc<App>,
+    registry: Arc<Registry>,
+    port: u16,
+    mut lan: Option<Lan>,
+    mdns: Option<mdns_sd::ServiceDaemon>,
+    mut stop: watch::Receiver<bool>,
+) {
+    let mut tick = time::interval_at(time::Instant::now() + LAN_CHECK, LAN_CHECK);
+    loop {
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = stop.changed() => return,
+        }
+        let now = tokio::task::spawn_blocking(Lan::detect).await.ok().flatten();
+        if now == lan {
+            continue;
+        }
+        let (old_ip, new_ip) = (lan.map(|l| IpAddr::V4(l.ip)), now.map(|l| IpAddr::V4(l.ip)));
+        match new_ip {
+            Some(ip) => eprintln!("LAN: o endereço desta máquina na rede agora é {ip}"),
+            None => eprintln!("LAN: esta máquina saiu da rede local"),
+        }
+        registry.set_lan(now);
+        *app.address.write().unwrap() = new_ip.map(|ip| format!("{ip}:{port}"));
+        if let Some(d) = &mdns {
+            let me = discovery::Announce {
+                name: &app.cfg.server_name,
+                id: registry.id(),
+                port,
+                tls_port: app.cfg.tls.as_ref().map_or(0, |t| t.port),
+            };
+            if let Err(e) = discovery::move_announcement(d, &me, &app.cfg.mdns_interfaces, old_ip, new_ip) {
+                eprintln!("mDNS: could not move the announcement to the new address: {e}");
+            }
+        }
+        #[cfg(feature = "tls")]
+        if let (Some(ip), Some(t), Some((_, fp))) = (new_ip, app.cfg.tls.as_ref(), app.ca.read().ok().and_then(|c| c.clone())) {
+            eprintln!("TLS: pairing code  pindrel://pair?host={ip}:{}&ca={fp}", t.port);
+        }
+        lan = now;
+    }
+}
+
 async fn accept_loop(app: Arc<App>, listener: TcpListener, mut stop: watch::Receiver<bool>, closed: oneshot::Sender<()>) {
-    let permits = Arc::new(Semaphore::new(app.cfg.max_connections));
+    let permits = app.conn_slots.clone();
     let mut conns = tokio::task::JoinSet::new();
-    let per_ip = ConnLimit::new(app.cfg.max_connections_per_ip);
+    let per_ip = app.conn_per_ip.clone();
     loop {
         // a permit per open connection bounds the memory a flood of connections can take
         let permit = tokio::select! {

@@ -177,7 +177,11 @@ func (h *Handler) PutChunk(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "a piece is at most 512 KiB")
 		return
 	}
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(chunkReadWindow))
+	// The server's 10 s write deadline started with the headers: a piece that takes longer to arrive would be stored and
+	// its answer lost, so the client sends it again and again. The answer gets its window after the body's.
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(time.Now().Add(chunkReadWindow))
+	_ = rc.SetWriteDeadline(time.Now().Add(chunkReadWindow + 10*time.Second))
 	defer r.Body.Close()
 	if err := h.svc.PutChunk(r.Context(), user, id, n, http.MaxBytesReader(w, r.Body, ChunkSize+1), sum); err != nil {
 		var tooBig *http.MaxBytesError
