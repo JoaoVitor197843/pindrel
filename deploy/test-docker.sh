@@ -40,7 +40,7 @@ up() {
 }
 
 case "${1:-up}" in
-  up) shift 2>/dev/null || true; up "$@" ;;
+  up) [ $# -eq 0 ] || shift; up "$@" ;;
   reset) compose down -v; up ;;
   down) compose down ;;
   status)

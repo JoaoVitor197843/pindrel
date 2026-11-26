@@ -4,17 +4,17 @@ Um workflow por projeto, cada um só dispara quando os caminhos que ele cobre mu
 
 | Workflow | Cobre | Label | Análise | Testes |
 |---|---|---|---|---|
-| `backend.yml` | `backend/**`, `shared/protos/**` | `ci` | `gofmt`, `go vet` | `go test` sem os que usam Postgres |
-| `web.yml` | `web/**`, `shared/protos/**` | `ci` | `yarn check` (svelte-check + tsc) | `vitest` (jsdom) |
-| `mobile.yml` | `mobile/**`, `shared/protos/**` | `ci-flutter` | `flutter analyze` | `flutter test` sem o que chama o servidor |
+| `backend.yml` | `backend/**`, `shared/protos/**` | `build` | `gofmt`, `go vet` | `go test`, todos, os `TestDB_*` também (Postgres descartável) |
+| `web.yml` | `web/**`, `shared/protos/**` | `build` | `yarn check` (svelte-check + tsc) | `vitest` (jsdom) |
+| `mobile.yml` | `mobile/**`, `shared/protos/**` | `flutter` | `flutter analyze` | `flutter test` |
+| `gateway.yml` | `gateway/**` | `build` | rustfmt, clippy, `cargo audit` e `cargo deny` | `cargo test` (com e sem as features) |
 | `release.yml` | push na `main` (`backend/**`, `web/**`, `gateway/**`, `Dockerfile`) | `build` | — | chama os quatro de teste e, se todos passarem, pede ao GitHub o build das imagens amd64+arm64 (`dispatch-images.sh`, ver `deploy/README.md`) |
 
-## Testes que dependem do servidor (não rodam no CI)
+## Testes que usam o banco
 
-- Go: todo teste que usa o banco se chama `TestDB_*` (filtro `-skip '^TestDB_'` no `backend.yml`). O teste `internal/testnaming` falha se algum teste que carrega o `.env` ou abre conexão não tiver esse prefixo.
-- Flutter: `Testa a chamada de api para o go` (filtro `--name` no `mobile.yml`).
-
-Se criar um teste novo que use banco/servidor, nomeie-o `TestDB_...` (Go) e ajuste o filtro do mobile; o filtro do Go não muda.
+Todo teste Go que usa o banco se chama `TestDB_*`: o CI do PC roda todos num Postgres descartável, e quem roda sem banco
+(o runner do Pi, se voltar a ser usado) filtra com `go test ./... -skip '^TestDB_'`. O teste `internal/testnaming` falha
+se algum teste que carrega o `.env` ou abre conexão não tiver esse prefixo.
 Arquivos de teste vazios (placeholders) são ignorados pelo CI até terem conteúdo.
 
 ## Orçamento de RAM do Raspberry Pi (3,8 GB)
@@ -60,31 +60,16 @@ backend (~5 min) + web (~2 min) + mobile (~6 min) rodavam em fila, ~13 min no to
 poucos minutos e começam juntos. O Pi segue disponível como alternativa (basta trocar o `runs-on`).
 
 A imagem `ci-pc:1` (Go + Rust com clippy/rustfmt + zig + node + yarn + CLI golang-migrate + git) se constrói no PC: Por cima dela vai uma camada com os caches do PC (`ci-pc-cache.Dockerfile`: módulos Go e registry do cargo, ~2,5 GB), porque o `proxy.golang.org` cortava os streams HTTP/2 do `go mod download` na rede lenta do PC e derrubou o backend três vezes; com o cache os jobs de backend e gateway não precisam de rede para as dependências. Construir: `docker tag ci-pc:1 ci-pc:base` (uma vez) e `docker buildx build -f .forgejo/images/ci-pc-cache.Dockerfile -t ci-pc:1 --load --build-context go-mod=$HOME/go/pkg/mod --build-context cargo-registry=$HOME/.cargo/registry .forgejo/images`. O `backend.yml` ainda tenta o download 3 vezes com HTTP/1.1, para quando o `go.mod` passar do cache. O zig é o compilador C dos binários Linux do gateway com HTTPS (job `gateway` do `release-tag.yml`, que para com uma mensagem clara se ele faltar). Para pôr numa imagem que ainda não o tem: `docker build -f .forgejo/images/ci-pc.Dockerfile -t ci-pc:base .forgejo/images` (as camadas de cima vêm do cache; o zig é a última) e depois a camada dos caches, como acima.
-`docker build -f .forgejo/images/ci-pc.Dockerfile -t ci-pc:1 .forgejo/images`. O runner do PC tem `capacity: 4` e os labels `build`, `flutter` e `apk`.
+O runner do PC tem `capacity: 4` e os labels `build`, `flutter` e `apk`.
 
 Ler o log de um job: o Forgejo guarda em `<dados do Forgejo>/gitea/actions_log/<dono>/<repo>/<id em hex>/<id>.log.zst`
 no Pi (`zstd -dc`); o id da tarefa vem de `GET /api/v1/repos/<dono>/<repo>/actions/tasks`.
 
-## Runner de release (PC)
+## Segurança do runner do PC
 
-O `release.yml` roda no runner do **PC** (`~/runner`, contêiner `runner`), que tem o Docker do host. Uma vez:
-
-1. Construir a imagem do job: `docker build -f .forgejo/images/ci-docker.Dockerfile -t ci-docker:1 .forgejo/images`
-2. Em `~/runner/data/config.yml` (fazer backup antes):
-   ```yaml
-   runner:
-     labels:
-       - apk:docker://ci-flutter:1
-       - build:docker://ci-docker:1
-   container:
-     valid_volumes:
-       - /var/run/docker.sock      # o job `release` monta o socket do Docker do PC
-   ```
-3. `cd ~/runner && docker compose up -d --force-recreate runner`; o label `build` aparece no Forgejo
-   (Administração > Runners).
-
-O job monta o socket do Docker: quem consegue editar o `release.yml` na `main` controla o Docker do PC.
-Mantenha a `main` protegida (só merge por revisão) e não registre este label em repositórios de terceiros.
+Os jobs rodam em contêineres das imagens `ci-pc:1`, `ci-flutter:1` e `ci-release:1`, sem o socket do Docker do PC (a
+construção das imagens Docker foi para o GitHub). Mesmo assim quem edita um workflow na `main` roda código no PC:
+mantenha a `main` protegida e não registre este runner em repositórios de terceiros.
 
 ## Release versionada (tag `v*`)
 
@@ -96,7 +81,7 @@ git tag v1.2.0 && git push origin v1.2.0      # v1.2.0-rc1 vira pré-release
 
 1. Roda os mesmos quatro workflows de teste. Se um falhar, nada é criado.
 2. Cria a release como **rascunho** (`.forgejo/scripts/release.sh create`), com as notas geradas do `git log` desde a tag anterior.
-3. Em paralelo no PC: `gateway` (binários estáticos musl `amd64` e `arm64`, `.tar.gz`), `linux` (bundle do app Flutter, amd64) e `android` (APK assinado); o mesmo push da tag, espelhado no GitHub, faz o `release-images.yml` pôr as tags de versão (`1.2.0`, `1.2`) nas imagens do commit.
+3. Em paralelo no PC: `gateway` (binários estáticos musl `amd64` e `arm64` com HTTPS, `.tar.gz` com o instalador), `linux` (bundle do app Flutter, amd64) e `android` (APK assinado); o mesmo push da tag, espelhado no GitHub, faz o `release-images.yml` pôr as tags de versão (`1.2.0`, `1.2`) nas imagens do commit.
 4. Só quando todos terminam, `publish` tira o rascunho. Um build que falha deixa o rascunho invisível; basta rodar de novo (o upload substitui arquivos de mesmo nome) ou apagar o rascunho.
 
 Cada arquivo sobe com o seu `.sha256`. O build number do app é a contagem de commits (só precisa crescer).
@@ -114,8 +99,8 @@ O Flutter não compila para Windows nem macOS a partir do runner Linux do PC, en
 público `JoaoVitor197843/pindrel` é um **espelho de push** do Forgejo: ele leva só o git (branches e tags), nunca issues, PRs nem releases.
 
 1. Em push na `main` que mexe no app: o GitHub só compila Windows, macOS e iOS (sem assinatura), para pegar quebra cedo.
-2. Em tag `v*`: o espelho leva a tag, o GitHub compila e publica `pindrel-app_<tag>_windows_amd64_portable.zip`, `pindrel-app_<tag>_windows_amd64_installer.exe` (Inno Setup, `mobile/windows/installer/pindrel.iss`) e `pindrel-app_<tag>_macos_universal.zip` numa release dele.
-3. No Forgejo, o job `desktop` do `release-tag.yml` roda **depois** do `publish`, espera esses arquivos aparecerem (até 45 min cada) e os anexa à release (`github-assets.sh` + `release.sh upload`). Se o GitHub atrasar ou cair, só esse job falha (`continue-on-error`) e a release principal já está pública.
+2. Em tag `v*`: o espelho leva a tag, o GitHub compila e publica numa release dele o app (`pindrel-app_<tag>_windows_amd64_portable.zip`, `..._installer.exe` do Inno Setup `mobile/windows/installer/pindrel.iss`, `pindrel-app_<tag>_macos_universal.zip`), o gateway (`pindrel-gateway_<tag>_windows_amd64_{portable.zip,installer.exe}`) e o servidor com o PostgreSQL embutido (`pindrel-server_<tag>_windows_amd64_{portable.zip,installer.exe}`).
+3. No Forgejo, o job `desktop` do `release-tag.yml` roda **depois** do `publish`, espera os arquivos do app e do gateway aparecerem (até 45 min cada) e os do servidor por até 15 min (o job `server-windows` do GitHub é `continue-on-error`: sem eles a release sai com o resto), e os anexa à release (`github-assets.sh` + `release.sh upload`). Se o GitHub atrasar ou cair, só esse job falha (`continue-on-error`) e a release principal já está pública; o `github-release` roda mesmo assim (`if: !cancelled()`) e copia o que houver.
 4. Sem assinatura: o Windows mostra o SmartScreen na primeira execução, e o macOS exige "Abrir" pelo menu de contexto. O iOS só compila; sem conta Apple paga não há o que instalar.
 
 Configurar o espelho (uma vez, pelo navegador): Forgejo > repositório > Configurações > Repositório > **Espelhos de push**: URL
