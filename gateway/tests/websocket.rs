@@ -132,6 +132,27 @@ async fn a_silent_tunnel_is_closed_after_the_idle_time_and_a_busy_one_is_not() {
     gw.shutdown().await;
 }
 
+/// A browser cannot send pings, so a channel where only the server talks (sync pushes) stays silent from the client's
+/// side: the tunnel lives while bytes cross either way, and closes only when both sides are quiet.
+#[tokio::test]
+async fn a_tunnel_where_only_the_server_talks_is_not_idle() {
+    let a = Backend::start("a").await;
+    let gw = gateway_with(&[&a], |c| c.ws_idle = Duration::from_millis(400)).await;
+    let (mut s, head) = open(gw.addr, &HANDSHAKE.replace("/ws ", "/ws/push ")).await;
+    assert!(head.starts_with("HTTP/1.1 101"), "{head}");
+    let mut buf = [0u8; 1];
+    // past 400 ms of the client's silence plus the 5 s a closing tunnel gives the other side
+    let until = time::Instant::now() + Duration::from_millis(6500);
+    while time::Instant::now() < until {
+        let n = time::timeout(Duration::from_secs(1), s.read(&mut buf))
+            .await
+            .expect("the server's bytes stopped coming")
+            .unwrap();
+        assert_eq!(n, 1, "the tunnel was closed although the server kept talking");
+    }
+    gw.shutdown().await;
+}
+
 #[tokio::test]
 async fn shutting_the_gateway_down_closes_the_open_tunnels() {
     let a = Backend::start("a").await;

@@ -52,7 +52,7 @@ pub fn discovered_servers(list: &[Server]) -> Vec<u8> {
 }
 
 const MAX_SERVERS: usize = 256;
-const MAX_ADDRESSES: usize = 16;
+pub(crate) const MAX_ADDRESSES: usize = 16;
 const MAX_TEXT: usize = 255;
 
 struct Reader<'a>(&'a [u8]);

@@ -59,14 +59,15 @@ fn save(path: &Path, bytes: &[u8]) {
 
 /// Checks the remembered servers every `interval`, and right away when one stops being announced.
 /// With `file`, the memory is loaded at the start and saved when it changes.
-pub async fn run(registry: Arc<Registry>, lan: Option<Lan>, file: Option<PathBuf>, interval: Duration, mut stop: watch::Receiver<bool>) {
+pub async fn run(registry: Arc<Registry>, file: Option<PathBuf>, interval: Duration, mut stop: watch::Receiver<bool>) {
     if let Some(f) = &file {
         registry.load(load(f));
     }
     let mut saved = file.as_deref().map(|f| std::fs::read(f).unwrap_or_default());
     loop {
-        if let Some(lan) = &lan {
-            verify(&registry, lan).await;
+        // read every round: the machine may have joined its network after the start, or another one
+        if let Some(lan) = registry.lan() {
+            verify(&registry, &lan).await;
         }
         if let (Some(f), Some(prev)) = (&file, saved.as_mut()) {
             let now = proto::discovered_servers(&registry.snapshot());

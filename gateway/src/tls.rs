@@ -7,28 +7,30 @@ use hyper_util::{
     server::conn::auto,
 };
 use rustls::ServerConfig;
-use tokio::{
-    net::TcpListener,
-    sync::{watch, Semaphore},
-    time,
-};
+use tokio::{net::TcpListener, sync::watch, time};
 use tokio_rustls::TlsAcceptor;
 
-use crate::{
-    handler::{handle, App},
-    limiter::ConnLimit,
-};
+use crate::handler::{handle, App};
+
+/// HTTP/2 flow-control windows: what one stream, and one connection, may send before the gateway reads it.
+pub const H2_STREAM_WINDOW: u32 = 64 * 1024;
+pub const H2_CONNECTION_WINDOW: u32 = 128 * 1024;
 
 pub async fn accept_loop(app: Arc<App>, listener: TcpListener, config: Arc<ServerConfig>, mut stop: watch::Receiver<bool>) {
     let acceptor = TlsAcceptor::from(config);
-    let permits = Arc::new(Semaphore::new(app.cfg.max_connections));
-    let per_ip = ConnLimit::new(app.cfg.max_connections_per_ip);
+    let (permits, per_ip) = (app.conn_slots.clone(), app.conn_per_ip.clone());
     // one builder for the life of the process: a connection borrows it
     let mut builder = auto::Builder::new(TokioExecutor::new());
     builder.http1().timer(TokioTimer::new()).header_read_timeout(app.cfg.header_timeout);
+    // h2 takes DATA frames up to the flow-control windows and keeps them until the handler reads the body, which it does
+    // only once the body budget lets it: with hyper's 1 MiB windows a client could park ~1 MiB per connection outside
+    // that budget (64 connections, 64 MiB, over the 48 MiB cap). Small windows bound it; a LAN still fills them fast.
     builder
         .http2()
         .timer(TokioTimer::new())
+        .initial_stream_window_size(H2_STREAM_WINDOW)
+        .initial_connection_window_size(H2_CONNECTION_WINDOW)
+        .max_send_buf_size(H2_STREAM_WINDOW as usize)
         .max_concurrent_streams(64)
         .keep_alive_interval(Some(Duration::from_secs(30)))
         .keep_alive_timeout(Duration::from_secs(20));

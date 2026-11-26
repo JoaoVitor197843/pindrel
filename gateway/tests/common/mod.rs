@@ -159,13 +159,23 @@ async fn backend_handler(id: &'static str, mut req: Request<Incoming>) -> Result
         req.uri().path_and_query().map(|p| p.to_string()).unwrap_or_default(),
     );
     let path = req.uri().path().to_string();
-    // /ws accepts a WebSocket upgrade and echoes the bytes it receives (the frames themselves are not parsed)
-    if path == "/ws" && req.headers().contains_key("upgrade") {
+    // /ws accepts a WebSocket upgrade and echoes the bytes it receives (the frames themselves are not parsed);
+    // /ws/push only talks: a byte every 100 ms, whatever the client does
+    if (path == "/ws" || path == "/ws/push") && req.headers().contains_key("upgrade") {
         let on = hyper::upgrade::on(&mut req);
+        let push = path == "/ws/push";
         tokio::spawn(async move {
             if let Ok(up) = on.await {
                 let (mut r, mut w) = tokio::io::split(TokioIo::new(up));
-                let _ = tokio::io::copy(&mut r, &mut w).await;
+                if push {
+                    use tokio::io::AsyncWriteExt;
+                    let _keep = r;
+                    while w.write_all(b"s").await.is_ok() {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                } else {
+                    let _ = tokio::io::copy(&mut r, &mut w).await;
+                }
             }
         });
         return Ok(Response::builder()
