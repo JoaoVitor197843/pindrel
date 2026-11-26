@@ -172,7 +172,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Logout godoc
 // @Summary Close the session
-// @Description Invalidates the refresh token (and the access token, if sended) and clear the cookie
+// @Description Invalidates the refresh token (and the access token, if sent) and clears the cookie
 // @Tags auth
 // @Produce application/x-protobuf
 // @Success 204 "No Content"
@@ -187,10 +187,18 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 
 	accessToken, _ := ExtractBearerToken(r)
 	if err := h.service.Logout(r.Context(), refreshToken, accessToken, h.jwtSecret); err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
+		// a cookie that is no longer good is useless to keep: the browser drops it even though the answer is 401
+		if IsTokenRefused(err) {
+			clearRefreshCookie(w, r)
+		}
+		writeTokenError(w, "logout", "unauthorized", err)
 		return
 	}
+	clearRefreshCookie(w, r)
+	w.WriteHeader(http.StatusNoContent)
+}
 
+func clearRefreshCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "refresh_token",
 		Value:    "",
@@ -200,7 +208,6 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 	})
-	w.WriteHeader(http.StatusNoContent)
 }
 
 // Refresh godoc
@@ -219,12 +226,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	accessToken, err := h.service.Refresh(r.Context(), tokenString, h.jwtSecret, h.accessExpireIn)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrUserNotFound):
-			api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "user no longer exists")
-		default:
-			api.WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "no valid token found")
-		}
+		writeTokenError(w, "refresh", "invalid_refresh_token", err)
 		return
 	}
 	api.WriteResponse(w, http.StatusOK, &dto.LoginRefreshResponse{
@@ -250,7 +252,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.service.Me(r.Context(), tokenString, h.jwtSecret)
 	if err != nil {
-		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "no valid token found")
+		writeTokenError(w, "me", "unauthorized", err)
 		return
 	}
 	api.WriteResponse(w, http.StatusOK, &dto.UserSummary{
@@ -258,6 +260,18 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		Email:    user.Email,
 		Username: user.Username,
 	})
+}
+
+// writeTokenError answers a failed token check. A refused token (or an account that no longer exists) is 401 with
+// code; anything else is the server failing (the database is down), which must NOT be a 401: the clients take a 401 on
+// a renewal as "the session is over" and forget it, so a database restart would sign everybody out.
+func writeTokenError(w http.ResponseWriter, op, code string, err error) {
+	if IsTokenRefused(err) || errors.Is(err, ErrUserNotFound) {
+		api.WriteError(w, http.StatusUnauthorized, code, "no valid token found")
+		return
+	}
+	log.Printf("%s error: %v", op, err)
+	api.WriteError(w, http.StatusInternalServerError, "internal_error", "something went wrong")
 }
 
 // secureRequest says whether the client reached the server over TLS: directly, or through the gateway (or a tunnel),

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 )
 
@@ -21,7 +22,7 @@ func setupTest(t *testing.T, registrationEnabled bool) (*auth.Handler, *db.Queri
 	}
 	dbPool, err := database.NewConnection(context.Background(), cfg.Database)
 	if err != nil {
-		t.Fatalf("failed to connect to mongo: %v", err)
+		t.Fatalf("failed to connect to postgres: %v", err)
 	}
 	repo := db.New(dbPool)
 	service := auth.NewService(repo, registrationEnabled)
@@ -42,11 +43,10 @@ func setupDummyUser(t *testing.T, queries *db.Queries) uuid.UUID {
 	if err != nil {
 		t.Fatalf("error on create dummy password: %v", err)
 	}
-	create_user_params := db.CreateUserParams{
+	user, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:        "test-" + dummyEmail.String() + "@test.com",
 		PasswordHash: hashPassword,
-	}
-	user, err := queries.CreateUser(ctx, create_user_params)
+	})
 	if err != nil {
 		t.Fatalf("falha ao criar dummy user: %v", err)
 	}
@@ -56,4 +56,20 @@ func setupDummyUser(t *testing.T, queries *db.Queries) uuid.UUID {
 	})
 
 	return user.ID
+}
+
+// setupPool opens a pool on the test database for queries the generated code does not have.
+func setupPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	godotenv.Load("../../.env")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("error on creating configuration: %v", err)
+	}
+	pool, err := database.NewConnection(context.Background(), cfg.Database)
+	if err != nil {
+		t.Fatalf("failed to connect to postgres: %v", err)
+	}
+	t.Cleanup(pool.Close)
+	return pool
 }

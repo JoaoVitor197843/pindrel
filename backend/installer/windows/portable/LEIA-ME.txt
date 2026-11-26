@@ -1,0 +1,11 @@
+Pindrel Server (portátil)
+
+1. Dê dois cliques em iniciar.cmd. Na primeira vez ele cria a pasta "dados" (configuração, banco de dados e arquivos
+   enviados) e mostra o endereço para abrir no navegador.
+2. Para parar, feche a janela ou aperte Ctrl+C. Se o banco de dados continuar rodando, use parar.cmd.
+3. O Windows pode perguntar sobre o Firewall na primeira vez: permita em redes privadas para os outros aparelhos da casa.
+4. A configuração fica em dados\server.env (veja server.env.example). Depois de editar, pare e inicie de novo.
+
+Para fazer backup, pare o servidor e copie a pasta "dados". Para remover: pare o servidor e apague esta pasta.
+Para a versão que instala, inicia com o Windows e tem desinstalador, baixe o instalador.
+Para parear os apps do celular com HTTPS, use também o Pindrel Gateway (ele tem portátil e instalador).

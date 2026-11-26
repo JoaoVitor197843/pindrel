@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -160,12 +161,40 @@ func (s *Store) Commit(tmpPath string, sum []byte) error {
 
 func (s *Store) Open(sum []byte) (*os.File, error) { return os.Open(s.BlobPath(sum)) }
 
-func (s *Store) RemoveBlob(sum []byte) error {
-	err := os.Remove(s.BlobPath(sum))
+// Release moves the bytes of a content into tmp, out of the way of a new file with the same content, and returns where
+// they went ("" when there were none). Discard deletes them after the transaction that released them committed; Restore
+// puts them back when it failed. A file left in tmp by a crash in between is removed by the clean-up like any other.
+func (s *Store) Release(sum []byte) (string, error) {
+	aside := filepath.Join(s.tmpDir(), "released-"+uuid.NewString())
+	err := os.Rename(s.BlobPath(sum), aside)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return "", nil
 	}
-	return err
+	if err != nil {
+		return "", err
+	}
+	return aside, nil
+}
+
+// Restore puts released bytes back. If a file with the same content arrived meanwhile its bytes are already in place (the
+// name is the hash, so they are the same bytes) and the released copy is dropped.
+func (s *Store) Restore(aside string, sum []byte) {
+	final := s.BlobPath(sum)
+	if _, err := os.Stat(final); err == nil {
+		_ = os.Remove(aside)
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(final), 0o700)
+	if err := os.Rename(aside, final); err != nil {
+		log.Printf("files: could not put %x back after a failed transaction: %v", sum[:8], err)
+	}
+}
+
+// Discard deletes released bytes for good.
+func (s *Store) Discard(aside string) {
+	if err := os.Remove(aside); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Printf("files: %s stays until the next clean-up: %v", aside, err)
+	}
 }
 
 // OldBlobs lists the content hashes of files on disk last written more than `age` ago.

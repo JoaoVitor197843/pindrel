@@ -75,7 +75,7 @@ const docTemplate = `{
         },
         "/auth/logout/": {
             "post": {
-                "description": "Invalidates the refresh token (and the access token, if sended) and clear the cookie",
+                "description": "Invalidates the refresh token (and the access token, if sent) and clears the cookie",
                 "produces": [
                     "application/x-protobuf"
                 ],

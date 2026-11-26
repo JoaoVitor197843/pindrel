@@ -12,6 +12,8 @@ import (
 	"pindrel/internal/api/dto"
 	"pindrel/internal/middleware"
 
+	"golang.org/x/time/rate"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -150,4 +152,53 @@ func TestCleanup_ConcurrentWithRequests(t *testing.T) {
 		go func() { defer wg.Done(); l.Cleanup(0) }()
 	}
 	wg.Wait()
+}
+
+// Stress: a flood from more addresses than the table holds. The table stops at its cap (the memory does not grow with the
+// number of sources), the clients already in it keep their own buckets, and newcomers are refused until room appears.
+func TestRateLimit_TableIsCappedUnderAFloodOfAddresses(t *testing.T) {
+	l := middleware.NewIPRateLimiter(0, 1) // no refill: every bucket stays "in use" once spent
+	l.SetMaxClients(100)
+	h := middleware.RateLimitMiddleware(l, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	for i := 0; i < 5000; i++ {
+		serve(h, fmt.Sprintf("10.%d.%d.%d:1", i>>16&255, i>>8&255, i&255), nil)
+	}
+	if n := l.Len(); n > 100 {
+		t.Fatalf("%d entries in a table capped at 100", n)
+	}
+	rec := serve(h, "203.0.113.9:1", nil)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Errorf("a newcomer while the table is full of active clients: %d, Retry-After %q", rec.Code, rec.Header().Get("Retry-After"))
+	}
+}
+
+// When the table is full of clients whose buckets are full again (they stopped sending), a newcomer takes the room of
+// one of them: nothing is lost, a full bucket is the same as a new one.
+func TestRateLimit_FullTableMakesRoomFromIdleBuckets(t *testing.T) {
+	l := middleware.NewIPRateLimiter(1000, 1) // refills in a millisecond
+	l.SetMaxClients(10)
+	for i := 0; i < 10; i++ {
+		l.GetLimiter(fmt.Sprintf("10.0.0.%d", i))
+	}
+	time.Sleep(1100 * time.Millisecond) // past the once-a-second prune guard, and every bucket full again
+	if !l.GetLimiter("203.0.113.9").Allow() {
+		t.Fatal("a newcomer was refused although every client in the table was idle")
+	}
+	if l.Len() > 10 {
+		t.Fatalf("%d entries, cap 10", l.Len())
+	}
+}
+
+func TestRateLimit_RetryAfterFollowsTheRate(t *testing.T) {
+	for _, c := range []struct {
+		r    rate.Limit
+		want string
+	}{{rate.Every(time.Minute / 5), "12"}, {rate.Every(time.Minute / 600), "1"}, {0, "60"}, {rate.Every(time.Hour), "60"}} {
+		l := middleware.NewIPRateLimiter(c.r, 1)
+		h := middleware.RateLimitMiddleware(l, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+		serve(h, "1.2.3.4:1", nil)
+		if got := serve(h, "1.2.3.4:1", nil).Header().Get("Retry-After"); got != c.want {
+			t.Errorf("rate %v: Retry-After %q, want %q", c.r, got, c.want)
+		}
+	}
 }

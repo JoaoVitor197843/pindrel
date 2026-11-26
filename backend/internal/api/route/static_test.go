@@ -430,3 +430,32 @@ func TestSPAHandler_PageCarriesTheContentSecurityPolicyAndAssetsDoNot(t *testing
 		t.Errorf("a script file does not need a document policy: %q", csp)
 	}
 }
+
+// On Windows a backslash is a separator: "/..\secret.txt" used to be joined into a path outside the web folder (and a
+// colon names a drive or a file stream). Such paths are 404 on every platform, whatever exists outside.
+func TestSPAHandler_BackslashColonAndDevicePathsAreNotFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "secret.txt.br"), []byte("secret-br"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pub := filepath.Join(root, "public")
+	if err := os.Mkdir(pub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pub, "index.html"), []byte("spa"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := spaHandler(pub)
+	for _, target := range []string{
+		`/..\secret.txt`, "/%2e%2e%5csecret.txt", "/%5c..%5csecret.txt", "/index.html::$DATA", "/C:/Windows/win.ini",
+		"/NUL", "/con", "/COM1.txt", "/index.html%00",
+	} {
+		rec := getWith(h, target, map[string]string{"Accept-Encoding": "br"})
+		if strings.Contains(rec.Body.String(), "secret") || rec.Code != http.StatusNotFound {
+			t.Errorf("%s: %d %q", target, rec.Code, rec.Body.String())
+		}
+	}
+}

@@ -1,4 +1,4 @@
-# Windows and macOS builds of the app and the Windows build of the gateway (zip and installer), plus a compile check of the iOS app. Flutter cannot cross-compile them from the
+# Windows and macOS builds of the app, the Windows builds of the gateway and of the server (zip and installer each), plus a compile check of the iOS app. Flutter cannot cross-compile them from the
 # Linux runner of the Forgejo, so GitHub Actions does it. This folder is on purpose: Forgejo reads .forgejo/workflows and
 # ignores .github, and GitHub reads only this one.
 #
@@ -14,7 +14,7 @@ on:
     branches: [main]
     tags: ["v*"]
     # GitHub does not apply path filters to tags
-    paths: ["mobile/**", "gateway/**", "shared/protos/**", ".github/workflows/release-desktop.yml"]
+    paths: ["mobile/**", "gateway/**", "backend/**", "web/**", "shared/protos/**", ".github/workflows/release-desktop.yml"]
   workflow_dispatch:
 
 permissions:
@@ -134,6 +134,145 @@ jobs:
             dist/*.exe
           if-no-files-found: error
 
+  # The server for Windows: the Go API, the web build it serves and its own PostgreSQL. Same two downloads as the gateway:
+  # a portable zip and an installer with its uninstaller (backend/installer/windows). The portable folder is started for
+  # real on this runner (database created, a sign-up through the API, stopped) before anything is packed.
+  server-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    # new: until it has gone through a real release, a failure here must not keep the app and the gateway from being
+    # published (the release job needs it, and then simply has no server files)
+    continue-on-error: true
+    env:
+      # PostgreSQL for Windows from EnterpriseDB, the zip without an installer. Pinned with its checksum: a new version is a
+      # change to these two lines. A new MAJOR version needs pg_upgrade for the databases already created (the start script
+      # refuses to open a database of another major version and says so).
+      PG_ZIP: postgresql-18.7-2-windows-x64-binaries.zip
+      PG_ZIP_SHA256: 74f3740a2e7844118857f297c2067d226f8f2b0652de96022ce54bb27cd60a79
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Página web
+        shell: bash
+        working-directory: web
+        run: |
+          # the same Yarn as the ci-pc image (.forgejo/images/ci-pc.Dockerfile)
+          corepack enable
+          corepack prepare yarn@4.18.1 --activate
+          yarn install --immutable
+          yarn build
+
+      - name: Servidor (Windows)
+        shell: bash
+        working-directory: backend
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          # the tests that need no database, on Windows itself (the installer files, the settings reader, the static files)
+          go test ./installer/... ./internal/config/ ./internal/api/... ./internal/files/ -skip '^TestDB_'
+          go build -trimpath -ldflags="-s -w" -o ../stage/pindrel-server.exe ./cmd/api
+
+      - name: PostgreSQL e montagem da pasta
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://get.enterprisedb.com/postgresql/$env:PG_ZIP" -OutFile pg.zip
+          $sum = (Get-FileHash pg.zip -Algorithm SHA256).Hash.ToLower()
+          if ($sum -ne $env:PG_ZIP_SHA256) { throw "checksum of $env:PG_ZIP is $sum, expected $env:PG_ZIP_SHA256" }
+          Expand-Archive pg.zip -DestinationPath pgzip
+          $pg = 'stage/pgsql'
+          New-Item -ItemType Directory -Force $pg | Out-Null
+          foreach ($d in 'bin', 'lib', 'share') { Copy-Item "pgzip/pgsql/$d" "$pg/$d" -Recurse }
+          Copy-Item pgzip/pgsql/server_license.txt $pg/
+          # what a server never uses: pgAdmin and StackBuilder (left in the zip), StackBuilder's GUI libraries, static
+          # libraries, headers for extensions, and the translated messages (the database runs with the C locale)
+          Remove-Item "$pg/bin/stackbuilder.exe", "$pg/bin/wx*.dll", "$pg/lib/*.lib" -ErrorAction SilentlyContinue
+          Remove-Item "$pg/lib/pgxs", "$pg/share/locale" -Recurse -ErrorAction SilentlyContinue
+          # the zip expects the Visual C++ runtime to be installed; a copy next to the programs covers machines without it
+          foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
+            if (-not (Test-Path "$pg/bin/$dll")) {
+              if (Test-Path "$env:WINDIR/System32/$dll") { Copy-Item "$env:WINDIR/System32/$dll" "$pg/bin/" }
+              else { Write-Warning "$dll not found on the runner" }
+            }
+          }
+          Copy-Item web/dist stage/public -Recurse
+          Copy-Item backend/installer/windows/pindrel-server.ps1, backend/installer/windows/server.env.example stage/
+          "{0:N1} MiB" -f ((Get-ChildItem stage -Recurse -File | Measure-Object Length -Sum).Sum / 1MB)
+
+      - name: Testar a pasta portátil (banco, servidor, cadastro)
+        shell: pwsh
+        run: |
+          # a space and an accent in the path on purpose: user folders have both
+          $data = Join-Path $env:RUNNER_TEMP 'dados do João'
+          $script = (Resolve-Path stage/pindrel-server.ps1).Path
+          function Run([string]$Action) {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -Action $Action -Data $data -Quiet
+            if ($LASTEXITCODE -ne 0) {
+              Get-ChildItem $data -Filter *.log | ForEach-Object { "--- $($_.Name)"; Get-Content $_.FullName -Tail 30 }
+              throw "$Action failed: $LASTEXITCODE"
+            }
+          }
+          try {
+            Run init
+            Run start
+            $port = (Select-String -Path "$data/server.env" -Pattern '^PORT=(\d+)').Matches[0].Groups[1].Value
+            $base = "http://127.0.0.1:$port"
+            $info = Invoke-WebRequest "$base/server/info/" -UseBasicParsing
+            if ($info.StatusCode -ne 200 -or $info.Headers['Content-Type'] -ne 'application/x-protobuf') { throw "server/info: $($info.StatusCode)" }
+            $page = Invoke-WebRequest "$base/" -UseBasicParsing
+            if ($page.Content -notmatch '<html') { throw 'the web page is not served' }
+            # a sign-up writes to the database (migrations applied, citext loaded): RegisterInput {1: email, 2: username, 3: password}
+            function Field([int]$n, [string]$v) { $b = [Text.Encoding]::UTF8.GetBytes($v); [byte[]](@((($n -shl 3) -bor 2), $b.Length) + $b) }
+            $body = [byte[]]((Field 1 'ci@windows.test') + (Field 2 'Windows') + (Field 3 'uma-senha-longa-9'))
+            $r = Invoke-WebRequest "$base/auth/register/" -Method Post -Body $body -ContentType 'application/x-protobuf' -UseBasicParsing
+            if ($r.StatusCode -ne 201) { throw "register: $($r.StatusCode)" }
+            "server, database and web answered on $base"
+          } finally {
+            Run stop
+          }
+          Start-Sleep -Seconds 2
+          $stage = (Resolve-Path stage).Path
+          $left = Get-Process postgres, pindrel-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$stage*" }
+          if ($left) { throw "still running after stop: $($left.Path -join ', ')" }
+
+      - name: Empacotar
+        shell: pwsh
+        run: |
+          $tag = if ($env:GITHUB_REF -like 'refs/tags/v*') { $env:GITHUB_REF_NAME } else { 'ci' }
+          $ver = if ($tag -eq 'ci') { '0.0.0' } else { ($tag -replace '^v', '') -replace '-.*$', '' }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $stage = (Resolve-Path stage).Path
+          $portable = Join-Path $env:RUNNER_TEMP 'server-portable'
+          Copy-Item $stage $portable -Recurse
+          Copy-Item backend/installer/windows/portable/* $portable
+          Compress-Archive -Path "$portable/*" -DestinationPath "dist/pindrel-server_${tag}_windows_amd64_portable.zip"
+
+          $iscc = Get-Command iscc -ErrorAction SilentlyContinue
+          $path = if ($iscc) { $iscc.Source } else { 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' }
+          if (-not (Test-Path $path)) {
+            choco install innosetup -y --no-progress
+            $path = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          }
+          & $path "/DAppVersion=$ver" "/DSourceDir=$stage" "/O$((Resolve-Path dist).Path)" "/Fpindrel-server_${tag}_windows_amd64_installer" backend/installer/windows/pindrel-server.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed: $LASTEXITCODE" }
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-windows
+          path: |
+            dist/*.zip
+            dist/*.exe
+          if-no-files-found: error
+
   macos:
     runs-on: macos-latest
     timeout-minutes: 60
@@ -209,7 +348,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, gateway-windows, macos]
+    needs: [windows, gateway-windows, server-windows, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -227,7 +366,7 @@ jobs:
         run: |
           pre=""
           case "$TAG" in *-*) pre="--prerelease" ;; esac
-          notes="Builds de Windows (app e gateway, em zip portátil e instalador) e macOS da versão $TAG (sem assinatura). As demais plataformas e os binários do gateway estão na release principal do Forgejo."
+          notes="Builds de Windows (app, gateway e servidor, em zip portátil e instalador) e macOS da versão $TAG (sem assinatura). As demais plataformas e os binários do gateway estão na release principal do Forgejo."
           # every download has its checksum next to it, like the ones the Forgejo makes
           (cd dist && for f in *.zip *.exe; do [ -f "$f" ] || continue; sha256sum "$f" > "$f.sha256"; done)
           # a re-run replaces the files instead of failing on the existing release

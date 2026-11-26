@@ -190,9 +190,8 @@ func TestDB_Handler_Register_EmailAlreadyExists(t *testing.T) {
 	requireError(t, rec, http.StatusConflict, "email_already_exists")
 }
 
-func TestDB_Handler_Register_RegistrationDisabled(t *testing.T) {
-	handler, _, cleanup := setupTest(t, false)
-	defer cleanup()
+func TestHandler_Register_RegistrationDisabled(t *testing.T) {
+	handler := dblessHandler(false)
 
 	rec := httptest.NewRecorder()
 	handler.Register(rec, protoRequest(t, http.MethodPost, "/auth/register", &dto.RegisterInput{
@@ -204,9 +203,8 @@ func TestDB_Handler_Register_RegistrationDisabled(t *testing.T) {
 	requireError(t, rec, http.StatusForbidden, "registration_disabled")
 }
 
-func TestDB_Handler_Register_ValidationErrors(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Register_ValidationErrors(t *testing.T) {
+	handler := dblessHandler(true)
 
 	cases := []struct {
 		name  string
@@ -227,9 +225,8 @@ func TestDB_Handler_Register_ValidationErrors(t *testing.T) {
 
 // An empty body is a valid protobuf (all fields at the zero value),
 // so what stops it is the validation, not Unmarshal.
-func TestDB_Handler_Register_EmptyBody(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Register_EmptyBody(t *testing.T) {
+	handler := dblessHandler(true)
 
 	rec := httptest.NewRecorder()
 	handler.Register(rec, rawRequest(http.MethodPost, "/auth/register", nil))
@@ -237,9 +234,8 @@ func TestDB_Handler_Register_EmptyBody(t *testing.T) {
 	requireError(t, rec, http.StatusUnprocessableEntity, "validation_failed")
 }
 
-func TestDB_Handler_Register_MalformedBody(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Register_MalformedBody(t *testing.T) {
+	handler := dblessHandler(true)
 
 	rec := httptest.NewRecorder()
 	handler.Register(rec, rawRequest(http.MethodPost, "/auth/register", truncatedProto))
@@ -384,9 +380,8 @@ func TestDB_Handler_Login_InvalidCredentials(t *testing.T) {
 	}
 }
 
-func TestDB_Handler_Login_EmptyBody(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Login_EmptyBody(t *testing.T) {
+	handler := dblessHandler(true)
 
 	rec := httptest.NewRecorder()
 	handler.Login(rec, rawRequest(http.MethodPost, "/auth/login", nil))
@@ -394,9 +389,8 @@ func TestDB_Handler_Login_EmptyBody(t *testing.T) {
 	requireError(t, rec, http.StatusUnprocessableEntity, "validation_failed")
 }
 
-func TestDB_Handler_Login_MalformedBody(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Login_MalformedBody(t *testing.T) {
+	handler := dblessHandler(true)
 
 	rec := httptest.NewRecorder()
 	handler.Login(rec, rawRequest(http.MethodPost, "/auth/login", truncatedProto))
@@ -434,9 +428,8 @@ func TestDB_Handler_Logout_Success(t *testing.T) {
 	requireError(t, rec2, http.StatusUnauthorized, "unauthorized")
 }
 
-func TestDB_Handler_Logout_NoToken(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Logout_NoToken(t *testing.T) {
+	handler := dblessHandler(true)
 
 	rec := httptest.NewRecorder()
 	handler.Logout(rec, httptest.NewRequest(http.MethodPost, "/auth/logout", nil))
@@ -471,9 +464,8 @@ func TestDB_Handler_Refresh_Success(t *testing.T) {
 	}
 }
 
-func TestDB_Handler_Refresh_NoToken(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Refresh_NoToken(t *testing.T) {
+	handler := dblessHandler(true)
 
 	rec := httptest.NewRecorder()
 	handler.Refresh(rec, httptest.NewRequest(http.MethodPost, "/auth/refresh", nil))
@@ -507,9 +499,8 @@ func TestDB_Handler_Me_Success(t *testing.T) {
 	}
 }
 
-func TestDB_Handler_Me_Unauthorized(t *testing.T) {
-	handler, _, cleanup := setupTest(t, true)
-	defer cleanup()
+func TestHandler_Me_Unauthorized(t *testing.T) {
+	handler := dblessHandler(true)
 
 	cases := []struct {
 		name   string

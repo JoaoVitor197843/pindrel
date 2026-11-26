@@ -13,7 +13,7 @@ import (
 type Querier interface {
 	// Exactly one request wins the right to join the pieces.
 	ClaimUploadForFinish(ctx context.Context, arg ClaimUploadForFinishParams) (Upload, error)
-	ClearFileOrphan(ctx context.Context, arg ClearFileOrphanParams) error
+	ClearFileOrphan(ctx context.Context, arg ClearFileOrphanParams) (int64, error)
 	CountFilesWithHash(ctx context.Context, sha256 []byte) (int64, error)
 	CountOpenUploads(ctx context.Context, userID uuid.UUID) (int64, error)
 	CreateFile(ctx context.Context, arg CreateFileParams) (File, error)
@@ -37,7 +37,8 @@ type Querier interface {
 	// One statement, one row lock: pieces that arrive together on different replicas never lose each other's bit.
 	// Bit n is bit (n % 8) of byte (n / 8), least significant first, and set_bit(bytea) counts the same way.
 	MarkChunkReceived(ctx context.Context, arg MarkChunkReceivedParams) ([]byte, error)
-	MarkFileOrphan(ctx context.Context, arg MarkFileOrphanParams) error
+	// Only the owner's row: a file of somebody else changes nothing and reads as "not found".
+	MarkFileOrphan(ctx context.Context, arg MarkFileOrphanParams) (int64, error)
 	OrphanFilesDue(ctx context.Context, arg OrphanFilesDueParams) ([]OrphanFilesDueRow, error)
 	// Everything a user holds: finished files plus uploads still open (their size is already promised).
 	QuotaUsed(ctx context.Context, userID uuid.UUID) (int64, error)

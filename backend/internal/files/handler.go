@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"pindrel/internal/api"
@@ -228,7 +229,7 @@ func (h *Handler) CancelUpload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// List — GET /files/?after=<created ms>&after_id=<uuid>
+// List — GET /files/?cursor=<next_cursor of the previous page>
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	user, ok := userID(r)
 	if !ok {
@@ -236,14 +237,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	after, afterID := time.Now().Add(24*time.Hour), uuid.Max
-	if c := r.URL.Query().Get("after"); c != "" {
-		ms, err := strconv.ParseInt(c, 10, 64)
-		id, err2 := uuid.Parse(r.URL.Query().Get("after_id"))
-		if err != nil || err2 != nil {
+	if c := r.URL.Query().Get("cursor"); c != "" {
+		var okCursor bool
+		if after, afterID, okCursor = parseCursor(c); !okCursor {
 			api.WriteError(w, http.StatusBadRequest, "invalid_input", "invalid cursor")
 			return
 		}
-		after, afterID = time.UnixMilli(ms), id
 	}
 	rows, used, err := h.svc.List(r.Context(), user, after, afterID, listLimit+1)
 	if err != nil {
@@ -253,13 +252,28 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	out := &dto.ListFilesResponse{UsedBytes: used, QuotaBytes: h.svc.Quota()}
 	for i, f := range rows {
 		if i == listLimit {
-			last := rows[listLimit-1]
-			out.NextCursor = strconv.FormatInt(last.CreatedAt.Time.UnixMilli(), 10) + "." + last.ID.String()
+			out.NextCursor = cursorOf(rows[listLimit-1])
 			break
 		}
 		out.Files = append(out.Files, info(f))
 	}
 	api.WriteResponse(w, http.StatusOK, out)
+}
+
+// cursorOf is the opaque position after a file: its creation time in MICROseconds (what Postgres keeps; milliseconds
+// would skip the files made in the same millisecond as the last one of a page) and its id.
+func cursorOf(f db.File) string {
+	return strconv.FormatInt(f.CreatedAt.Time.UnixMicro(), 10) + "." + f.ID.String()
+}
+
+func parseCursor(c string) (time.Time, uuid.UUID, bool) {
+	us, idText, ok := strings.Cut(c, ".")
+	micros, err := strconv.ParseInt(us, 10, 64)
+	id, err2 := uuid.Parse(idText)
+	if !ok || err != nil || err2 != nil {
+		return time.Time{}, uuid.Nil, false
+	}
+	return time.UnixMicro(micros), id, true
 }
 
 // Link — POST /files/{id}/link

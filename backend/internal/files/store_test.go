@@ -147,14 +147,74 @@ func TestStore_EqualContentTakesTheSpaceOnce(t *testing.T) {
 	}
 }
 
-func TestStore_BlobPathCannotEscapeAndRemoveIsIdempotent(t *testing.T) {
+func TestStore_BlobPathCannotEscape(t *testing.T) {
 	s := newStore(t)
 	p := s.BlobPath(sum([]byte("x")))
 	if !strings.HasPrefix(p, filepath.Join(s.dir, "blobs")+string(filepath.Separator)) || strings.Contains(p, "..") {
 		t.Errorf("path %q", p)
 	}
-	if err := s.RemoveBlob(sum([]byte("nada"))); err != nil {
-		t.Errorf("removing a missing blob: %v", err)
+}
+
+// storeBlob puts a finished file with this content in place, as Join + Commit would.
+func storeBlob(t *testing.T, s *Store, data []byte) []byte {
+	t.Helper()
+	tmp := filepath.Join(s.tmpDir(), "x-"+uuid.NewString())
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Commit(tmp, sum(data)); err != nil {
+		t.Fatal(err)
+	}
+	return sum(data)
+}
+
+// The bytes of a deleted file are only moved aside inside the transaction: a commit that fails puts them back, so the file
+// row the rollback keeps still has its bytes.
+func TestStore_ReleaseThenRestoreOrDiscard(t *testing.T) {
+	s := newStore(t)
+	if aside, err := s.Release(sum([]byte("nada"))); err != nil || aside != "" {
+		t.Fatalf("releasing a missing blob: %q %v", aside, err)
+	}
+
+	data := []byte("conteúdo")
+	h := storeBlob(t, s, data)
+	aside, err := s.Release(h)
+	if err != nil || aside == "" {
+		t.Fatalf("release: %q %v", aside, err)
+	}
+	if _, err := os.Stat(s.BlobPath(h)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the bytes are still in place after the release")
+	}
+	s.Restore(aside, h)
+	if got, err := os.ReadFile(s.BlobPath(h)); err != nil || !bytes.Equal(got, data) {
+		t.Fatalf("restore: %q %v", got, err)
+	}
+
+	aside, _ = s.Release(h)
+	s.Discard(aside)
+	s.Discard(aside) // twice: a retry must not fail
+	if _, err := os.Stat(aside); !errors.Is(err, os.ErrNotExist) {
+		t.Error("discard left the released bytes")
+	}
+	if _, err := os.Stat(s.BlobPath(h)); !errors.Is(err, os.ErrNotExist) {
+		t.Error("discard brought the bytes back")
+	}
+}
+
+// While a failed transaction was releasing them, a new file with the same content put its own bytes in place: they are the
+// same bytes (the name is the hash), so the released copy is dropped and the new one stays.
+func TestStore_RestoreWhenTheContentCameBackMeanwhile(t *testing.T) {
+	s := newStore(t)
+	data := []byte("mesmo conteúdo")
+	h := storeBlob(t, s, data)
+	aside, _ := s.Release(h)
+	storeBlob(t, s, data)
+	s.Restore(aside, h)
+	if _, err := os.Stat(aside); !errors.Is(err, os.ErrNotExist) {
+		t.Error("the released copy was kept next to the new one")
+	}
+	if got, _ := os.ReadFile(s.BlobPath(h)); !bytes.Equal(got, data) {
+		t.Error("the bytes in place are damaged")
 	}
 }
 

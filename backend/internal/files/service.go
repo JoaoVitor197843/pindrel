@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/bits"
 	"os"
 	"time"
@@ -329,10 +330,11 @@ func (s *Service) Delete(ctx context.Context, user, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	if err := s.dropBlobIfUnused(ctx, tx, sum); err != nil {
+	rel, err := s.releaseIfUnused(ctx, tx, sum)
+	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commitReleasing(ctx, tx, rel)
 }
 
 // lockHash serialises everything that decides whether the bytes of one content exist: it is held until the transaction
@@ -342,29 +344,69 @@ func lockHash(ctx context.Context, tx pgx.Tx, sum []byte) error {
 	return err
 }
 
-// dropBlobIfUnused removes the bytes of a content when no file uses it any more. It runs inside the transaction that just
-// removed a file, under the lock of that content.
-func (s *Service) dropBlobIfUnused(ctx context.Context, tx pgx.Tx, sum []byte) error {
+// releaseIfUnused takes the bytes of a content out of place when no file uses it any more. It runs inside the transaction
+// that just removed a file, under the lock of that content. The bytes are only moved aside here: they are deleted for
+// good after the commit (commitReleasing) and put back if the commit fails, so a failed transaction never leaves a file
+// row without its bytes. nil means nothing was moved (still used, already gone, or held open by a download on Windows,
+// which refuses to move an open file: the daily sweep takes those bytes once nobody reads them).
+func (s *Service) releaseIfUnused(ctx context.Context, tx pgx.Tx, sum []byte) (*released, error) {
 	if err := lockHash(ctx, tx, sum); err != nil {
-		return err
+		return nil, err
 	}
 	n, err := s.q.WithTx(tx).CountFilesWithHash(ctx, sum)
 	if err != nil || n > 0 {
+		return nil, err
+	}
+	aside, err := s.store.Release(sum)
+	if err != nil {
+		log.Printf("files: the bytes of %x stay until the next sweep: %v", sum[:8], err)
+		return nil, nil
+	}
+	if aside == "" {
+		return nil, nil
+	}
+	return &released{store: s.store, sum: sum, aside: aside}, nil
+}
+
+// released is a content whose bytes were moved aside inside a transaction that has not ended yet.
+type released struct {
+	store *Store
+	sum   []byte
+	aside string
+}
+
+// commitReleasing commits tx and then deletes the bytes it released, or puts them back when the commit fails.
+func commitReleasing(ctx context.Context, tx pgx.Tx, rel *released) error {
+	if err := tx.Commit(ctx); err != nil {
+		if rel != nil {
+			rel.store.Restore(rel.aside, rel.sum)
+		}
 		return err
 	}
-	return s.store.RemoveBlob(sum)
+	if rel != nil {
+		rel.store.Discard(rel.aside)
+	}
+	return nil
 }
 
 // MarkOrphan tells the server nothing uses a file any more (the page that held it was deleted, or the block removed). The
 // clean-up removes it after the grace period unless the file is claimed again.
 func (s *Service) MarkOrphan(ctx context.Context, user, id uuid.UUID, orphan bool) error {
-	if _, err := s.q.GetFile(ctx, id); errors.Is(err, pgx.ErrNoRows) {
+	var n int64
+	var err error
+	if orphan {
+		n, err = s.q.MarkFileOrphan(ctx, db.MarkFileOrphanParams{ID: id, UserID: user})
+	} else {
+		n, err = s.q.ClearFileOrphan(ctx, db.ClearFileOrphanParams{ID: id, UserID: user})
+	}
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		// someone else's file answers like one that does not exist: no way to probe for other people's files
 		return ErrFileMissing
 	}
-	if orphan {
-		return s.q.MarkFileOrphan(ctx, db.MarkFileOrphanParams{ID: id, UserID: user})
-	}
-	return s.q.ClearFileOrphan(ctx, db.ClearFileOrphanParams{ID: id, UserID: user})
+	return nil
 }
 
 // List returns a page of the user's files, newest first, and the bytes used against the quota.

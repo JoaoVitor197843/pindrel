@@ -7,3 +7,9 @@ compose.yml merge=ours
 .env.example merge=ours
 web/src/lib/logo/debug.ts merge=ours
 web/src/lib/logo/debug.test.ts merge=ours
+
+# Bytes that must reach every checkout exactly as committed, whatever core.autocrlf says (Windows runners turn it on):
+# the common-password list is searched in place as LF-separated sorted lines (a CR at the end of each line would make
+# every lookup miss), and the golden protobuf files are binary (a 0x0a byte would get a CR in front of it).
+backend/internal/auth/data/*.txt -text
+gateway/tests/golden/*.bin binary

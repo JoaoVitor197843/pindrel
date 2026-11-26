@@ -26,7 +26,14 @@ func CreateConnString(cfg config.DatabaseConfig) string {
 	return u.String()
 }
 
+// NewConnection opens the pool, trying for a while (the database may still be starting next to the API).
 func NewConnection(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Pool, error) {
+	return Connect(ctx, cfg, 5)
+}
+
+// Connect opens the pool and checks it with a ping, up to attempts times, 2 s apart.
+func Connect(ctx context.Context, cfg config.DatabaseConfig, attempts int) (*pgxpool.Pool, error) {
+	attempts = max(1, attempts)
 	dsn := CreateConnString(cfg)
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -40,7 +47,7 @@ func NewConnection(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Poo
 	config.MaxConnIdleTime = 15 * time.Minute
 
 	var pool *pgxpool.Pool
-	for attempt := 1; attempt <= 5; attempt++ {
+	for attempt := 1; attempt <= attempts; attempt++ {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -55,16 +62,22 @@ func NewConnection(ctx context.Context, cfg config.DatabaseConfig) (*pgxpool.Poo
 		cancel()
 
 		if err == nil {
-			log.Println("Postgres Connected Successfully!")
 			return pool, nil
 		}
 
 		if pool != nil {
 			pool.Close()
 		}
-		log.Printf("Attempt %d/%d failed: %v. Trying again in 2s...", attempt, 5, err)
-		time.Sleep(2 * time.Second)
+		if attempt == attempts {
+			break
+		}
+		log.Printf("postgres: attempt %d/%d failed: %v; trying again in 2s", attempt, attempts, err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
 
-	return nil, fmt.Errorf("could not connect to Postgres after %d attempts: %w", 5, err)
+	return nil, fmt.Errorf("could not connect to Postgres after %d attempts: %w", attempts, err)
 }
