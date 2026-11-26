@@ -9,6 +9,7 @@
 // blocks no longer matches what was last synced, the document is replaced.
 
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:appflowy_editor/appflowy_editor.dart';
 import 'package:flutter/foundation.dart';
@@ -42,6 +43,11 @@ class PageBodyController {
   /// The shortcut behind "/" and the others, for tests (the IME that would fire them is not there in a widget test).
   @visibleForTesting
   List<CharacterShortcutEvent> get characterShortcuts => _state?._characters ?? const [];
+
+  /// The key shortcuts the editor runs (Tab, undo...), for tests.
+  @visibleForTesting
+  List<CommandShortcutEvent> get commandShortcuts => _state?._commands ?? const [];
+
   void scrollTo(String id) => _state?._scrollTo(id);
 }
 
@@ -448,9 +454,35 @@ class _PageBodyState extends State<PageBody> {
     _slash,
   ];
 
-  // Tab/Shift+Tab on lists only (a Tab in a paragraph would nest it inside the previous one); the table's own
-  // keys (Tab to the next cell, arrows, Enter) stay
-  List<CommandShortcutEvent> get _commands => standardCommandShortcutEvents;
+  /// Tab nests list items only, and no deeper than [maxIndent]: the stored blocks keep a level for bulleted and numbered
+  /// items alone, so a paragraph or a checklist row nested by Tab looked nested and came back flat when the page reopened.
+  /// Tab elsewhere does nothing (it must not move the focus out of the page). A table cell never gets here: the table's own
+  /// Tab (next cell) comes first in the list. The package moves an item with all its children, so the deepest of them
+  /// must still fit too.
+  static int _height(Node n) => n.children.fold(0, (h, c) => math.max(h, 1 + _height(c)));
+
+  static final _listIndent = CommandShortcutEvent(
+    key: indentCommand.key,
+    command: indentCommand.command,
+    getDescription: () => indentCommand.description ?? '',
+    handler: (es) {
+      final sel = es.selection;
+      if (sel == null) return KeyEventResult.ignored;
+      const lists = {BulletedListBlockKeys.type, NumberedListBlockKeys.type};
+      final nodes = es.getNodesInSelection(sel.normalized).normalized;
+      final previous = nodes.firstOrNull?.previous;
+      if (previous == null || !lists.contains(previous.type) || previous.path.length > maxIndent) return KeyEventResult.handled;
+      final level = nodes.where((n) => n.path.length == previous.path.length);
+      if (!level.every((n) => lists.contains(n.type))) return KeyEventResult.handled;
+      // previous.path.length is the level a moved item lands on (the root's children are level 0)
+      if (level.any((n) => previous.path.length + _height(n) > maxIndent)) return KeyEventResult.handled;
+      return indentCommand.handler(es);
+    },
+  );
+
+  List<CommandShortcutEvent> get _commands => [
+    for (final e in standardCommandShortcutEvents) identical(e, indentCommand) ? _listIndent : e,
+  ];
 
   @override
   Widget build(BuildContext context) {

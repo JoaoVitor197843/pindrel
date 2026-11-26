@@ -48,6 +48,34 @@ sh "$rel/install.sh" --name Outro --port 9000 </dev/null >/dev/null 2>&1
 check "a re-run keeps the settings file" grep -qx 'EXTRA=edited' "$conf"
 check "and does not rewrite them with the new answers" sh -c "! grep -q 'SERVER_NAME=Outro' '$conf'"
 
+# HTTPS: on by default (the phone apps pair over it), in the state directory, and never twice
+check "HTTPS is on by default, its CA kept with the state" sh -c "grep -qx 'TLS_AUTO=true' '$conf' && grep -qx 'TLS_DIR=/var/lib/pindrel-gateway/tls' '$conf' && grep -qx 'TLS_PORT=8443' '$conf'"
+sh "$rel/install.sh" --https </dev/null >/dev/null 2>&1
+check "a re-run with --https does not add it again" sh -c "[ \"\$(grep -c '^TLS_PORT=' '$conf')\" = 1 ]"
+h="$work/https"
+DESTDIR="$h" sh "$rel/install.sh" --name X --port 8080 --upstreams 127.0.0.1:1 --no-https </dev/null >/dev/null 2>&1
+hc="$h/etc/pindrel-gateway/gateway.env"
+check "--no-https leaves it off" sh -c "! grep -q '^TLS' '$hc'"
+check "a re-run without --https says how to turn it on" sh -c "DESTDIR='$h' sh '$rel/install.sh' </dev/null | grep -q -- '--https'"
+check "and changes nothing" sh -c "! grep -q '^TLS' '$hc'"
+printf 'GATEWAY_PORT=8443' >>"$hc"   # an edit that left no newline at the end, on the HTTPS port
+refuses "a re-run with --https refuses the port the gateway already uses" env DESTDIR="$h" sh "$rel/install.sh" --https
+check "and wrote nothing" sh -c "! grep -q '^TLS' '$hc'"
+DESTDIR="$h" sh "$rel/install.sh" --https --tls-port 9443 </dev/null >/dev/null 2>&1
+check "a re-run with --https turns it on in the kept file" sh -c "grep -qx 'TLS_AUTO=true' '$hc' && grep -qx 'TLS_PORT=9443' '$hc'"
+check "the last line without a newline stays whole" grep -qx 'GATEWAY_PORT=8443' "$hc"
+rm -rf "$h"
+DESTDIR="$h" sh "$rel/install.sh" --name X --port 8080 --upstreams 127.0.0.1:1 --no-https </dev/null >/dev/null 2>&1
+printf 'TLS_CERT_FILE=/etc/ssl/c.pem\nTLS_KEY_FILE=/etc/ssl/k.pem\n' >>"$hc"
+DESTDIR="$h" sh "$rel/install.sh" --https </dev/null >/dev/null 2>&1
+check "certificates somebody else manages stay: only the port is added" sh -c "grep -qx 'TLS_PORT=8443' '$hc' && ! grep -q '^TLS_AUTO' '$hc'"
+rm -rf "$h"
+refuses "refuses an HTTPS port equal to the gateway's" env DESTDIR="$h" sh "$rel/install.sh" --name X --port 8443 --upstreams 127.0.0.1:1
+refuses "refuses a bad HTTPS port" env DESTDIR="$h" sh "$rel/install.sh" --name X --port 8080 --upstreams 127.0.0.1:1 --tls-port 0
+check "nothing was written for a bad HTTPS port" test ! -e "$hc"
+check "with --no-https the HTTPS port does not matter" env DESTDIR="$h" sh "$rel/install.sh" --name X --port 8443 --upstreams 127.0.0.1:1 --no-https
+rm -rf "$h"
+
 # uninstall: the program goes, the settings stay
 sh "$rel/uninstall.sh" >/dev/null 2>&1
 check "uninstall removes the program and the unit" sh -c "[ ! -e '$root/usr/local/bin/pindrel-gateway' ] && [ ! -e '$unit' ]"

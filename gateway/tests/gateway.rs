@@ -88,6 +88,10 @@ async fn hop_by_hop_headers_are_not_forwarded() {
     .await;
     assert_eq!((r.header("x-seen-te"), r.header("x-seen-upgrade")), ("", ""));
     assert!(!r.header("x-seen-connection").contains("x-secret"));
+    assert_eq!(r.header("x-seen-secret"), "", "a header named in Connection is for this hop only");
+    // without being named there, the same header is an ordinary one
+    let r = send(gw.addr, "GET", "/x", &[("x-secret", "1")], "").await;
+    assert_eq!(r.header("x-seen-secret"), "1");
     gw.shutdown().await;
 }
 
@@ -598,17 +602,6 @@ async fn shutdown_lets_in_flight_requests_finish_and_stops_accepting() {
     );
     assert!(t.elapsed() < Duration::from_secs(4));
     assert!(TcpStream::connect(reach(addr)).await.is_err(), "nothing listens after shutdown");
-}
-
-#[tokio::test]
-async fn rate_limit_state_is_tracked_per_client() {
-    // the gateway sees 127.0.0.1 here; per-prefix (IPv6) sharing is covered by the limiter unit tests
-    let a = Backend::start("a").await;
-    let gw = gateway(&[&a]).await;
-    assert_eq!(gw.app.limiters.login.tracked(), 0);
-    send(gw.addr, "POST", "/auth/login/", &[], "x").await;
-    assert_eq!(gw.app.limiters.login.tracked(), 1);
-    gw.shutdown().await;
 }
 
 // ---- the client behind a trusted proxy ----

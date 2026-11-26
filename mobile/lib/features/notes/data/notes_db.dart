@@ -1,8 +1,8 @@
-import '../../../core/performance/frame_pacer.dart';
 import 'dart:convert';
 
 import 'package:sqlite3/sqlite3.dart';
 
+import '../../../core/performance/frame_pacer.dart';
 import 'blocks.dart';
 import 'note_page.dart';
 
@@ -44,7 +44,17 @@ class NotesDb {
     }
   }
 
-  void dispose() => _db.close();
+  bool _open = true;
+
+  /// False once [dispose] ran: writes are then ignored (every change was already written when it was made).
+  bool get isOpen => _open;
+
+  /// Closes the file. Safe to call more than once.
+  void dispose() {
+    if (!_open) return;
+    _open = false;
+    _db.close();
+  }
 
   // pages
 
@@ -78,6 +88,7 @@ class NotesDb {
 
   /// Writes the metadata (and the body too when the page has one open).
   void savePage(NotePage p, {bool content = false}) {
+    if (!_open) return;
     _db.execute(
       '''INSERT INTO pages(id,title,excerpt,tags,updated,created,blocks,content,locked,trashed,pinned,icon,cover)
          VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
@@ -94,6 +105,7 @@ class NotesDb {
 
   /// The body of a page; null when the page has none stored yet.
   List<Block>? content(String id) {
+    if (!_open) return null;
     final rows = _db.select('SELECT content FROM pages WHERE id=?', [id]);
     if (rows.isEmpty) return null;
     final raw = rows.first['content'];
@@ -111,6 +123,7 @@ class NotesDb {
   }
 
   void deletePages(Iterable<String> ids) {
+    if (!_open) return;
     _db.execute('BEGIN');
     try {
       for (final id in ids) {
@@ -125,6 +138,7 @@ class NotesDb {
 
   /// Bodies of every page, one at a time (search through blocks, file clean-up).
   Iterable<(String, List<Block>)> bodies() sync* {
+    if (!_open) return;
     for (final r in _db.select('SELECT id FROM pages WHERE content IS NOT NULL')) {
       final id = r['id'] as String;
       final c = content(id);
@@ -139,10 +153,13 @@ class NotesDb {
           Tag(r['id'] as String, r['name'] as String, TagColor.values.where((c) => c.name == r['color']).firstOrNull ?? TagColor.accent),
       ];
 
-  void saveTag(Tag t, int pos) => _db.execute(
+  void saveTag(Tag t, int pos) {
+    if (!_open) return;
+    _db.execute(
         'INSERT INTO tags(id,name,color,pos) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,color=excluded.color,pos=excluded.pos',
         [t.id, t.name, t.color.name, pos],
       );
+  }
 
   // settings
 
@@ -157,6 +174,7 @@ class NotesDb {
   }
 
   void saveSettings(Settings s) {
+    if (!_open) return;
     _db.execute('BEGIN');
     try {
       _db.execute("INSERT INTO settings(key,value) VALUES('useTrash',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ['${s.useTrash}']);

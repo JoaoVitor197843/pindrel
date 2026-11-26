@@ -76,15 +76,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # static musl binaries, no C toolchain (gateway/.cargo/config.toml): the Pi runs the arm64 one
+      # static musl binaries with HTTPS (`selfcert`, as the image): the installers turn it on, and the apps pair over it.
+      # `ring` has C and assembly parts, so each target needs a C compiler; zig (in ci-pc) is it for both, as in the
+      # Dockerfile (gateway/cross/zigcc). rust-lld links the arm64 one (gateway/.cargo/config.toml): the Pi runs it.
       - name: Compilar (Linux amd64 e arm64)
         working-directory: gateway
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS: "-C target-feature=+crt-static"
         run: |
+          command -v zig >/dev/null || { echo "falta o zig na imagem ci-pc:1: reconstrua-a (.forgejo/images/ci-pc.Dockerfile, passos no .forgejo/README.md)"; exit 1; }
+          export CC_x86_64_unknown_linux_musl="$PWD/cross/zigcc-x86_64" AR_x86_64_unknown_linux_musl="$PWD/cross/zigar"
+          export CC_aarch64_unknown_linux_musl="$PWD/cross/zigcc-aarch64" AR_aarch64_unknown_linux_musl="$PWD/cross/zigar"
           rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
           mkdir -p /tmp/assets
           for pair in x86_64-unknown-linux-musl:amd64 aarch64-unknown-linux-musl:arm64; do
             target=${pair%:*} arch=${pair#*:}
-            cargo build --release --locked --target "$target"
+            cargo build --release --locked --target "$target" --features selfcert
             # the program and, beside it, the installer: `sudo ./install.sh` makes the systemd service
             tar -czf "/tmp/assets/pindrel-gateway_${GITHUB_REF_NAME}_linux_${arch}.tar.gz" \
               -C "target/$target/release" gateway \

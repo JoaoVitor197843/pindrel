@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { initialsOf } from '../../stores/users'
   import Icon from './Icon.svelte'
 
   interface Props {
@@ -21,14 +22,7 @@
   let userOpen = $state(false)
   let root: HTMLDivElement | undefined = $state()
 
-  const initials = $derived(
-    userName
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]!.toUpperCase())
-      .join('') || '?',
-  )
+  const initials = $derived(initialsOf(userName))
 
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '')
 

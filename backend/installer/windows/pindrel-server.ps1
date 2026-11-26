@@ -143,10 +143,16 @@ function Start-Database($s) {
   $common = @{ FilePath = (Join-Path $PgBin 'pg_ctl.exe'); ArgumentList = $pgArgs; PassThru = $true; RedirectStandardOutput = $out; RedirectStandardError = $err }
   # in this window (portable): the database shares the console, so closing the window stops it too
   if ($Action -eq 'run') { $p = Start-Process @common -NoNewWindow } else { $p = Start-Process @common -WindowStyle Hidden }
+  # Windows PowerShell 5.1 hands back an ExitCode of $null (and the start counted as failed, on the CI's Windows) unless
+  # the handle was asked for before the process ended; pwsh 7 under Wine did not show it. A code still missing is
+  # settled by asking pg_ctl itself.
+  $null = $p.Handle
   $p.WaitForExit()
-  if ($p.ExitCode -ne 0) {
+  $code = $p.ExitCode
+  if ($null -eq $code) { if (Test-DatabaseRunning) { $code = 0 } else { $code = 1 } }
+  if ($code -ne 0) {
     $why = @($out, $err, $PgLog) | Where-Object { Test-Path -LiteralPath $_ } | ForEach-Object { Get-Content -LiteralPath $_ -Tail 5 }
-    throw "o banco de dados não iniciou (pg_ctl: $($p.ExitCode)).$([Environment]::NewLine)$($why -join [Environment]::NewLine)"
+    throw "o banco de dados não iniciou (pg_ctl: $code).$([Environment]::NewLine)$($why -join [Environment]::NewLine)"
   }
 }
 

@@ -1,5 +1,5 @@
 import { deleteDB, openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction } from 'idb'
-import type { Block } from '../stores/blocks'
+import { fileIdsOf, type Block } from '../stores/blocks'
 import type { NotePage, Settings, Tag } from '../stores/workspace.svelte'
 
 // One object store per kind of item, so each can later get its own treatment (the vault its encryption, the media its
@@ -10,17 +10,35 @@ import type { NotePage, Settings, Tag } from '../stores/workspace.svelte'
 //            vault page. Plain for now; the vault's key arrives with the vault itself.
 //   media    pictures, as Blobs (never base64: no 33% overhead, no string in memory)
 //   meta     tags and settings
+// `fileIds` repeats the server files a body points at, under a multiEntry index, so "does any page still use this file?"
+// is one lookup instead of reading every body (thousands of pages, on the main thread, whenever a file block goes).
 interface Schema extends DBSchema {
   pages: { key: string; value: StoredPage }
-  bodies: { key: string; value: { id: string; blocks: Block[] } }
-  secrets: { key: string; value: Secret; indexes: { pageId: string } }
+  bodies: { key: string; value: Body; indexes: { fileIds: string } }
+  secrets: { key: string; value: Secret; indexes: { pageId: string; fileIds: string } }
   media: { key: string; value: Media; indexes: { pageId: string } }
   meta: { key: string; value: unknown }
 }
 
 export type StoredPage = Omit<NotePage, 'content'>
 
-type Secret = { key: string; pageId: string } & ({ kind: 'block'; text: string } | { kind: 'page'; blocks: Block[]; excerpt: string })
+type Body = { id: string; blocks: Block[]; fileIds?: string[] }
+type Secret = { key: string; pageId: string } & ({ kind: 'block'; text: string } | { kind: 'page'; blocks: Block[]; excerpt: string; fileIds?: string[] })
+
+/** A body or a vault page with its `fileIds` filled in from its blocks (written again whenever the blocks are). */
+function indexed<T extends Body | Secret>(value: T): T {
+  return 'blocks' in value ? { ...value, fileIds: fileIdsOf(value.blocks) } : value
+}
+
+interface Cursor<V> {
+  value: V
+  update(value: V): Promise<unknown>
+  continue(): Promise<Cursor<V> | null>
+}
+
+async function backfill<V extends Body | Secret>(store: { openCursor(): Promise<Cursor<V> | null> }) {
+  for (let c = await store.openCursor(); c; c = await c.continue()) if ('blocks' in c.value) await c.update(indexed(c.value))
+}
 
 export interface Media {
   id: string
@@ -47,7 +65,8 @@ export interface Loaded {
 export const LOCAL_DB = 'pindrel-local'
 /** What the local database was called before the modes were told apart. */
 const LEGACY_DB = 'pindrel-notes'
-const VERSION = 1
+/** 1: the stores; 2: the `fileIds` index on bodies and vault pages. */
+const VERSION = 2
 /** One database per account, so two people on the same browser never see each other's notes. */
 export const cloudDbName = (accountId: string) => {
   // the id comes from the server: it only ever becomes a database name when it looks like one
@@ -71,12 +90,22 @@ export class NotesStore {
 
   static async open(name = LOCAL_DB): Promise<NotesStore> {
     const db = await openDB<Schema>(name, VERSION, {
-      upgrade(db) {
-        db.createObjectStore('pages', { keyPath: 'id' })
-        db.createObjectStore('bodies', { keyPath: 'id' })
-        db.createObjectStore('secrets', { keyPath: 'key' }).createIndex('pageId', 'pageId')
-        db.createObjectStore('media', { keyPath: 'id' }).createIndex('pageId', 'pageId')
-        db.createObjectStore('meta')
+      upgrade(db, oldVersion, _newVersion, tx) {
+        if (oldVersion < 1) {
+          db.createObjectStore('pages', { keyPath: 'id' })
+          db.createObjectStore('bodies', { keyPath: 'id' })
+          db.createObjectStore('secrets', { keyPath: 'key' }).createIndex('pageId', 'pageId')
+          db.createObjectStore('media', { keyPath: 'id' }).createIndex('pageId', 'pageId')
+          db.createObjectStore('meta')
+        }
+        if (oldVersion < 2) {
+          const bodies = tx.objectStore('bodies')
+          const secrets = tx.objectStore('secrets')
+          bodies.createIndex('fileIds', 'fileIds', { multiEntry: true })
+          secrets.createIndex('fileIds', 'fileIds', { multiEntry: true })
+          // what is already stored gets its ids once, one record at a time; the open waits for this transaction
+          if (oldVersion >= 1) void backfill(bodies).then(() => backfill(secrets))
+        }
       },
       // another tab asked for a newer schema: let it, this one reopens on its next load
       blocking() {
@@ -119,6 +148,25 @@ export class NotesStore {
     return body.blocks.map((b) => (b.type === 'secure' ? { ...b, text: texts.get(blockKey(id, b.id)) ?? '' } : b))
   }
 
+  /**
+   * Which of these server files a stored body of one of these pages points at. Only keys are read, through the
+   * `fileIds` index: no body is loaded, however many pages there are.
+   */
+  async fileIdsIn(pageIds: ReadonlySet<string>, fileIds: Iterable<string>): Promise<Set<string>> {
+    const out = new Set<string>()
+    const tx = this.#db.transaction(['bodies', 'secrets'])
+    const bodies = tx.objectStore('bodies').index('fileIds')
+    // a vault page keeps its whole body with the secrets, under `p:<page id>`
+    const secrets = tx.objectStore('secrets').index('fileIds')
+    await Promise.all(
+      [...new Set(fileIds)].map(async (id) => {
+        const [plain, vault] = await Promise.all([bodies.getAllKeys(id), secrets.getAllKeys(id)])
+        if (plain.some((p) => pageIds.has(p)) || vault.some((k) => pageIds.has(k.slice(2)))) out.add(id)
+      }),
+    )
+    return out
+  }
+
   /** The excerpts of vault pages, which are kept with their bodies and not in the list. */
   async loadVaultExcerpts(): Promise<Map<string, string>> {
     const all = await this.#db.getAll('secrets')
@@ -158,7 +206,7 @@ export class NotesStore {
     const secrets = tx.objectStore('secrets')
     if (page.locked) {
       await bodies.delete(page.id)
-      await secrets.put({ key: pageKey(page.id), pageId: page.id, kind: 'page', blocks: body, excerpt: page.excerpt })
+      await secrets.put(indexed({ key: pageKey(page.id), pageId: page.id, kind: 'page', blocks: body, excerpt: page.excerpt }))
       return
     }
     const blocks: Block[] = []
@@ -168,7 +216,7 @@ export class NotesStore {
         blocks.push({ ...b, text: '' })
       } else blocks.push(b)
     }
-    await bodies.put({ id: page.id, blocks })
+    await bodies.put(indexed({ id: page.id, blocks }))
   }
 
   /** Keeps a picture in its own store and returns the id the block points at. */
@@ -218,7 +266,8 @@ export async function moveLegacy(to: string, from: string): Promise<void> {
           const range = after === undefined ? undefined : IDBKeyRange.lowerBound(after, true)
           const keys = await old.getAllKeys(name, range, COPY_BATCH)
           if (!keys.length) break
-          const values = await Promise.all(keys.map((k) => old.get(name, k)))
+          // the old database may predate the file index: its bodies get their ids on the way in
+          const values = await Promise.all(keys.map(async (k) => (name === 'bodies' || name === 'secrets' ? indexed(await old.get(name, k)) : old.get(name, k))))
           const tx = dest.transaction(name, 'readwrite')
           const inline = tx.store.keyPath !== null
           await Promise.all([...keys.map((k, i) => (inline ? tx.store.put(values[i]) : tx.store.put(values[i], k))), tx.done])

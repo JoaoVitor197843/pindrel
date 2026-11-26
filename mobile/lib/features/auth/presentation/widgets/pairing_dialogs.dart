@@ -593,7 +593,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog>
       _codeError = null;
     }
     if (state.wrongTries > _lastWrong) {
-      final left = 3 - state.wrongTries;
+      final left = (flow?.maxWrongTries ?? 3) - state.wrongTries;
       _codeError =
           'Não confere com o do servidor. ${left == 1 ? 'Resta 1 tentativa' : 'Restam $left tentativas'}.';
       _code.clear();

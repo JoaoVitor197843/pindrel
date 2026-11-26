@@ -72,6 +72,15 @@ void main() {
       expect(server.calls, ['GET /server/ca.pem', 'POST /server/pair/master/start', 'POST /server/pair/master/finish']);
     });
 
+    test('alguém no meio junta a CA dele depois da verdadeira: as provas passam, mas só a verdadeira é guardada', () async {
+      server = await FakeServer(master: master, servedCa: '${File('test/fixtures/pairing/good-ca.pem').readAsStringSync()}\n'
+          '${File('test/fixtures/pairing/other-ca.pem').readAsStringSync()}').start();
+      expect(await pair(), isA<Paired>());
+      final kept = (await store.find('127.0.0.1:${server.port}'))!;
+      expect(RegExp('BEGIN CERTIFICATE').allMatches(kept.caPem).length, 1);
+      expect(fingerprintOfPem(kept.caPem), goodFp);
+    });
+
     test('o código é aceito digitado de qualquer jeito', () async {
       server = await FakeServer(master: master).start();
       expect(await pair(code: '  0410 6105 0r3g g28a  '), isA<Paired>());

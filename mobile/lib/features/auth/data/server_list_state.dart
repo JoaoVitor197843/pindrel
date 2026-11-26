@@ -25,10 +25,10 @@ class ServerListState {
     this.loaded = false,
   });
 
-  /// The servers the network announces right now.
+  /// The servers the network announces right now, then the paired ones it does not announce.
   final List<ServerOption> available;
 
-  /// The chosen server (drawn at random or picked by the user), whether or not it is on the network.
+  /// The server the person chose (nothing is chosen on its own), whether or not it is on the network.
   final ServerOption? selected;
 
   final bool selectedConnected;

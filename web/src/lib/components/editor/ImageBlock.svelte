@@ -14,7 +14,7 @@
   let { ed, block }: Props = $props()
 
   const TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-  // without a server the picture only lives in this session, so it stays small; with one the limit is the server's
+  // a picture without a server is kept in this browser (or only in this session), so it stays small; with one the limit is the server's
   const MAX_BYTES = 8_000_000
   let over = $state(false)
   let retried = $state(false)

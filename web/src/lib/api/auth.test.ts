@@ -73,6 +73,8 @@ describe('AuthApi', () => {
     expect(await new AuthApi(empty as unknown as typeof fetch).login('a@b.co', 'x', false).catch((x) => x.code)).toBe('bad_reply')
     expect(await new AuthApi(empty as unknown as typeof fetch).me('t.o.k').catch((x) => x.code)).toBe('bad_reply')
     expect(await new AuthApi(empty as unknown as typeof fetch).register('a@b.co', 'ana', 'senha-forte').catch((x) => x.code)).toBe('bad_reply')
+    // bytes that do not decode at all: the same answer, not a bare decoding error the form cannot explain
+    expect(await new AuthApi(garbage as unknown as typeof fetch).register('a@b.co', 'ana', 'senha-forte').catch((x) => x.code)).toBe('bad_reply')
   })
 
   it('an enormous answer is thrown away undecoded', async () => {

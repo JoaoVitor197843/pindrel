@@ -13,9 +13,9 @@ import 'package:flutter/widgets.dart';
 /// uneven and keeps the CPU/GPU busy all the time (heat, battery). Not asking for the frames in between costs nothing
 /// at all: no build, no layout, no raster, no composition by the system.
 ///
-/// Two things turn it on: the person's "Energia" setting ("Economia"; "Sempre fluido" turns the limiter off for good), and a device that is seen to be late
-/// ([PaceMonitor]). The limiter itself is [PacedFrames], a mixin of the binding that delays the request for a frame.
-/// Configurações > Energia.
+/// Two things turn it on: the person's setting (Configurações > Energia: "Economia"; "Sempre fluido" turns the limiter off
+/// for good), and a device that is seen to be late ([PaceMonitor]). The limiter itself is [PacedFrames], a mixin of the
+/// binding that delays the request for a frame.
 enum PowerMode {
   /// Full rate; 30 only while the device is seen to be late ([PaceMonitor]).
   auto,

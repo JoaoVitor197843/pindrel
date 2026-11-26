@@ -44,30 +44,25 @@
   })
 
   /** Opens a browser database and brings the saved pages in (the list shows nothing until then, not an empty state). */
-  async function openStorage(open: () => Promise<NotesStore>) {
-    ws.loading = true
-    try {
-      await ws.attach(await open())
-    } catch (e) {
+  function openStorage(open: () => Promise<NotesStore>) {
+    ws.open(open).catch((e) => {
       console.error(e)
       toast.show('Este navegador não deixou guardar as notas; elas valem só até fechar a aba')
-    } finally {
-      ws.loading = false
-    }
+    })
   }
 
   function goLocal() {
     openAccountId = null
     ws.goLocal()
     ws.ownerName = 'Você'
-    void openStorage(() => NotesStore.openLocal())
+    openStorage(() => NotesStore.openLocal())
   }
 
   function enterAccount(user: Account) {
     openAccountId = user.id
     ws.goAccount()
     ws.ownerName = user.username
-    void openStorage(() => NotesStore.openAccount(user.id))
+    openStorage(() => NotesStore.openAccount(user.id))
   }
 
   function continueLocal() {
@@ -82,11 +77,12 @@
     enterAccount(user)
   }
 
-  /** "Logar" in local mode: back to the login screen. */
+  /** "Logar" in local mode: back to the login screen. The local notes leave memory (going back reads them again). */
   function toLogin() {
     history.pushState(null, '', '/')
     preview = false
     ws.local = false
+    void ws.close()
   }
 
   function logout() {
@@ -158,7 +154,7 @@
   })
 </script>
 
-<!-- There is no router yet: `/` and `/login` (the only routes allowed in isWebRoute) open the Login. -->
+<!-- `Nav` only knows `/notes/:id`; every other page route the server lets through (`/`, `/login`) is the login or the panel, by the address's query. -->
 {#if restoring}
   <div class="min-h-dvh bg-bg" aria-busy="true"></div>
 {:else if preview}

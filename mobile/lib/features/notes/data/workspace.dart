@@ -1,7 +1,7 @@
-import '../../../core/performance/frame_pacer.dart';
-import 'package:flutter/widgets.dart' show ChangeNotifier;
 import 'package:characters/characters.dart';
+import 'package:flutter/widgets.dart' show ChangeNotifier;
 
+import '../../../core/performance/frame_pacer.dart';
 import 'blocks.dart';
 import 'cover_spec.dart';
 import 'note_page.dart';
@@ -37,6 +37,22 @@ class Workspace extends ChangeNotifier {
   final NotesDb _db;
   final int Function() _now;
   int _seq = 0;
+  bool _disposed = false;
+
+  /// Closes the database too: whoever opens a workspace hands its database over. Every change was written when it was made,
+  /// so nothing is lost; a page closed after this (an editor torn down later) changes nothing.
+  @override
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _db.dispose();
+    super.dispose();
+  }
+
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
 
   late List<NotePage> pages;
   late List<Tag> tags;

@@ -16,6 +16,7 @@ import 'package:mobile/features/auth/presentation/widgets/server_dropdown_select
 import 'package:mobile/features/auth/presentation/pages/auth_page.dart';
 import 'package:mobile/features/auth/data/server_trust.dart';
 import 'package:mobile/features/auth/presentation/providers/servers_provider.dart';
+import 'package:mobile/features/notes/presentation/pages/notes_gate.dart';
 
 import '../../support/choose_first.dart';
 import '../../support/discovery_fakes.dart';
@@ -329,13 +330,14 @@ void main() {
     expect(called, 1);
   });
 
-  testWidgets('botão offline sem callback mostra aviso', (tester) async {
+  testWidgets('botão offline sem callback abre as notas do aparelho', (tester) async {
     await pumpApp(tester);
 
     await tester.tap(find.text('Continuar offline neste dispositivo'));
-    await tester.pump();
+    await tester.pumpAndSettle();
 
-    expect(find.text('Notas locais chegam em breve.'), findsOneWidget);
+    expect(find.byType(NotesGate), findsOneWidget);
+    expect(find.byType(AuthPage), findsNothing);
   });
 
   testWidgets('"Chave de recuperação" abre o modal de recuperação', (

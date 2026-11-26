@@ -97,19 +97,6 @@ class ApiClient {
   final http.Client client;
   final CookieStore cookies;
 
-  Future<http.Response> postProto(String path, GeneratedMessage input) async {
-    final response = await client.post(
-      Uri.parse('$baseUrl$path'),
-      headers: {
-        'Content-Type': 'application/x-protobuf',
-        ...await _cookieHeader(),
-      },
-      body: input.writeToBuffer(),
-    );
-    await _saveResponseCookies(response);
-    return response;
-  }
-
   /// Any method, protobuf in and bytes out. The whole call (headers and body) is bounded by [timeout], and an answer
   /// bigger than [maxBytes] is cut off while it streams (it is not from a Pindrel server): [ReplyTooLarge].
   Future<http.Response> send(

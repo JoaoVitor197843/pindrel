@@ -41,6 +41,8 @@ export interface NotePage {
   /** Lives in the vault: its content is hidden until the vault is unlocked. */
   locked: boolean
   trashed: boolean
+  /** When it went to the trash: the retention counts from here, not from the last edit. */
+  trashedAt?: number
   pinned: boolean
   /** One emoji, or '' for none. */
   icon: string
@@ -99,6 +101,27 @@ export class Workspace {
   #stored = new Set<string>()
   /** How many screens have each page's body open; it goes back to disk when the last one leaves. */
   #open = new Map<string, number>()
+  /** Bumped whenever the notes in memory are swapped or dropped, so a database that finishes opening late is not mixed in. */
+  #generation = 0
+
+  /**
+   * Opens a browser database and brings its pages in (the list shows nothing until then, not an empty state). When the
+   * notes in memory change hands before it is open (the person signed in, signed out, went local), it is closed unused.
+   * Throws when the database cannot be opened.
+   */
+  async open(opener: () => Promise<NotesStore>): Promise<void> {
+    const generation = this.#generation
+    this.loading = true
+    let store: NotesStore
+    try {
+      store = await opener()
+    } catch (e) {
+      if (generation === this.#generation) this.loading = false
+      throw e
+    }
+    if (generation !== this.#generation) return store.close()
+    await this.attach(store)
+  }
 
   /**
    * Starts saving into `store` and replaces the pages with what it holds. Only the list is read: bodies come with
@@ -106,9 +129,15 @@ export class Workspace {
    */
   async attach(store: NotesStore): Promise<void> {
     await this.detach()
+    const generation = this.#generation
     this.loading = true
     try {
       const saved = await store.loadAll()
+      // another database was opened (or the account closed) while this one was reading: it must not take over
+      if (generation !== this.#generation) {
+        store.close()
+        return
+      }
       const made = this.pages
       const taken = new Set(saved.pages.map((p) => p.id))
       for (const id of taken) {
@@ -125,19 +154,21 @@ export class Workspace {
       this.persist.onerror = () => toast.show('Não foi possível guardar neste navegador; as mudanças podem se perder')
       // whatever was made while the list was loading still has to be saved
       for (const p of made) this.persist.mark(p.id)
+      this.#purgeExpired()
       void navigator.storage?.persist?.()
     } catch (e) {
       store.close()
       toast.show('Este navegador não deixou guardar as notas; elas valem só até fechar a aba')
       console.error(e)
     } finally {
-      this.loading = false
+      if (generation === this.#generation) this.loading = false
     }
   }
 
   /** Closes the account: writes what is left, stops saving and drops every note from memory. */
   async close(): Promise<void> {
     const done = this.detach()
+    this.loading = false
     this.pages = []
     this.tags = []
     this.users = []
@@ -149,6 +180,7 @@ export class Workspace {
 
   /** Writes what is left and stops saving. */
   async detach(): Promise<void> {
+    this.#generation++
     const p = this.persist
     this.persist = null
     this.#stored.clear()
@@ -209,7 +241,7 @@ export class Workspace {
     }
   }
 
-  /** Local mode (no login): the person's own notes start empty. The demo pages, tags and people go (the vault stays, empty), and there is no sharing. */
+  /** Local mode (no login): the notes in memory go (they come back from the browser's own database), and there is no sharing. */
   goLocal() {
     this.#startEmpty(true)
   }
@@ -222,6 +254,7 @@ export class Workspace {
   #startEmpty(local: boolean) {
     // first: the pages are about to be emptied, and whatever was waiting to be saved must be copied before that
     void this.detach()
+    this.loading = false
     this.local = local
     this.pages = []
     this.tags = []
@@ -330,7 +363,7 @@ export class Workspace {
     this.tagFilter = null
   }
 
-  /** Brings a page into view (the prototype has no editor yet): its view, no tag filter, its title as the search. */
+  /** Brings a page into view on the dashboard (where there is no editor to open it in): its view, no tag filter, its title as the search. */
   reveal(id: string) {
     const p = this.pages.find((x) => x.id === id)
     if (!p) return
@@ -364,6 +397,15 @@ export class Workspace {
     this.view = 'all'
     this.query = ''
     this.sort = 'recent'
+    // the reactive copy: a change made to `page` itself would not reach the screen once the list has read it
+    return this.pages[0]
+  }
+
+  /** A page made from an imported file, with its body. */
+  importPage(title: string, blocks: Block[]): NotePage {
+    const page = this.newPage(title)
+    page.content = blocks
+    this.touch(page.id)
     return page
   }
 
@@ -436,6 +478,7 @@ export class Workspace {
       shares: [],
       pinned: false,
       trashed: false,
+      trashedAt: undefined,
     }
     this.pages.unshift(copy)
     this.persist?.mark(copy.id)
@@ -448,42 +491,101 @@ export class Workspace {
     this.persist?.mark(id)
   }
 
-  /** Moves a page to the trash, or deletes it for good when the trash is turned off in the settings. */
-  trash(id: string) {
+  /**
+   * Moves a page to the trash, or deletes it for good when the trash is turned off in the settings. The promise ends when
+   * the server was told which of its files nothing uses any more.
+   */
+  trash(id: string): Promise<void> {
     // vault pages never wait in the trash; a trash that is turned off deletes at once too
-    if (!this.settings.useTrash || this.page(id)?.locked) {
-      this.pages = this.pages.filter((p) => p.id !== id)
-      this.persist?.mark(id)
-      return
+    if (!this.settings.useTrash || this.page(id)?.locked) return this.deleteForever(id)
+    const p = this.page(id)
+    if (p && !p.trashed) {
+      p.trashed = true
+      p.trashedAt = Date.now()
     }
-    const p = this.pages.find((x) => x.id === id)
-    if (p) p.trashed = true
     this.persist?.mark(id)
+    return Promise.resolve()
   }
 
   restore(id: string) {
-    const p = this.pages.find((x) => x.id === id)
-    if (p) p.trashed = false
+    const p = this.page(id)
+    if (p) {
+      p.trashed = false
+      delete p.trashedAt
+    }
     this.persist?.mark(id)
   }
 
-  emptyTrash() {
-    const gone = this.pages.filter((p) => p.trashed)
-    this.pages = this.pages.filter((p) => !p.trashed)
-    gone.forEach((p) => this.persist?.mark(p.id))
-    this.#dropFiles(gone)
+  emptyTrash(): Promise<void> {
+    return this.#drop(this.pages.filter((p) => p.trashed))
+  }
+
+  deleteForever(id: string): Promise<void> {
+    return this.#drop(this.pages.filter((p) => p.id === id))
+  }
+
+  /** Pages that sat in the trash for longer than the retention are deleted for good. */
+  #purgeExpired() {
+    const now = Date.now()
+    const limit = now - this.settings.retention * 86_400_000
+    const old: NotePage[] = []
+    for (const p of this.pages) {
+      if (!p.trashed) continue
+      // trashed before the date was kept: the retention starts counting now
+      if (p.trashedAt === undefined) {
+        p.trashedAt = now
+        this.persist?.mark(p.id)
+      } else if (p.trashedAt < limit) old.push(p)
+    }
+    if (old.length) void this.#drop(old)
   }
 
   /** Told which files only the pages deleted for good used, so the server can drop them at once. */
   filesGone: (ids: string[]) => void = (ids) => files.remove(ids)
 
-  #dropFiles(gone: NotePage[]) {
+  #drop(gone: NotePage[]): Promise<void> {
+    if (!gone.length) return Promise.resolve()
+    const goneIds = new Set(gone.map((p) => p.id))
     // only my own pages: a page shared with me keeps its files with whoever sent it
-    const ids = fileIdsOf(gone.filter((p) => !p.sharedBy).flatMap((p) => p.content ?? []))
-    if (!ids.length) return
-    const kept = new Set(fileIdsOf(this.pages.flatMap((p) => p.content ?? [])))
-    const alone = ids.filter((id) => !kept.has(id))
-    if (alone.length) this.filesGone(alone)
+    const mine = gone.filter((p) => !p.sharedBy)
+    // bodies still on disk are read now, before the next save deletes them (IndexedDB runs transactions in the order made)
+    const store = this.persist?.store
+    const unread = store ? mine.filter((p) => !p.content && this.#stored.has(p.id)).map((p) => store.loadBody(p.id).catch(() => null)) : []
+    const inMemory = fileIdsOf(mine.flatMap((p) => p.content ?? []))
+    this.pages = this.pages.filter((p) => !goneIds.has(p.id))
+    for (const id of goneIds) this.persist?.mark(id)
+    return (async () => {
+      const ids = new Set(inMemory)
+      for (const body of await Promise.all(unread)) for (const id of fileIdsOf(body ?? [])) ids.add(id)
+      if (!ids.size) return
+      const used = await this.filesInUse([...ids])
+      const alone = [...ids].filter((id) => !used.has(id))
+      if (alone.length) this.filesGone(alone)
+    })()
+  }
+
+  /**
+   * Which of these server files a page that is still listed (the trash included) points at, bodies on disk included. When
+   * the disk cannot be read every one of them counts as used: a file is never let go on a guess.
+   */
+  async filesInUse(ids: string[]): Promise<Set<string>> {
+    const wanted = new Set(ids)
+    const used = new Set<string>()
+    const unread = new Set<string>()
+    for (const p of this.pages) {
+      if (p.content) {
+        for (const id of fileIdsOf(p.content)) if (wanted.has(id)) used.add(id)
+      } else if (this.#stored.has(p.id)) unread.add(p.id)
+    }
+    const store = this.persist?.store
+    if (!store || !unread.size || used.size === wanted.size) return used
+    try {
+      for (const id of await store.fileIdsIn(unread, [...wanted].filter((id) => !used.has(id)))) used.add(id)
+      return used
+    } catch (e) {
+      console.error(e)
+      return wanted
+    }
   }
 
   /** Returns the new tag, or the existing one when the name is already taken; null for an empty name. */
@@ -513,13 +615,6 @@ export class Workspace {
 
   lockVault() {
     this.vaultUnlocked = false
-  }
-
-  deleteForever(id: string) {
-    const gone = this.pages.filter((p) => p.id === id)
-    this.pages = this.pages.filter((p) => p.id !== id)
-    this.persist?.mark(id)
-    this.#dropFiles(gone)
   }
 
   /** A new, empty vault page. Only while the vault is unlocked. */
@@ -572,6 +667,7 @@ export class Workspace {
   saveSettings(next: Settings) {
     this.settings = { useTrash: next.useTrash, retention: Math.min(90, Math.max(7, Math.round(next.retention) || 30)) }
     this.persist?.markMeta()
+    this.#purgeExpired()
   }
 }
 

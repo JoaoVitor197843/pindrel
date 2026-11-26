@@ -343,5 +343,25 @@ void main() {
       expect(Workspace(d2, clock: () => now).pages.single.title, 'No disco');
       d2.dispose();
     });
+
+    test('descartar o workspace fecha o banco: o arquivo pode ser apagado e reaberto', () {
+      final dir = Directory.systemTemp.createTempSync('notes_db');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final path = '${dir.path}/notes.db';
+      final d = NotesDb.open(path);
+      final w = Workspace(d, clock: () => now);
+      final p = w.newPage('Aberta');
+      w.contentOf(p.id)!.add(Block('b1', BlockType.paragraph, text: 'texto'));
+      w.dispose();
+      expect(d.isOpen, false);
+      // a page that closes after the workspace (an editor torn down later) neither throws nor writes
+      w.release(p.id);
+      w.touch(p.id);
+      d.dispose(); // twice is fine
+      final again = NotesDb.open(path);
+      expect(Workspace(again, clock: () => now).pages.single.title, 'Aberta');
+      again.dispose();
+      File(path).deleteSync();
+    });
   });
 }

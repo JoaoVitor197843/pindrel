@@ -8,7 +8,7 @@
 //    through the markers of `inline_marks.dart`. A table is the package's table
 //    node: row 0 holds the column labels (the stored model keeps them apart from
 //    the rows), the cells carry the column id (`cid`, on row 0) and the width.
-//  * Every other block (code, callout, toggle, table, media, secure...) is an
+//  * Every other block (code, callout, toggle, toggle heading, media, secure...) is an
 //    opaque `pindrel_block` node that only carries the block id. The editor
 //    never reads inside it, so nothing it does can damage the block, and the
 //    existing widgets keep drawing and editing it.
@@ -198,8 +198,8 @@ List<Block> documentToBlocks(Document doc, Map<String, Block> keep, {bool stamp 
 
   Block? open; // the checklist being filled
   void walk(Node n, int depth) {
-    final delta = n.type;
-    switch (delta) {
+    final type = n.type;
+    switch (type) {
       case 'paragraph':
         open = null;
         out.add(Block(idFor(n), BlockType.paragraph, text: _marks(n)));
@@ -212,7 +212,7 @@ List<Block> documentToBlocks(Document doc, Map<String, Block> keep, {bool stamp 
         out.add(Block(idFor(n), BlockType.heading, text: _marks(n), level: l == 2 ? null : l));
       case 'bulleted_list' || 'numbered_list':
         open = null;
-        out.add(Block(idFor(n), delta == 'bulleted_list' ? BlockType.bullet : BlockType.numbered, text: _marks(n), indent: depth.clamp(0, maxIndent)));
+        out.add(Block(idFor(n), type == 'bulleted_list' ? BlockType.bullet : BlockType.numbered, text: _marks(n), indent: depth.clamp(0, maxIndent)));
       case 'todo_list':
         // Enter copies the attributes, so a repeated item id gets a fresh one and the row stays in the same list
         final wanted = n.attributes[itemKey];

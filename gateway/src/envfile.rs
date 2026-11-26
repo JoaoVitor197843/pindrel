@@ -56,18 +56,20 @@ pub fn load(path: &Path) -> Result<HashMap<String, String>, String> {
     Ok(parse(&String::from_utf8_lossy(&raw)))
 }
 
-/// Which file to read: `--config <file>` (or `--config=<file>`) first, then `GATEWAY_CONFIG`.
-pub fn path_from(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Option<String>) -> Option<String> {
+/// Which file to read: `--config <file>` (or `--config=<file>`) first, then `GATEWAY_CONFIG`. A `--config` without a file
+/// is an error: starting on settings the operator did not mean is worse than not starting.
+pub fn path_from(args: impl IntoIterator<Item = String>, env: impl Fn(&str) -> Option<String>) -> Result<Option<String>, String> {
+    let missing = || "--config needs the path of a settings file".to_string();
     let mut args = args.into_iter();
     while let Some(a) = args.next() {
         if a == "--config" {
-            return args.next().filter(|v| !v.is_empty());
+            return args.next().filter(|v| !v.is_empty()).map(Some).ok_or_else(missing);
         }
         if let Some(v) = a.strip_prefix("--config=") {
-            return Some(v.to_string()).filter(|v| !v.is_empty());
+            return if v.is_empty() { Err(missing()) } else { Ok(Some(v.to_string())) };
         }
     }
-    env("GATEWAY_CONFIG").map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    Ok(env("GATEWAY_CONFIG").map(|v| v.trim().to_string()).filter(|v| !v.is_empty()))
 }
 
 #[cfg(test)]
@@ -128,15 +130,16 @@ mod tests {
         let none = |_: &str| None;
         let env = |k: &str| (k == "GATEWAY_CONFIG").then(|| " /etc/g.env ".to_string());
         let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(path_from(args(&["--config", "a.env"]), env).as_deref(), Some("a.env"));
-        assert_eq!(path_from(args(&["--config=b.env"]), env).as_deref(), Some("b.env"));
-        assert_eq!(path_from(args(&[]), env).as_deref(), Some("/etc/g.env"));
-        assert_eq!(
-            path_from(args(&["--config"]), env),
-            None,
-            "a flag without a file is not silently replaced"
-        );
-        assert_eq!(path_from(args(&["healthcheck"]), none), None);
+        assert_eq!(path_from(args(&["--config", "a.env"]), env), Ok(Some("a.env".into())));
+        assert_eq!(path_from(args(&["--config=b.env"]), env), Ok(Some("b.env".into())));
+        assert_eq!(path_from(args(&[]), env), Ok(Some("/etc/g.env".into())));
+        for bad in [&["--config"][..], &["--config", ""], &["--config="]] {
+            assert!(
+                path_from(args(bad), env).is_err(),
+                "{bad:?}: a flag without a file is neither ignored nor replaced"
+            );
+        }
+        assert_eq!(path_from(args(&["healthcheck"]), none), Ok(None));
     }
 
     #[test]

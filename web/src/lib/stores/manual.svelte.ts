@@ -1,6 +1,7 @@
 import { untrack } from 'svelte'
 import { findServer, inspect, MAX_NAME_LENGTH, reach } from '../api/serverCheck'
 import { errorText } from '../api/serverCheckText'
+import { mapLimit } from '../mapLimit'
 
 export { reach }
 import { remember, trustOf } from './trust'
@@ -19,20 +20,6 @@ const CONCURRENCY = 4
 /** Every Nth round also reads who answers (the id), not only that someone does: ~1 per minute. */
 const STRONG_EVERY = 4
 
-async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length)
-  let next = 0
-  const worker = async () => {
-    for (;;) {
-      const i = next++
-      if (i >= items.length) return
-      out[i] = await fn(items[i])
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
-  return out
-}
-
 /** `other`: something answers there, but it is not the server that was saved. */
 type Probe = 'up' | 'down' | 'other'
 
@@ -50,6 +37,8 @@ export interface ManualServer {
   address: string
   /** Only when the server has a secure side this browser does not trust yet: the page that explains how to connect. */
   connectUrl?: string
+  /** The port of that secure side, so the list can notice when this browser starts trusting it (older entries lack it). */
+  tlsPort?: number
 }
 
 export type ManualHealth = 'connected' | 'disconnected'
@@ -65,6 +54,7 @@ function valid(e: unknown): e is ManualServer {
       u.origin === m.url &&
       m.id === m.url &&
       (m.connectUrl === undefined || (typeof m.connectUrl === 'string' && sameHostPage(m.connectUrl, u))) &&
+      (m.tlsPort === undefined || (Number.isInteger(m.tlsPort) && (m.tlsPort as number) >= 1 && (m.tlsPort as number) <= 65535)) &&
       m.address === u.host &&
       (m.name as string).length > 0 &&
       (m.name as string).length <= MAX_NAME_LENGTH &&
@@ -151,7 +141,7 @@ export class ManualServers {
         serverId: found.serverId,
         url: origin,
         address: new URL(origin).host,
-        ...(connectUrl ? { connectUrl } : {}),
+        ...(connectUrl ? { connectUrl, tlsPort: found.tlsPort } : {}),
       }
       // an id that differs from the one this name had must not be learned silently: opening it will ask
       if (trustOf(server.trustName, server.serverId) !== 'changed') remember(server.trustName, server.serverId)

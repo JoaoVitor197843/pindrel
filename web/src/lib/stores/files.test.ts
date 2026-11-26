@@ -85,15 +85,66 @@ describe('FilesService — envios', () => {
     expect(server.seen).toHaveLength(0)
   })
 
-  it('tidy esquece o que acabou e guarda o que ainda anda', async () => {
+  it('esquece sozinho o envio que acabou, deu errado ou foi cancelado (a página pode ficar aberta por dias)', async () => {
     const { server, service } = rig()
     server.delay = 20
     const a = service.start(file(10), () => undefined)
-    await until(() => a.status === 'done')
     const b = service.start(file(CHUNK * 3), () => undefined)
-    service.tidy()
-    expect(service.uploads.map((u) => u.key)).toEqual([b.key])
-    await until(() => b.status === 'done')
+    const queued = service.start(file(10), () => undefined)
+    expect(service.active).toBe(3)
+    service.cancel(queued.key)
+    expect(queued.status).toBe('cancelled')
+    expect(service.active).toBe(2)
+    await until(() => a.status === 'done' && b.status === 'done')
+    expect(service.active).toBe(0)
+    server.hook = () => server.err(413, 'quota_exceeded')
+    const failed = service.start(file(10), () => undefined)
+    await until(() => failed.status === 'failed')
+    expect(service.active).toBe(0)
+    // the cancelled one never reached the server
+    expect(server.seen.filter((r) => r.method === 'POST' && r.path === '/files/uploads/')).toHaveLength(3)
+  })
+
+  it('o token vence no meio de um envio grande: renova uma vez só e continua de onde estava', async () => {
+    const server = new FakeFiles()
+    server.delay = 5
+    let token = 'velho'
+    server.token = 'velho'
+    let renewals = 0
+    const service = new FilesService(
+      new FilesApi({
+        token: () => token,
+        fetch: server.fetch,
+        renew: async () => {
+          renewals++
+          await new Promise((r) => setTimeout(r, 10))
+          token = 'novo'
+          return true
+        },
+      }),
+    )
+    // the server stops accepting the old token after the first piece
+    server.hook = (r) => {
+      if (r.path.includes('/uploads/') && r.method === 'PUT' && server.token === 'velho') server.token = 'novo'
+    }
+    const up = service.start(file(CHUNK * 4), () => undefined)
+    await until(() => up.status !== 'queued' && up.status !== 'sending')
+    expect(up.status).toBe('done')
+    // the two pieces in flight both met the 401; the renewal they asked for is the same one
+    expect(renewals).toBeLessThanOrEqual(2)
+    expect(server.files.size).toBe(1)
+  })
+
+  it('sem conseguir renovar, o envio para com "sessão acabou" e não tenta de novo para sempre', async () => {
+    const server = new FakeFiles()
+    server.token = 'outro'
+    const renew = vi.fn(async () => false)
+    const service = new FilesService(new FilesApi({ token: () => 'velho', fetch: server.fetch, renew }))
+    const up = service.start(file(10), () => undefined)
+    await until(() => up.status === 'failed')
+    expect(up.error).toBe('Sua sessão acabou: entre de novo')
+    expect(renew).toHaveBeenCalledTimes(1)
+    expect(server.seen.filter((r) => r.path === '/files/uploads/')).toHaveLength(1)
   })
 
   it('mensagens para cada erro conhecido, e uma genérica para o resto', () => {

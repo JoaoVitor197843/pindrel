@@ -356,6 +356,250 @@ describe('what is kept apart', () => {
   })
 })
 
+describe('the trash empties itself', () => {
+  const DAY = 86_400_000
+
+  it('a page left in the trash longer than the retention is deleted for good at the next start', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 0, 1))
+    const ws = await start()
+    const old = ws.newPage('velha')
+    const recent = ws.newPage('recente')
+    ws.trash(old.id)
+    vi.setSystemTime(new Date(2026, 0, 25))
+    ws.trash(recent.id)
+    vi.setSystemTime(new Date(2026, 1, 5)) // 35 days after the first went to the trash, 11 after the second
+    const again = await restart(ws)
+    expect(again.pages.map((p) => p.title)).toEqual(['recente'])
+    await again.persist!.flush()
+    expect((await raw('pages')).map((p) => p.title)).toEqual(['recente'])
+  })
+
+  it('counts from the day it went to the trash, not from the last edit', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 0, 1))
+    const ws = await start()
+    const p = ws.newPage('editada há muito tempo')
+    await ws.persist!.flush()
+    vi.setSystemTime(new Date(2026, 2, 1))
+    ws.trash(p.id)
+    vi.setSystemTime(new Date(2026, 2, 2))
+    expect((await restart(ws)).pages).toHaveLength(1)
+  })
+
+  it('a page already in the trash before the date was kept gets the whole retention from now on', async () => {
+    const ws = await start()
+    const p = ws.newPage('antiga')
+    p.trashed = true
+    p.updated = Date.now() - 400 * DAY
+    ws.touch(p.id)
+    p.updated = Date.now() - 400 * DAY
+    await ws.persist!.flush()
+    const again = await restart(ws)
+    expect(again.pages).toHaveLength(1)
+    expect(again.pages[0].trashedAt).toBeGreaterThan(Date.now() - DAY)
+  })
+
+  it('a shorter retention saved in the settings applies at once; restoring a page stops the count', async () => {
+    const ws = await start()
+    const a = ws.newPage('a')
+    const b = ws.newPage('b')
+    ws.trash(a.id)
+    ws.trash(b.id)
+    ws.restore(b.id)
+    ws.page(a.id)!.trashedAt = Date.now() - 10 * DAY
+    ws.page(b.id)!.updated = Date.now() - 10 * DAY
+    ws.saveSettings({ useTrash: true, retention: 7 })
+    expect(ws.pages.map((p) => p.title)).toEqual(['b'])
+    expect(ws.page(b.id)!.trashedAt).toBeUndefined()
+  })
+})
+
+describe('files on the server and pages whose body is only on disk', () => {
+  const file = (fileId: string): Block => ({ id: `blk-${fileId}`, type: 'file', fileId, name: fileId, size: 1, mime: '', level: 3 })
+
+  /** A workspace where `a` and its copy `b` share the file `f1`, and `a` alone has `f2`; both bodies went back to disk. */
+  async function shared() {
+    const ws = await start()
+    const gone: string[][] = []
+    ws.filesGone = (ids) => gone.push(ids)
+    const a = ws.newPage('a')
+    a.content!.push(file('f1'), file('f2'))
+    ws.touch(a.id)
+    const b = ws.newPage('b')
+    b.content!.push(file('f1'))
+    ws.touch(b.id)
+    const again = await restart(ws)
+    again.filesGone = (ids) => gone.push(ids)
+    expect(again.pages.every((p) => p.content === null)).toBe(true)
+    return { ws: again, gone, a: again.pages.find((p) => p.title === 'a')!.id, b: again.pages.find((p) => p.title === 'b')!.id }
+  }
+
+  it('deleting a page that was never opened still lets its files go, and keeps the ones another closed page uses', async () => {
+    const { ws, gone, a } = await shared()
+    await ws.deleteForever(a)
+    expect(gone).toEqual([['f2']])
+  })
+
+  it('emptying the trash reads the bodies of the pages that leave', async () => {
+    const { ws, gone, a, b } = await shared()
+    ws.trash(a)
+    ws.trash(b)
+    await ws.emptyTrash()
+    expect(gone.flat().sort()).toEqual(['f1', 'f2'])
+  })
+
+  it('removing a block does not mark as unused a file that a closed copy of the page still shows', async () => {
+    const { ws, a } = await shared()
+    await ws.load(a)
+    const orphaned: string[] = []
+    const ed = new PageEditor(ws, a)
+    ed.files = { ...ed.files, orphan: (id: string, on: boolean) => on && orphaned.push(id) } as typeof ed.files
+    ed.remove('blk-f1')
+    ed.remove('blk-f2')
+    await vi.waitFor(() => expect(orphaned).toEqual(['f2']))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(orphaned).toEqual(['f2'])
+    ed.destroy()
+  })
+
+  it('asking whether a file is still used walks no body: it is one index lookup per file', async () => {
+    const { ws } = await shared()
+    for (let i = 0; i < 30; i++) ws.newPage(`outra ${i}`).content!.push(file(`x${i}`))
+    const again = await restart(ws)
+    const cursors = vi.spyOn(IDBObjectStore.prototype, 'openCursor')
+    const all = vi.spyOn(IDBObjectStore.prototype, 'getAll')
+    expect([...(await again.filesInUse(['f1', 'x7', 'nada']))].sort()).toEqual(['f1', 'x7'])
+    expect(cursors).not.toHaveBeenCalled()
+    expect(all).not.toHaveBeenCalled()
+    cursors.mockRestore()
+    all.mockRestore()
+  })
+
+  it('a closed vault page still holds on to its files', async () => {
+    const ws = await start()
+    const gone: string[][] = []
+    const a = ws.newPage('a')
+    a.content!.push(file('f9'))
+    const cofre = ws.newPage('cofre')
+    cofre.content!.push(file('f9'))
+    cofre.locked = true
+    ws.touch(a.id)
+    ws.touch(cofre.id)
+    const again = await restart(ws)
+    again.filesGone = (ids) => gone.push(ids)
+    expect([...(await again.filesInUse(['f9']))]).toEqual(['f9'])
+    await again.deleteForever(again.pages.find((p) => p.title === 'a')!.id)
+    expect(gone).toEqual([])
+  })
+
+  it('a database from before the file index finds the files of its bodies after the upgrade', async () => {
+    const db = await openDB(name, 1, {
+      upgrade(d) {
+        d.createObjectStore('pages', { keyPath: 'id' })
+        d.createObjectStore('bodies', { keyPath: 'id' })
+        d.createObjectStore('secrets', { keyPath: 'key' }).createIndex('pageId', 'pageId')
+        d.createObjectStore('media', { keyPath: 'id' }).createIndex('pageId', 'pageId')
+        d.createObjectStore('meta')
+      },
+    })
+    const meta = (id: string, locked = false) => ({ id, title: id, excerpt: '', tags: [], updated: 1, blocks: 1, created: 1, sharedBy: null, myPerms: [], shares: [], locked, trashed: false, pinned: false, icon: '', cover: '' })
+    await db.put('pages', meta('velha'))
+    await db.put('bodies', { id: 'velha', blocks: [file('f1')] })
+    await db.put('pages', meta('cofre', true))
+    await db.put('secrets', { key: 'p:cofre', pageId: 'cofre', kind: 'page', blocks: [file('f2')], excerpt: '' })
+    await db.put('secrets', { key: 'b:velha:s', pageId: 'velha', kind: 'block', text: 'segredo' })
+    db.close()
+    const ws = await start()
+    expect([...(await ws.filesInUse(['f1', 'f2', 'f3']))].sort()).toEqual(['f1', 'f2'])
+    expect(await ws.persist!.store.loadBody('velha')).toEqual([file('f1')])
+  })
+
+  it('a body copied from the old database name is found by its files too', async () => {
+    const old = `${name}-old`
+    const db = await openDB(old, 1, {
+      upgrade(d) {
+        for (const s of ['pages', 'bodies', 'media']) d.createObjectStore(s, { keyPath: 'id' })
+        d.createObjectStore('secrets', { keyPath: 'key' }).createIndex('pageId', 'pageId')
+        d.createObjectStore('meta')
+      },
+    })
+    await db.put('pages', { id: 'n1', title: 'n1', excerpt: '', tags: [], updated: 1, blocks: 1, created: 1, sharedBy: null, myPerms: [], shares: [], locked: false, trashed: false, pinned: false, icon: '', cover: '' })
+    await db.put('bodies', { id: 'n1', blocks: [file('f5')] })
+    db.close()
+    await moveLegacy(name, old)
+    const ws = await start()
+    expect([...(await ws.filesInUse(['f5']))]).toEqual(['f5'])
+  })
+
+  it('when the disk cannot be read, no file is let go on a guess', async () => {
+    const { ws, gone, a } = await shared()
+    ws.persist!.store.fileIdsIn = async () => {
+      throw new Error('disco')
+    }
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    await ws.load(a)
+    await ws.deleteForever(a)
+    expect(gone).toEqual([])
+  })
+})
+
+describe('opening a database late', () => {
+  it('a database that finishes opening after another one took over is closed, not mixed in', async () => {
+    const first = await NotesStore.open(name)
+    const ws = sampleWorkspace()
+    ws.goLocal()
+    await ws.attach(first)
+    ws.newPage('local')
+    await ws.detach()
+
+    const other = `${name}-conta`
+    const seeded = sampleWorkspace()
+    seeded.goAccount()
+    await seeded.attach(await NotesStore.open(other))
+    seeded.newPage('da conta')
+    await seeded.detach()
+
+    let release!: () => void
+    const slow = ws.open(async () => {
+      await new Promise<void>((r) => (release = r))
+      return NotesStore.open(name)
+    })
+    ws.goAccount()
+    await ws.open(() => NotesStore.open(other))
+    opened.push(ws)
+    release()
+    await slow
+    expect(ws.pages.map((p) => p.title)).toEqual(['da conta'])
+    expect(ws.loading).toBe(false)
+    ws.newPage('nova')
+    await ws.persist!.flush()
+    const db = await openDB(other)
+    expect((await db.getAll('pages')).map((p) => p.title).sort()).toEqual(['da conta', 'nova'])
+    db.close()
+  })
+
+  it('a database that cannot be opened stops the loading and says why to the caller', async () => {
+    const ws = sampleWorkspace()
+    ws.goLocal()
+    await expect(ws.open(async () => Promise.reject(new Error('bloqueado')))).rejects.toThrow('bloqueado')
+    expect(ws.loading).toBe(false)
+  })
+})
+
+describe('importing a file', () => {
+  it('keeps the whole text as the body, saved like any page', async () => {
+    const ws = await start()
+    const page = ws.importPage('Receita', [para('a', 'misture tudo'), para('b', 'asse por 40 min')])
+    expect(page.excerpt).toBe('misture tudo')
+    expect(page.blocks).toBe(2)
+    const again = await restart(ws)
+    const id = again.pages[0].id
+    await again.load(id)
+    expect(again.page(id)!.content!.map((b) => (b as { text: string }).text)).toEqual(['misture tudo', 'asse por 40 min'])
+  })
+})
+
 describe('the database that used to be called pindrel-notes', () => {
   const names = async () => (await indexedDB.databases()).map((d) => d.name)
 

@@ -49,7 +49,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "startnow"; Description: "Iniciar o gateway agora (e confirmar que ele subiu)"
 Name: "autostart"; Description: "Iniciar o gateway quando eu entrar no Windows"
 Name: "tray"; Description: "Mostrar o ícone do gateway na bandeja do Windows (parar, iniciar, abrir a configuração e o registro)"
-Name: "https"; Description: "Ativar HTTPS com certificado próprio (necessário para parear os apps do celular)"
+; hidden on an upgrade whose settings already have HTTPS: there is nothing left for it to do
+Name: "https"; Description: "Ativar HTTPS com certificado próprio (necessário para parear os apps do celular)"; Check: HttpsMissing
 Name: "firewall"; Description: "Liberar o gateway no Firewall do Windows (redes privadas)"; Check: IsAdminInstallMode
 
 [Files]
@@ -91,6 +92,36 @@ begin
     Result := ExpandConstant('{commonappdata}\Pindrel Gateway')
   else
     Result := ExpandConstant('{localappdata}\Pindrel Gateway');
+end;
+
+// What gateway.env says for a setting ('' when it is not set): the last line for a key wins, as in the gateway.
+function ConfiguredValue(Key: String): String;
+var
+  Lines: TArrayOfString;
+  I: Integer;
+  L: String;
+begin
+  Result := '';
+  if not LoadStringsFromFile(DataDir('') + '\gateway.env', Lines) then Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
+  begin
+    L := Trim(Lines[I]);
+    // the byte order mark the installer writes, read as text or not
+    while (Length(L) > 0) and (Ord(L[1]) > 127) do L := Copy(L, 2, Length(L));
+    if Pos('export ', L) = 1 then L := Trim(Copy(L, 8, Length(L)));
+    if Pos(Key + '=', L) = 1 then
+    begin
+      L := Trim(Copy(L, Length(Key) + 2, Length(L)));
+      if (Length(L) >= 2) and ((L[1] = '"') or (L[1] = '''')) and (L[Length(L)] = L[1]) then L := Copy(L, 2, Length(L) - 2);
+      Result := L;
+    end;
+  end;
+end;
+
+// True unless the kept settings of an earlier install already serve HTTPS (TLS_PORT is what turns it on).
+function HttpsMissing: Boolean;
+begin
+  Result := ConfiguredValue('TLS_PORT') = '';
 end;
 
 function Quoted(S: String): String;
@@ -269,6 +300,32 @@ begin
   ConfigPage.Values[4] := '9099';
 end;
 
+// The port written in gateway.env (a kept config on an upgrade is not what the wizard page holds).
+function ConfiguredPort: Integer;
+begin
+  Result := StrToIntDef(ConfiguredValue('GATEWAY_PORT'), 8080);
+end;
+
+// An upgrade keeps gateway.env and skips its page, so HTTPS asked for now is checked here: its port must be free.
+function UpgradeHttpsOk: Boolean;
+var
+  Who: String;
+begin
+  Result := False;
+  if ConfiguredPort = TlsPort then
+  begin
+    MsgBox('O gateway já usa a porta ' + IntToStr(TlsPort) + ' (GATEWAY_PORT no gateway.env), que é a do HTTPS.' + #13#10 + #13#10 +
+      'Mude a porta no gateway.env, ou desmarque o HTTPS.', mbError, MB_OK);
+    Exit;
+  end;
+  if PortBusy(TlsPort, Who) then
+  begin
+    MsgBox(PortText(TlsPort, Who) + #13#10 + #13#10 + 'Ela é a porta do HTTPS: libere-a, ou desmarque o HTTPS.', mbError, MB_OK);
+    Exit;
+  end;
+  Result := True;
+end;
+
 // an upgrade keeps the settings that are already there
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
@@ -281,6 +338,11 @@ var
   Port, Lo, Hi, I: Integer;
 begin
   Result := True;
+  if (CurPageID = wpSelectTasks) and WizardIsTaskSelected('https') and FileExists(DataDir('') + '\gateway.env') then
+  begin
+    Result := UpgradeHttpsOk;
+    Exit;
+  end;
   if CurPageID <> ConfigPage.ID then Exit;
   Name := Trim(ConfigPage.Values[0]);
   Ip := Trim(ConfigPage.Values[2]);
@@ -455,6 +517,32 @@ begin
     RaiseException('não foi possível gravar ' + App + '\stop-gateway.ps1');
 end;
 
+// An upgrade keeps gateway.env as it is, but HTTPS asked for now must still turn on: the lines go at the end, where they
+// win over anything above them. Certificates somebody else manages (TLS_CERT_FILE) stay theirs: only the port is added.
+procedure AddHttps(Conf, Data: String);
+var
+  Lines: TArrayOfString;
+  N: Integer;
+begin
+  SetArrayLength(Lines, 5);
+  // ends a last line that has no line break (the gateway skips a line without "=")
+  Lines[0] := '';
+  Lines[1] := '# HTTPS ligado pelo instalador numa atualização';
+  N := 2;
+  if ConfiguredValue('TLS_CERT_FILE') = '' then
+  begin
+    Lines[N] := 'TLS_AUTO=true'; N := N + 1;
+    if ConfiguredValue('TLS_DIR') = '' then
+    begin
+      Lines[N] := 'TLS_DIR=' + Data + '\tls'; N := N + 1;
+    end;
+  end;
+  Lines[N] := 'TLS_PORT=' + IntToStr(TlsPort); N := N + 1;
+  SetArrayLength(Lines, N);
+  if not SaveStringsToUTF8File(Conf, Lines, True) then
+    RaiseException('não foi possível acrescentar o HTTPS a ' + Conf);
+end;
+
 procedure WriteConfig;
 var
   Data, Conf, Ip, Lo, Hi, Upstreams: String;
@@ -463,7 +551,11 @@ var
 begin
   Data := DataDir('');
   Conf := Data + '\gateway.env';
-  if FileExists(Conf) then Exit;
+  if FileExists(Conf) then
+  begin
+    if WizardIsTaskSelected('https') and HttpsMissing then AddHttps(Conf, Data);
+    Exit;
+  end;
   Ip := Trim(ConfigPage.Values[2]);
   Lo := IntToStr(StrToInt(Trim(ConfigPage.Values[3])));
   Hi := IntToStr(StrToInt(Trim(ConfigPage.Values[4])));
@@ -486,19 +578,6 @@ begin
   SetArrayLength(Lines, N);
   if not SaveStringsToUTF8File(Conf, Lines, False) then
     RaiseException('não foi possível gravar ' + Conf);
-end;
-
-// The port written in gateway.env (a kept config on an upgrade is not what the wizard page holds).
-function ConfiguredPort: Integer;
-var
-  Lines: TArrayOfString;
-  I: Integer;
-begin
-  Result := 8080;
-  if not LoadStringsFromFile(DataDir('') + '\gateway.env', Lines) then Exit;
-  for I := 0 to GetArrayLength(Lines) - 1 do
-    if Pos('GATEWAY_PORT=', Trim(Lines[I])) = 1 then
-      Result := StrToIntDef(Trim(Copy(Trim(Lines[I]), 14, 10)), Result);
 end;
 
 // First lines of the gateway log, to say why it did not start.

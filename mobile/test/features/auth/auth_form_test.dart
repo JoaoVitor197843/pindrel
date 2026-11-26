@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mobile/core/theme/app_theme.dart';
 import 'package:mobile/features/auth/presentation/widgets/auth_form.dart';
+import 'package:mobile/features/notes/presentation/pages/notes_gate.dart';
 
 Future<void> pumpForm(
   WidgetTester tester, {
@@ -109,13 +111,24 @@ void main() {
     expect(calls, 2);
   });
 
-  testWidgets('sem callback, o botão offline avisa com um SnackBar', (
+  testWidgets('sem callback e sem tela anterior, o botão offline abre as notas do aparelho', (
     tester,
   ) async {
-    await pumpForm(tester);
+    tester.view.physicalSize = const Size(450, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      ProviderScope(
+        child: MaterialApp(
+          theme: AppTheme.dark,
+          home: const Scaffold(body: SingleChildScrollView(child: AuthForm())),
+        ),
+      ),
+    );
     await tester.tap(find.text('Continuar offline neste dispositivo'));
-    await tester.pump();
-    expect(find.text('Notas locais chegam em breve.'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.byType(NotesGate), findsOneWidget);
+    expect(find.byType(AuthForm), findsNothing);
   });
 
   testWidgets('o botão primário segue o modo e, com campos vazios, só avisa e não chama o servidor', (
@@ -152,8 +165,13 @@ void main() {
     tester.platformDispatcher.textScaleFactorTestValue = 2.5;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await pumpForm(tester, size: const Size(240, 600), showSubtitle: true);
+    expect(tester.takeException(), isNull);
+    // at 2.5x the link is far below the fold: without scrolling to it the tap missed and sign-up was never laid out
+    await tester.ensureVisible(find.text('Criar conta').last);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Criar conta').last);
     await tester.pump();
+    expect(find.widgetWithText(FilledButton, 'Criar conta'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

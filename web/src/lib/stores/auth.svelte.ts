@@ -50,6 +50,7 @@ export class Auth {
 
   constructor(api: AuthApi = new AuthApi()) {
     this.#api = api
+    session.renew = () => this.renew()
     // a hidden tab's timers are throttled: come back and renew at once if the token ran out meanwhile
     if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', () => {
@@ -104,6 +105,15 @@ export class Auth {
       }
     })()
     return this.#renewing
+  }
+
+  /**
+   * A new access token now, for a request the server refused with 401 (the token ran out before the timer renewed it).
+   * Shares the request with any renewal already running; false when nobody is signed in or the server refused.
+   */
+  async renew(): Promise<boolean> {
+    if (this.status !== 'in') return false
+    return (await this.#renew()) && !!this.#token
   }
 
   /** On page load: turns the refresh cookie back into a session, if this device had one. */

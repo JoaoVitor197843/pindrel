@@ -109,8 +109,9 @@ impl Reloadable {
         self.ca.read().unwrap().clone()
     }
 
-    pub fn serial_hint(&self) -> usize {
-        self.current.read().unwrap().cert.first().map(|c| c.len()).unwrap_or(0)
+    /// The server certificate in use (DER), what a client is shown now.
+    pub fn leaf(&self) -> Option<Vec<u8>> {
+        self.current.read().unwrap().cert.first().map(|c| c.to_vec())
     }
 }
 

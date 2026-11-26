@@ -66,6 +66,10 @@ afterEach(() => viewport.set(450))
   g.ClipboardEvent ??= class ClipboardEvent extends Event {}
 }
 
+// axe asks for a canvas to measure text; jsdom has none and printed "Not implemented" for every check. null is what a
+// browser without one answers, and axe goes on without it.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext
+
 // No server behind it: the gateway "does not exist" (404) unless the test swaps fetch.
 const noGateway = async () => new Response(null, { status: 404 })
 vi.stubGlobal('fetch', vi.fn(noGateway))

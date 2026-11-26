@@ -3,8 +3,9 @@
   import { scale } from 'svelte/transition'
   import { ms } from '../../motion'
   import StatusDot from './StatusDot.svelte'
-  import { directory, selection, type ServerOption } from '../../stores/servers.svelte'
+  import { directory, selection, sideOf, type ServerOption } from '../../stores/servers.svelte'
   import { manual, type ManualServer } from '../../stores/manual.svelte'
+  import { bestUrl, secureChecks, secureOrigin, securityOf, type SecureSide, type Security } from '../../stores/security.svelte'
   import { toast } from '../../stores/toast.svelte'
 
   interface Props {
@@ -103,11 +104,65 @@
   // the page's server, when it does not respond, leaves "Disponíveis" and goes to "Desconectados"
   const available = $derived(offline ? directory.others : directory.list)
 
+  // ---- how each connection is protected (HTTP or HTTPS, and whether this browser trusts the certificate) ----
+
+  const LABEL: Record<Security, string> = {
+    https: 'HTTPS · confiável',
+    available: 'HTTP · HTTPS confiável disponível',
+    untrusted: 'HTTP · HTTPS não confiável',
+    plain: 'HTTP · sem criptografia',
+    checking: 'HTTP · verificando HTTPS…',
+  }
+  const EXPLAIN: Record<Security, string> = {
+    https: 'Conexão criptografada, com um certificado em que este navegador confia',
+    available: 'Esta página veio sem criptografia, mas este servidor também atende por HTTPS e este navegador já confia nele',
+    untrusted: 'O servidor tem conexão segura, mas este navegador ainda não confia no certificado dele',
+    plain: 'Este servidor só atende sem criptografia (HTTP)',
+    checking: 'Verificando se este navegador confia na conexão segura do servidor',
+  }
+  const TONE: Record<Security, string> = {
+    https: 'text-accent-text',
+    available: 'text-accent-text',
+    untrusted: 'text-tag-gold',
+    plain: 'text-muted',
+    checking: 'text-muted',
+  }
+
+  /** This page's own server: its secure side is asked at the host the page was opened by. */
+  const embeddedSide = $derived<SecureSide | undefined>(
+    selection.tlsPort ? { hostname: location.hostname, tlsPort: selection.tlsPort, serverId: selection.serverId || undefined } : undefined,
+  )
+  const embeddedSecurity = $derived.by((): Security => {
+    if (location.protocol === 'https:') return 'https'
+    if (!embeddedSide) return 'plain'
+    const r = secureChecks.result(embeddedSide)
+    return !r ? 'checking' : r.trusted ? 'available' : 'untrusted'
+  })
+  /** The same page over HTTPS, when this browser trusts it there. */
+  const embeddedSecureUrl = $derived(embeddedSecurity === 'available' && embeddedSide ? `${secureOrigin(embeddedSide)}${location.pathname}${location.search}` : null)
+
+  const manualSide = (m: ManualServer): SecureSide | undefined =>
+    m.tlsPort ? { hostname: new URL(m.url).hostname, tlsPort: m.tlsPort, serverId: m.serverId } : undefined
+  // an entry saved before the port was kept knows only that its secure side is not trusted
+  const manualSecurity = (m: ManualServer): Security => (m.url.startsWith('https:') || m.tlsPort || !m.connectUrl ? securityOf(m.url, manualSide(m)) : 'untrusted')
+  const shownAddress = (url: string, address: string, side?: SecureSide) => {
+    const best = bestUrl(url, side)
+    return best === url ? address : new URL(best).host
+  }
+
+  // asked only while the menu is open: a closed menu costs no request
+  const sides = $derived(
+    [embeddedSide, ...directory.others.map(sideOf), ...manual.list.map(manualSide)].filter((s): s is SecureSide => !!s),
+  )
+  $effect(() => {
+    if (open && sides.length) void secureChecks.check(sides)
+  })
+
   const asOption = (m: ManualServer): ServerOption => ({
     id: m.id,
     name: m.name,
     address: m.address,
-    url: m.url,
+    url: bestUrl(m.url, manualSide(m)),
     serverId: m.serverId,
     manual: true,
     trustName: m.trustName,
@@ -124,7 +179,8 @@
 
   function choose(server: ServerOption) {
     closeMenu()
-    void selection.open(server)
+    // a server whose HTTPS side this browser trusts is opened there
+    void selection.open(server.manual ? server : { ...server, url: bestUrl(server.url, sideOf(server)) })
   }
 
   function add() {
@@ -134,7 +190,38 @@
   }
 </script>
 
+{#snippet security(sec: Security)}
+  <span class="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] tracking-[0.8px] uppercase {TONE[sec]}" title={EXPLAIN[sec]} data-testid="security" data-security={sec}>
+    {#if sec === 'https' || sec === 'available'}
+      <svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <rect x="5" y="11" width="14" height="9" rx="2" />
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+      </svg>
+    {:else}
+      <svg class="size-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <rect x="5" y="11" width="14" height="9" rx="2" />
+        <path d="M8 11V8a4 4 0 0 1 7.5-2" />
+      </svg>
+    {/if}
+    <span class="truncate">{LABEL[sec]}</span>
+  </span>
+{/snippet}
+
+{#snippet secureLink(href: string, label: string, title: string)}
+  <a
+    {href}
+    target="_blank"
+    rel="noopener"
+    role="menuitem"
+    {title}
+    class="shrink-0 self-center rounded-lg px-2 py-1 font-mono text-[10px] tracking-[0.4px] text-accent-text uppercase transition-colors duration-150 hover:bg-line/40"
+  >
+    {label}
+  </a>
+{/snippet}
+
 {#snippet added(m: ManualServer, tone: 'online' | 'offline')}
+  {@const sec = manualSecurity(m)}
   <div class="flex items-stretch gap-1" role="none" data-testid="added-server" data-tone={tone}>
     <button
       type="button"
@@ -147,28 +234,12 @@
       {#if manual.health[m.id]}<StatusDot {tone} fontSize={11} />{/if}
       <span class="min-w-0">
         <span class="block truncate text-sm font-semibold">{m.name}</span>
-        <span class="flex items-center gap-1.5 font-mono text-[11px] tracking-[0.4px] text-muted">
-          {#if m.url.startsWith('https:')}
-            <svg class="size-3 shrink-0 text-accent-text" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" role="img" aria-label="Conexão segura">
-              <rect x="5" y="11" width="14" height="9" rx="2" />
-              <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-            </svg>
-          {/if}
-          <span class="truncate">{m.address}</span>
-        </span>
+        <span class="block truncate font-mono text-[11px] tracking-[0.4px] text-muted">{shownAddress(m.url, m.address, manualSide(m))}</span>
+        {@render security(sec)}
       </span>
     </button>
-    {#if m.connectUrl}
-      <a
-        href={m.connectUrl}
-        target="_blank"
-        rel="noopener"
-        role="menuitem"
-        title="Este servidor tem conexão segura, mas este navegador ainda não confia nela"
-        class="shrink-0 self-center rounded-lg px-2 py-1 font-mono text-[10px] tracking-[0.4px] text-accent-text uppercase transition-colors duration-150 hover:bg-line/40"
-      >
-        Conectar com segurança
-      </a>
+    {#if sec === 'untrusted'}
+      {@render secureLink(m.connectUrl ?? `${m.url}/server/connect/`, 'Conectar com segurança', EXPLAIN.untrusted)}
     {/if}
     <button
       type="button"
@@ -223,34 +294,45 @@
       use:keepFocus
       onkeydown={onmenukey}
       transition:scale|global={{ start: 0.92, duration: ms(200) }}
-      class="absolute right-0 z-20 mt-2 min-w-60 origin-top-right rounded-field border border-line bg-surface p-1.5"
+      class="absolute right-0 z-20 mt-2 w-max max-w-[min(24rem,calc(100vw-2rem))] min-w-60 origin-top-right rounded-field border border-line bg-surface p-1.5"
     >
       {#if headings}
         <p role="presentation" class="px-2.5 pt-3 pb-1 font-mono text-[10px] uppercase tracking-[1.4px] text-muted">Disponíveis</p>
       {/if}
       {#each available as server (server.id)}
         {@const active = server.id === selection.selected.id}
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={active}
-          disabled={!!selection.connecting}
-          data-selected={active}
-          onclick={() => choose(server)}
-          class="flex w-full items-center justify-between rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 hover:bg-line/40 active:bg-line/70 {active
-            ? 'border-accent-line bg-accent/45 text-accent-text'
-            : 'border-transparent text-fg'}"
-        >
-          <span>
-            <span class="block text-sm font-semibold">{server.name}</span>
-            <span class="block font-mono text-[11px] tracking-[0.4px] text-muted">{server.id === selection.selected.id ? selection.shownAddress : server.address}</span>
-          </span>
-          {#if active}
-            <svg class="size-[18px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" data-testid="selected-check">
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
+        {@const sec = active ? embeddedSecurity : securityOf(server.url, sideOf(server))}
+        <div class="flex items-stretch gap-1" role="none">
+          <button
+            type="button"
+            role="menuitemradio"
+            aria-checked={active}
+            disabled={!!selection.connecting}
+            data-selected={active}
+            onclick={() => choose(server)}
+            class="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 hover:bg-line/40 active:bg-line/70 {active
+              ? 'border-accent-line bg-accent/45 text-accent-text'
+              : 'border-transparent text-fg'}"
+          >
+            <span class="min-w-0">
+              <span class="block truncate text-sm font-semibold">{server.name}</span>
+              <span class="block truncate font-mono text-[11px] tracking-[0.4px] text-muted">{active ? selection.shownAddress : shownAddress(server.url, server.address, sideOf(server))}</span>
+              {@render security(sec)}
+            </span>
+            {#if active}
+              <svg class="size-[18px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" data-testid="selected-check">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            {/if}
+          </button>
+          {#if active && embeddedSecureUrl}
+            {@render secureLink(embeddedSecureUrl, 'Usar HTTPS', EXPLAIN.available)}
+          {:else if active && sec === 'untrusted'}
+            {@render secureLink('/server/connect/', 'Conectar com segurança', EXPLAIN.untrusted)}
+          {:else if !active && sec === 'untrusted'}
+            {@render secureLink(`${server.url}/server/connect/`, 'Conectar com segurança', EXPLAIN.untrusted)}
           {/if}
-        </button>
+        </div>
       {/each}
       {#if !directory.loaded}
         <div class="flex flex-col gap-2 px-2.5 py-2" data-testid="servers-skeleton" aria-hidden="true">
@@ -281,6 +363,7 @@
           <span>
             <span class="block text-sm font-semibold text-muted">{selection.selected.name}</span>
             <span class="block font-mono text-[11px] tracking-[0.4px] text-muted">{selection.shownAddress}</span>
+            {@render security(embeddedSecurity)}
           </span>
           <svg class="size-[18px] text-offline" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path d="M20 6 9 17l-5-5" />

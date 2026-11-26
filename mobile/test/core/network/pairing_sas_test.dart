@@ -175,6 +175,16 @@ void main() {
           reason: 'the CA is downloaded before the number is revealed');
     });
 
+    test('alguém no meio junta a CA dele depois da verdadeira: os números conferem, mas só a verdadeira é guardada', () async {
+      // the digits cover the fingerprint of the first certificate, so they match; what follows it must not be trusted
+      server = await FakeServer(servedCa: '${fixture('good-ca.pem')}\n${fixture('other-ca.pem')}').start();
+      final r = await run(server, store, (p) async => p.digits == server.serverDigits);
+      expect(r, isA<Paired>());
+      final kept = (await store.find('127.0.0.1:${server.port}'))!;
+      expect(RegExp('BEGIN CERTIFICATE').allMatches(kept.caPem).length, 1);
+      expect(fingerprintOfPem(kept.caPem), goodFp);
+    });
+
     test('uma pessoa lenta: a conexão fica parada e o servidor a fecha, mas o aviso de "terminei" ainda chega', () async {
       server = await FakeServer().start();
       server.http.idleTimeout = const Duration(milliseconds: 100);

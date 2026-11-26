@@ -117,3 +117,12 @@ export function markdownMarks(text: string): string {
     .map((part, i) => (i % 2 === 1 ? part : part.replace(UNDERLINE, '$1<u>$2</u>').replace(HIGHLIGHT, '$1<mark>$2</mark>')))
     .join('')
 }
+
+/** The inverse of `markdownMarks`: closed `<u>`/`<mark>` pairs outside code spans go back to the markers the page stores. */
+export function readMarkdownMarks(text: string): string {
+  if (!text.includes('<')) return text
+  return text
+    .split(/(`[^`\n]+`)/)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/<u>([^<\n]+?)<\/u>/g, '__$1__').replace(/<mark>([^<\n]+?)<\/mark>/g, '==$1==')))
+    .join('')
+}

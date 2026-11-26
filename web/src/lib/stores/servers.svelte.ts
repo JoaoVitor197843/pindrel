@@ -1,10 +1,10 @@
 import { fetchDiscoveredServers } from '../api/servers'
 import { ServerInfo, type DiscoveredServer } from '../../types/shared/protos/server'
-import { inspect } from '../api/serverCheck'
+import { inspect, parsePort } from '../api/serverCheck'
 import { manual } from './manual.svelte'
-import { parsePort } from '../api/serverCheck'
 import { toast } from './toast.svelte'
 import { remember, trustOf } from './trust'
+import type { SecureSide } from './security.svelte'
 
 export interface ServerOption {
   id: string
@@ -19,6 +19,18 @@ export interface ServerOption {
   manual?: boolean
   /** The name `trust` knows it by, when the list shows another one the user chose. */
   trustName?: string
+  /** The port of its HTTPS side, when it has one (the mDNS `tls=` entry). */
+  tlsPort?: number
+}
+
+/** The HTTPS side of a server of the list, reached by the same host as its plain address. */
+export function sideOf(server: Pick<ServerOption, 'url' | 'tlsPort' | 'serverId'>): SecureSide | undefined {
+  if (!server.tlsPort) return undefined
+  try {
+    return { hostname: new URL(server.url).hostname, tlsPort: server.tlsPort, serverId: server.serverId || undefined }
+  } catch {
+    return undefined
+  }
 }
 
 // The open page is always the embedded server's, and it is always the default.
@@ -72,7 +84,9 @@ export function toOption(server: DiscoveredServer): ServerOption | null {
   if (!host) return null
   const address = `${host}:${server.port}`
   const serverId = /^[A-Za-z0-9-]{1,64}$/.test(server.id ?? '') ? server.id : ''
-  return { id: idFor(server.name), name: server.name, address, url: `http://${address}`, serverId }
+  // a TLS port outside the unprivileged range is read as none, as the app does
+  const tls = Number.isInteger(server.tlsPort) && server.tlsPort >= 1024 && server.tlsPort <= 65535 ? server.tlsPort : 0
+  return { id: idFor(server.name), name: server.name, address, url: `http://${address}`, serverId, ...(tls ? { tlsPort: tls } : {}) }
 }
 
 /**
@@ -126,7 +140,7 @@ export class ServerDirectory {
       }
     }
     const sorted = [...next.values()].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
-    const same = sorted.length === this.others.length && sorted.every((s, i) => s.id === this.others[i].id && s.address === this.others[i].address && s.serverId === this.others[i].serverId)
+    const same = sorted.length === this.others.length && sorted.every((s, i) => s.id === this.others[i].id && s.address === this.others[i].address && s.serverId === this.others[i].serverId && s.tlsPort === this.others[i].tlsPort)
     if (!same) this.others = sorted
   }
 
@@ -231,6 +245,10 @@ class ServerSelection {
   address = $state<string | null>(null)
   /** Whether this page's server has a secure (HTTPS) side (`x-pindrel-tls` on `/server/info/`). */
   tlsOffered = $state(false)
+  /** The port of that side. */
+  tlsPort = $state<number | undefined>(undefined)
+  /** This page's server's own id (`x-pindrel-id`), empty when it says none (no gateway). */
+  serverId = $state('')
   /** Whether new accounts can be created here (`ServerInfo.registration_enabled`); null until the server has said. */
   registrationEnabled = $state<boolean | null>(null)
 
@@ -261,7 +279,10 @@ class ServerSelection {
       up = res.status < 500
       if (up) {
         this.address = lanAddress(res.headers.get(ADDRESS_HEADER)) ?? embedded.address
-        this.tlsOffered = parsePort(res.headers.get(TLS_HEADER)) !== undefined
+        this.tlsPort = parsePort(res.headers.get(TLS_HEADER))
+        this.tlsOffered = this.tlsPort !== undefined
+        const id = res.headers.get('x-pindrel-id') ?? ''
+        this.serverId = /^[A-Za-z0-9-]{1,64}$/.test(id) ? id : ''
         const open = await registrationOf(res)
         if (open !== null) this.registrationEnabled = open
       }

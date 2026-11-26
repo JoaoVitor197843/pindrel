@@ -34,7 +34,7 @@
   import TextBlock from '../lib/components/editor/TextBlock.svelte'
   import { autosize, place } from '../lib/components/editor/autosize'
   import { ms } from '../lib/motion'
-  import { ago, blockTypeForFile, isTextType, levelOf, numbering, toneOf, type Block, type BlockType, type HeadingLevel } from '../lib/stores/blocks'
+  import { MAX_BLOCKS, ago, blockTypeForFile, isTextType, levelOf, numbering, toneOf, type Block, type BlockType, type HeadingLevel } from '../lib/stores/blocks'
   import { toggleMark, type Mark } from '../lib/stores/inline'
   import { barLock, instances, type RichInstance } from '../lib/components/editor/rich/engine'
   import { Dock, dockScale } from '../lib/stores/dock.svelte'
@@ -192,7 +192,7 @@
 
   function duplicateBlock(blockId: string) {
     const made = ed.duplicateBlock(blockId)
-    if (!made) return void toast.show(ed.blocks.length >= 500 ? 'Limite de blocos da página atingido' : 'Este bloco não pode ser duplicado')
+    if (!made) return void toast.show(ed.blocks.length >= MAX_BLOCKS ? 'Limite de blocos da página atingido' : 'Este bloco não pode ser duplicado')
     void focusBlock(made.id, 'end')
   }
 
@@ -548,7 +548,7 @@
       {#if !zen}<PageCover {ed} />{/if}
       <div class="animate-fade relative w-full">
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <article class="mx-auto w-full min-w-0 px-7 pb-32 min-[360px]:px-7 md:px-20 {zen ? 'max-w-2xl pt-24' : 'max-w-3xl pt-10'}" onkeydown={(e) => (navKey(e), fmtKey(e))}
+      <article class="mx-auto w-full min-w-0 px-7 pb-32 md:px-20 {zen ? 'max-w-2xl pt-24' : 'max-w-3xl pt-10'}" onkeydown={(e) => (navKey(e), fmtKey(e))}
         ondragover={(e) => hasFiles(e) && e.preventDefault()}
         ondrop={(e) => {
           if (!hasFiles(e)) return
@@ -700,7 +700,6 @@
               <button
                 type="button"
                 class="h-9 rounded-full border border-field-line px-3.5 text-sm hover:bg-line/40"
-                disabled={starter.type === 'image' && !ed.can('images')}
                 onclick={() => pick(starter.type, null)}
               >
                 {starter.label}

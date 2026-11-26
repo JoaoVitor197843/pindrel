@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tests of zigcc-aarch64 and zigar with a fake `zig` that prints what it was given (run: sh gateway/cross/test_zigcc.sh).
+# Tests of zigcc (through zigcc-aarch64 and zigcc-x86_64) and zigar with a fake `zig` that prints what it was given (run: sh gateway/cross/test_zigcc.sh).
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d)
@@ -23,6 +23,12 @@ check "keeps arguments with spaces whole" "cc|-target|aarch64-linux-musl|-fno-sa
 
 got=$("$here/zigcc-aarch64" | tr '\n' ' ')
 check "no arguments" "cc -target aarch64-linux-musl -fno-sanitize=undefined " "$got"
+
+got=$("$here/zigcc-x86_64" --target=x86_64-unknown-linux-musl -c x.c | tr '\n' ' ')
+check "zigcc-x86_64 builds for x86_64 musl" "cc -target x86_64-linux-musl -fno-sanitize=undefined -c x.c " "$got"
+
+got=$(cd / && "$here/zigcc-aarch64" -c a.c | tr '\n' ' ')
+check "works from any directory" "cc -target aarch64-linux-musl -fno-sanitize=undefined -c a.c " "$got"
 
 got=$("$here/zigar" crs lib.a a.o b.o | tr '\n' ' ')
 check "zigar hands everything to zig ar" "ar crs lib.a a.o b.o " "$got"

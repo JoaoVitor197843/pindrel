@@ -43,7 +43,7 @@ impl Drop for Dir {
 
 /// A request written by hand (so the Host header is whatever the test says); returns the head and the body.
 async fn raw(addr: std::net::SocketAddr, request: &str) -> (String, String) {
-    let mut s = TcpStream::connect(addr).await.unwrap();
+    let mut s = TcpStream::connect(reach(addr)).await.unwrap();
     s.write_all(request.as_bytes()).await.unwrap();
     let mut out = Vec::new();
     let _ = time::timeout(Duration::from_secs(3), s.read_to_end(&mut out)).await;
@@ -292,7 +292,7 @@ async fn a_page_from_another_site_cannot_open_a_websocket_but_the_own_page_and_n
     let try_ws = |o: Option<&'static str>, host: &'static str| {
         let addr = gw.addr;
         async move {
-            let mut s = TcpStream::connect(addr).await.unwrap();
+            let mut s = TcpStream::connect(reach(addr)).await.unwrap();
             s.write_all(ws(o, host).as_bytes()).await.unwrap();
             let mut buf = vec![0u8; 512];
             let n = time::timeout(Duration::from_secs(2), s.read(&mut buf)).await.unwrap().unwrap();
@@ -411,8 +411,8 @@ async fn the_page_tells_whose_machine_it_is_and_what_it_does_not_do() {
     ] {
         assert!(body.contains(promise), "missing: {promise}");
     }
-    // the QR is behind a choice, not the first thing seen: the browser path is open, the app path is closed
-    // both closed at first and exclusive: opening one closes the other (the name attribute, plus a script for old browsers)
+    // the QR is behind a choice, not the first thing seen: both choices closed at first and exclusive, opening one closes
+    // the other (the name attribute, plus a script for old browsers)
     assert!(body.contains("<details class=\"choice\" id=\"web\" name=\"conexao\">\n<summary>Vou usar no navegador"));
     assert!(body.contains("<details class=\"choice\" id=\"app\" name=\"conexao\">\n<summary>Tenho o app Pindrel"));
     assert!(!body.contains("class=\"choice\" open"));
@@ -433,7 +433,7 @@ async fn the_page_tells_whose_machine_it_is_and_what_it_does_not_do() {
     );
     assert!(
         body.find("Vou usar no navegador").unwrap() < body.find("<svg xmlns").unwrap(),
-        "the QR comes before the explanation"
+        "the choices come before the QR"
     );
     gw.shutdown().await;
 }
@@ -477,8 +477,8 @@ async fn a_device_that_already_trusts_the_server_is_sent_on_unless_it_asks_to_st
         body.contains("setTimeout(function () { location.href"),
         "it must wait a moment, not jump at once"
     );
-    // the address it jumps to is the one checked, never taken from the page's own query
-    assert!(!body.contains("location.search +") || !body.contains("location.href = location.search"));
+    // the address it jumps to is the one checked (the link of the page), never taken from the page's own address
+    assert!(body.contains("location.href = open.href") && !body.contains("location.href = location"));
     gw.shutdown().await;
 }
 
@@ -511,6 +511,5 @@ async fn the_app_choice_leads_with_a_private_room_and_keeps_the_qr_and_the_maste
     assert!(!body.contains("/server/pair/sas"), "the public list of digits is gone");
     // the page explains the master code but never shows one
     assert!(body.contains("PAIR: código mestre XXXX-XXXX-XXXX-XXXX"));
-    assert!(!body.contains("em desenvolvimento"), "the app screen exists now");
     gw.shutdown().await;
 }

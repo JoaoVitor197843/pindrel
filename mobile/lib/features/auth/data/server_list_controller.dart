@@ -24,12 +24,9 @@ class ServerListController {
   ServerListController({
     required ServerDiscovery discovery,
     this.probe,
-    ServerTrust? trust,
-    PairedStore? paired,
-    // ignore: prefer_initializing_formals
-  }) : _trust = trust,
-       // ignore: prefer_initializing_formals
-       _paired = paired {
+    this._trust,
+    this._paired,
+  }) {
     _ready = _load();
     _subscription = discovery.watch().listen(_onFound, onError: _onError);
   }

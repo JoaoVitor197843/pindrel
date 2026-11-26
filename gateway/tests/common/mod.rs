@@ -152,7 +152,7 @@ impl Backend {
 async fn backend_handler(id: &'static str, mut req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
     let h = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let (xff, te, upgrade, conn, ctype) = (h("x-forwarded-for"), h("te"), h("upgrade"), h("connection"), h("content-type"));
-    let proto = h("x-forwarded-proto");
+    let (proto, host, secret) = (h("x-forwarded-proto"), h("host"), h("x-secret"));
     let claims = ["forwarded", "x-real-ip", "cf-connecting-ip", "true-client-ip"].map(h).concat();
     let (method, pq) = (
         req.method().to_string(),
@@ -196,6 +196,8 @@ async fn backend_handler(id: &'static str, mut req: Request<Incoming>) -> Result
         .header("x-backend", id)
         .header("x-seen-xff", xff)
         .header("x-seen-proto", proto)
+        .header("x-seen-host", host)
+        .header("x-seen-secret", secret)
         .header("x-seen-claims", claims)
         .header("x-seen-method", method)
         .header("x-seen-path", pq)

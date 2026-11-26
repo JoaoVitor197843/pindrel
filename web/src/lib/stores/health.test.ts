@@ -47,6 +47,16 @@ describe('selection.check', () => {
     expect(selection.health).toBe('disconnected')
   })
 
+  it('lê a porta HTTPS e o id do servidor desta página; valores estranhos não passam', async () => {
+    const headers = (h: Record<string, string>) => vi.mocked(fetch).mockImplementation(async () => new Response(null, { status: 200, headers: h }))
+    headers({ 'x-pindrel-tls': '8443', 'x-pindrel-id': 'casa-1' })
+    await selection.check()
+    expect([selection.tlsOffered, selection.tlsPort, selection.serverId]).toEqual([true, 8443, 'casa-1'])
+    headers({ 'x-pindrel-tls': '99999', 'x-pindrel-id': 'tem espaço <script>' })
+    await selection.check()
+    expect([selection.tlsOffered, selection.tlsPort, selection.serverId]).toEqual([false, undefined, ''])
+  })
+
   it('sem resposta no prazo é falha', async () => {
     vi.useFakeTimers()
     try {

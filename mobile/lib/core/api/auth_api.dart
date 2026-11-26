@@ -119,4 +119,7 @@ class AuthApi {
   Future<void> logout(String? token) async {
     await _call('POST', '/auth/logout/', token: token);
   }
+
+  /// Closes the HTTP client and its pooled connections; a request still running fails. Unused after this.
+  void close() => _api.client.close();
 }

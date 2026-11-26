@@ -47,7 +47,7 @@ const _labels = <BlockType, String>{
 };
 
 /// One page: a cover, an icon, the title, and the blocks, with the properties on the left and the panel on the right.
-/// Text blocks are plain fields for now (the rich editor comes later).
+/// The text blocks are edited by the rich-text body ([PageBody]); the other blocks keep their own widgets.
 class EditorPage extends StatefulWidget {
   const EditorPage({super.key, required this.ws, required this.pageId});
   final Workspace ws;
@@ -66,7 +66,7 @@ class _EditorPageState extends State<EditorPage> {
   final _pageNode = FocusNode(skipTraversal: true);
   String? _wantFocus;
   var _zen = false;
-  // the block that has the keyboard (the others fade back in zen mode), and the rows whose entrance already played
+  // the docked panels, open or closed by the person (null: not touched yet, open)
   bool? _propsDock, _panelDock;
   // the panels as drawers over the page (narrow windows); they always start closed
   var _propsDrawer = false, _panelDrawer = false;

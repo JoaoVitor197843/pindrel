@@ -386,6 +386,8 @@ mod tests {
             "string host = 2;",
             "repeated string addresses = 3;",
             "int32 port = 4;",
+            "string id = 5;",
+            "int32 tls_port = 6;",
             "repeated DiscoveredServer servers = 1;",
         ] {
             assert!(server.contains(line), "server.proto lost `{line}`");

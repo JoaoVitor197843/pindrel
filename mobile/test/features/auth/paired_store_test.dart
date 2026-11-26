@@ -117,6 +117,31 @@ void main() {
       expect((offer!.port, offer.serverId), (8443, 'a1b2c3'));
     });
 
+    test('só os cabeçalhos importam: um corpo sem fim (um aparelho malicioso na rede) não é lido nem segura a resposta', () async {
+      final s = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => s.close(force: true));
+      var sent = 0;
+      s.listen((req) async {
+        req.response.headers.set(tlsHeader, '8443');
+        req.response.headers.set(idHeader, 'a1b2c3');
+        final chunk = List.filled(64 * 1024, 120);
+        try {
+          for (var i = 0; i < 100000; i++) {
+            req.response.add(chunk);
+            sent += chunk.length;
+            await req.response.flush();
+          }
+        } catch (_) {
+          // the app hung up: what this test wants
+        }
+      });
+      final sw = Stopwatch()..start();
+      final offer = await fetchTlsOffer(base(s), timeout: const Duration(seconds: 2));
+      expect((offer!.port, offer.serverId), (8443, 'a1b2c3'));
+      expect(sw.elapsed, lessThan(const Duration(seconds: 1)));
+      expect(sent, lessThan(64 * 1024 * 1024), reason: 'the body is dropped, not read to the end');
+    });
+
     test('um servidor Pindrel sem lado seguro, ou com um valor que não é porta, não oferece HTTPS (e não é erro)', () async {
       for (final value in ['', 'abc', '0', '-1', '65536', '99999999999', '8.4']) {
         final s = await serve({tlsHeader: value, idHeader: 'a1b2c3'});
