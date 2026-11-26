@@ -77,6 +77,19 @@ export const MAX_TAG_NAME = 24
 export const MIN_VAULT_PASSWORD = 4
 
 /** The state of the dashboard. One instance per screen, so tests start clean. */
+/** Another tab opened a newer Pindrel, which changed how the notes are stored: this one can no longer save. */
+const UPDATED_ELSEWHERE = 'O Pindrel foi atualizado em outra aba. Recarregue esta página para continuar salvando.'
+
+/**
+ * A page id no other tab or window can also make: they share the database but nothing tells one what the other wrote, so
+ * a counter raised only when the list loads gave two tabs the same id and one page silently replaced the other. Time and
+ * 48 random bits (`getRandomValues`, unlike `randomUUID`, works on plain HTTP too); fits the `/notes/:id` route.
+ */
+export function newPageId(): string {
+  const r = crypto.getRandomValues(new Uint8Array(6))
+  return `n${Date.now().toString(36)}${Array.from(r, (b) => b.toString(16).padStart(2, '0')).join('')}`
+}
+
 export class Workspace {
   pages = $state<NotePage[]>([])
   tags = $state<Tag[]>([])
@@ -92,7 +105,6 @@ export class Workspace {
   layout = $state<Layout>('grid')
   query = $state('')
   tagFilter = $state<string | null>(null)
-  #seq = 100
   /** Where the pages are kept between visits; null when nothing is saved (the demo, or a browser without storage). */
   persist: Persistence | null = null
   /** The saved pages are being read. */
@@ -140,18 +152,20 @@ export class Workspace {
       }
       const made = this.pages
       const taken = new Set(saved.pages.map((p) => p.id))
-      for (const id of taken) {
-        const n = /^n(\d+)$/.exec(id)
-        if (n) this.#seq = Math.max(this.#seq, Number(n[1]))
-      }
       // a page made while the list was loading may have been given an id the saved ones already use
-      for (const p of made) if (taken.has(p.id)) p.id = `n${++this.#seq}`
+      for (const p of made) if (taken.has(p.id)) p.id = newPageId()
       if (saved.tags) this.tags = saved.tags
       if (saved.settings) this.settings = saved.settings
       this.pages = [...made, ...saved.pages.map((p): NotePage => ({ ...p, content: null }))]
       for (const id of taken) this.#stored.add(id)
       this.persist = new Persistence(store, this)
-      this.persist.onerror = () => toast.show('Não foi possível guardar neste navegador; as mudanças podem se perder')
+      const persist = this.persist
+      this.persist.onerror = () =>
+        toast.show(store.upgradedElsewhere ? UPDATED_ELSEWHERE : 'Não foi possível guardar neste navegador; as mudanças podem se perder')
+      store.onversionchange = async () => {
+        await persist.flush()
+        toast.show(UPDATED_ELSEWHERE)
+      }
       // whatever was made while the list was loading still has to be saved
       for (const p of made) this.persist.mark(p.id)
       this.#purgeExpired()
@@ -231,11 +245,13 @@ export class Workspace {
   }
 
   /** Runs `fn` with every body in memory (an export needs them all), then lets the ones nobody had open go again. */
-  async withBodies<T>(fn: () => T): Promise<T> {
+  async withBodies<T>(fn: () => T): Promise<T | null> {
     const ids = this.pages.filter((p) => !p.content && this.#stored.has(p.id)).map((p) => p.id)
     const ok = await Promise.all(ids.map((id) => this.load(id)))
     try {
-      return fn()
+      // a body that could not be read would go out as its excerpt (Markdown) or as nothing (JSON): an export that
+      // says it is ready must be whole, so it is not made at all
+      return ok.every(Boolean) ? fn() : null
     } finally {
       ids.forEach((id, i) => ok[i] && this.release(id))
     }
@@ -375,7 +391,7 @@ export class Workspace {
   /** Adds an empty page at the top of "all pages" and returns it. */
   newPage(title = 'Sem título'): NotePage {
     const page: NotePage = {
-      id: `n${++this.#seq}`,
+      id: newPageId(),
       title: title.trim().slice(0, MAX_TITLE) || 'Sem título',
       excerpt: '',
       tags: this.tagFilter ? [this.tagFilter] : [],
@@ -467,7 +483,7 @@ export class Workspace {
     const now = Date.now()
     const copy: NotePage = {
       ...JSON.parse(JSON.stringify({ ...src, content: null })),
-      id: `n${++this.#seq}`,
+      id: newPageId(),
       title: `${src.title} (cópia)`.slice(0, MAX_TITLE),
       content: body,
       blocks: body.length,

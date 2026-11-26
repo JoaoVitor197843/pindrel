@@ -578,7 +578,7 @@ describe('Dashboard — abrir uma página', () => {
     await click(screen.getByRole('button', { name: 'Nova página' }))
     await click(screen.getByRole('button', { name: 'Sem título' }))
     expect(onopen).toHaveBeenCalledOnce()
-    expect(onopen.mock.calls[0][0]).toMatch(/^n\d+$/)
+    expect(onopen.mock.calls[0][0]).toMatch(/^n[0-9a-z]{12,40}$/)
   })
 })
 
@@ -665,7 +665,7 @@ describe('Dashboard — páginas do cofre', () => {
     await submit('abcd')
     expect(onopen).toHaveBeenCalledOnce()
     const id = onopen.mock.calls[0][0]
-    expect(id).toMatch(/^n\d+$/)
+    expect(id).toMatch(/^n[0-9a-z]{12,40}$/)
     // the new entry sits in the vault list, next to the button that made it
     expect(screen.getAllByRole('button', { name: /Nova entrada segura/ })).toHaveLength(2)
   })
