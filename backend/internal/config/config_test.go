@@ -162,3 +162,74 @@ func TestLoad_FilesNeedTwoDatabaseConnections(t *testing.T) {
 		t.Errorf("one connection with files off: %v", err)
 	}
 }
+
+func TestLoad_ListenHost(t *testing.T) {
+	setRequired(t)
+	cfg, err := config.Load()
+	if err != nil || cfg.Port != ":8080" {
+		t.Fatalf("default: %q %v", cfg.Port, err)
+	}
+	for host, want := range map[string]string{"127.0.0.1": "127.0.0.1:8080", "::1": "[::1]:8080", "localhost": "localhost:8080"} {
+		t.Setenv("LISTEN_HOST", host)
+		cfg, err := config.Load()
+		if err != nil || cfg.Port != want {
+			t.Errorf("LISTEN_HOST=%s: %q %v", host, cfg.Port, err)
+		}
+	}
+	for _, bad := range []string{"0.0.0.0:80", "exemplo.com", "1.2.3", "http://127.0.0.1"} {
+		t.Setenv("LISTEN_HOST", bad)
+		if _, err := config.Load(); err == nil || !strings.Contains(err.Error(), "LISTEN_HOST") {
+			t.Errorf("LISTEN_HOST=%s accepted: %v", bad, err)
+		}
+	}
+}
+
+func TestLoad_WebDir(t *testing.T) {
+	setRequired(t)
+	cfg, _ := config.Load()
+	if cfg.WebDir != "./public" {
+		t.Errorf("default WEB_DIR = %q", cfg.WebDir)
+	}
+	t.Setenv("WEB_DIR", `C:\Program Files\Pindrel Server\public`)
+	if cfg, _ := config.Load(); cfg.WebDir != `C:\Program Files\Pindrel Server\public` {
+		t.Errorf("WEB_DIR = %q", cfg.WebDir)
+	}
+}
+
+// No other site may call the API by default; a list is read strictly, and "*" (any site, with the person's cookie) is
+// refused.
+func TestLoad_AllowedOrigins(t *testing.T) {
+	setRequired(t)
+	if cfg, _ := config.Load(); len(cfg.AllowedOrigins) != 0 {
+		t.Errorf("default: %v", cfg.AllowedOrigins)
+	}
+	t.Setenv("ALLOWED_ORIGINS", " https://notas.exemplo.com/ , http://localhost:*,http://192.168.1.10:8080 ")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"https://notas.exemplo.com", "http://localhost:*", "http://192.168.1.10:8080"}
+	if strings.Join(cfg.AllowedOrigins, " ") != strings.Join(want, " ") {
+		t.Errorf("got %v", cfg.AllowedOrigins)
+	}
+	for _, bad := range []string{"*", "https://*.exemplo.com", "exemplo.com", "ftp://x.com", "https://x.com/caminho", "https://x.com?a=1", "https://user@x.com", "http://"} {
+		t.Setenv("ALLOWED_ORIGINS", bad)
+		if _, err := config.Load(); err == nil {
+			t.Errorf("ALLOWED_ORIGINS=%q accepted", bad)
+		}
+	}
+}
+
+// Every error is on a line of its own, so the person reading the log of a service sees all of them.
+func TestLoad_EveryErrorOnItsOwnLine(t *testing.T) {
+	for _, k := range []string{"PORT", "DB_HOST", "JWT_SECRET"} {
+		t.Setenv(k, "")
+	}
+	_, err := config.Load()
+	if err == nil {
+		t.Fatal("expected errors")
+	}
+	if n := strings.Count(err.Error(), "\n - "); n < 3 {
+		t.Errorf("%d bullets in %q", n, err)
+	}
+}

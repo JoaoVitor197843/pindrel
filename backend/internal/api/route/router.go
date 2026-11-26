@@ -49,13 +49,17 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	r.Use(middleware.Recoverer)
 	r.Use(AuthMiddleware.SecurityHeaders)
 
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:*", "https://seu-app.com"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
+	// The web is served by this server and calls relative paths, so by default no other site may call the API (an empty
+	// list given to cors.Handler would mean "every origin": the middleware is left out instead).
+	if len(cfg.AllowedOrigins) > 0 {
+		r.Use(cors.Handler(cors.Options{
+			AllowedOrigins:   cfg.AllowedOrigins,
+			AllowedMethods:   []string{"GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"},
+			AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Chunk-Sha256"},
+			AllowCredentials: true,
+			MaxAge:           300,
+		}))
+	}
 	// who a request belongs to: its connection, or the client a TRUSTED_PROXIES proxy vouches for (never a header
 	// from anyone else: see internal/clientip)
 	clientKey := cfg.ClientKey
@@ -97,16 +101,14 @@ func SetupRouter(cfg *config.Config, repo *db.Queries, h *auth.Handler, loginLim
 	if ex.Files != nil {
 		mountFiles(r, cfg, repo, ex, clientKey)
 	}
-	r.Group(func(r chi.Router) {
-		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo, cfg.DebugMode))
-
-		// r.Get("/api/notes", GetNotesHandler)
-		// r.Get("/api/ws/sync", WebSocketSyncHandler)
-	})
 
 	// NotFound (and not a GET /* wildcard) so that an unknown path answers 404 for every method;
 	// a wildcard would make chi answer 405 for e.g. POST /auth/lo/.
-	r.NotFound(spaHandler(publicDir))
+	webDir := cfg.WebDir
+	if webDir == "" {
+		webDir = defaultWebDir
+	}
+	r.NotFound(spaHandler(webDir))
 
 	return r
 }
@@ -143,7 +145,7 @@ func mountFiles(r chi.Router, cfg *config.Config, repo *db.Queries, ex Extras, c
 		}
 	}
 	r.Group(func(r chi.Router) {
-		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo, cfg.DebugMode))
+		r.Use(AuthMiddleware.AuthMiddleware(cfg.JWTSecret, repo))
 		r.With(control).Get("/files/", fh.List)
 		r.With(control).Post("/files/uploads/", fh.CreateUpload)
 		r.With(control).Get("/files/uploads/{id}", fh.UploadStatus)
@@ -166,8 +168,8 @@ const webCSP = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-
 	"img-src 'self' data: blob:; media-src 'self' http: https: blob:; font-src 'self'; connect-src 'self' http: https: ws: wss:; worker-src 'self' blob:; " +
 	"object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
-// publicDir is where the Docker image places the web build.
-const publicDir = "./public"
+// defaultWebDir is where the Docker image places the web build (WEB_DIR changes it).
+const defaultWebDir = "./public"
 
 // isWebRoute is the allowlist of page routes of the web SPA (web/src/routes). Keep it in sync
 // with the web router: a path that is not a static file and not listed here is a 404.
@@ -196,9 +198,10 @@ func spaHandler(dir string) http.HandlerFunc {
 			http.NotFound(w, r)
 			return
 		}
-		// path.Clean on a rooted path drops any ".." segments, so it cannot escape dir
+		// path.Clean on a rooted path drops any ".." segments; statLocal also refuses what Windows reads as a separator,
+		// a drive or a device, so nothing can point outside dir
 		clean := path.Clean("/" + r.URL.Path)
-		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(clean))); err == nil && !info.IsDir() {
+		if info, err := statLocal(dir, clean); err == nil && !info.IsDir() {
 			// Vite names everything under /assets/ after its content: it can be kept for good
 			if strings.HasPrefix(clean, "/assets/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
@@ -233,6 +236,17 @@ func spaHandler(dir string) http.HandlerFunc {
 		}
 		http.ServeFile(w, r, index)
 	}
+}
+
+// statLocal stats a cleaned URL path inside dir, refusing (os.ErrNotExist) what would not stay inside it on every
+// platform: a backslash (a separator on Windows: "/..", a backslash and a name climbed out of the folder there), a colon
+// (a drive or a file stream), a NUL, and the reserved device names that filepath.IsLocal knows (NUL, CON, COM1...).
+func statLocal(dir, clean string) (os.FileInfo, error) {
+	rel := strings.TrimPrefix(clean, "/")
+	if rel == "" || strings.ContainsAny(rel, "\\:\x00") || !filepath.IsLocal(filepath.FromSlash(rel)) {
+		return nil, os.ErrNotExist
+	}
+	return os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
 }
 
 // servePrecompressed answers with `<file>.br` or `<file>.gz` when the build left one next to the file and the client

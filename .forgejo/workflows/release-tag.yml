@@ -214,13 +214,14 @@ jobs:
       MIRROR_REPO: JoaoVitor197843/pindrel
     steps:
       - uses: actions/checkout@v4
-      - name: Windows e macOS (construídos no GitHub, app e gateway)
+      - name: Windows e macOS (construídos no GitHub, app, gateway e servidor)
         run: |
           mkdir -p /tmp/assets
           sh .forgejo/scripts/github-assets.sh "$MIRROR_REPO" "$GITHUB_REF_NAME" /tmp/assets \
             "pindrel-app_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-app_${GITHUB_REF_NAME}_windows_amd64_installer.exe" \
             "pindrel-app_${GITHUB_REF_NAME}_macos_universal.zip" \
-            "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_installer.exe"
+            "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-gateway_${GITHUB_REF_NAME}_windows_amd64_installer.exe" \
+            "pindrel-server_${GITHUB_REF_NAME}_windows_amd64_portable.zip" "pindrel-server_${GITHUB_REF_NAME}_windows_amd64_installer.exe"
           sh .forgejo/scripts/release.sh upload "$GITHUB_REF_NAME" /tmp/assets/*
 
   # The public downloads page is the GitHub release: it gets a copy of everything the Forgejo release holds (notes and

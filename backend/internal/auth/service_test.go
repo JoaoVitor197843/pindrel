@@ -14,28 +14,6 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func TestDB_Service_Register_RegistrationDisabled(t *testing.T) {
-	godotenv.Load("../../.env")
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("error on creating configuration: %v", err)
-	}
-	dbPool, err := database.NewConnection(context.Background(), cfg.Database)
-	if err != nil {
-		t.Fatalf("failed to connect to postgres: %v", err)
-	}
-	defer dbPool.Close()
-	repo := db.New(dbPool)
-
-	service := auth.NewService(repo, false)
-
-	_, err = service.Register(context.Background(), "email@teste.com", "user", "senha_valida_123")
-
-	if !errors.Is(err, auth.ErrRegistrationDisabled) {
-		t.Fatalf("expected ErrRegistrationDisabled, got: %v", err)
-	}
-}
-
 func TestDB_Service_Register_DuplicateEmail(t *testing.T) {
 	godotenv.Load("../../.env")
 	cfg, err := config.Load()

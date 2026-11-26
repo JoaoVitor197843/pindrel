@@ -1,4 +1,4 @@
-// Package api have WriteError logic
+// Package api writes the protobuf answers and errors every handler sends.
 package api
 
 import (

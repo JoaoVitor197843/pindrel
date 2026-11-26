@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -45,19 +46,19 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 	if !s.registrationEnabled {
 		return nil, ErrRegistrationDisabled
 	}
-	_, err := s.repo.GetUserByEmail(ctx, email)
-	if err == nil {
+	// a shortcut that spares an Argon2 run; the UNIQUE constraint below is the real guard
+	if _, err := s.repo.GetUserByEmail(ctx, email); err == nil {
 		return nil, ErrEmailAlreadyExists
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
 	}
 	hashedPassword, err := HashPassword(password)
 	if err != nil {
 		return nil, err
 	}
-	user_params := db.CreateUserParams{Email: email, Username: validator.NormalizeUsername(username), PasswordHash: hashedPassword}
-	user, err := s.repo.CreateUser(ctx, user_params)
+	user, err := s.repo.CreateUser(ctx, db.CreateUserParams{Email: email, Username: validator.NormalizeUsername(username), PasswordHash: hashedPassword})
 	if err != nil {
-		// two registrations of the same e-mail at once: the UNIQUE constraint is the real guard,
-		// the GetUserByEmail above is only a shortcut
+		// two registrations of the same e-mail at once
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 			return nil, ErrEmailAlreadyExists
@@ -68,7 +69,6 @@ func (s *Service) Register(ctx context.Context, email, username, password string
 }
 
 func (s *Service) Login(ctx context.Context, email, password, secret string, accessExpireIn, refreshExpireIn time.Duration) (*LoginResult, error) {
-
 	user, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -95,40 +95,48 @@ func (s *Service) Login(ctx context.Context, email, password, secret string, acc
 	return &LoginResult{RefreshToken: refreshToken, AccessToken: accessToken}, nil
 }
 
+// revoke puts a token on the revocation list until it would have expired anyway.
+func (s *Service) revoke(ctx context.Context, c *CustomClaim) error {
+	return s.repo.RevokeToken(ctx, db.RevokeTokenParams{
+		TokenID:   c.ID,
+		UserID:    c.UserID,
+		ExpiresAt: pgtype.Timestamptz{Time: c.ExpiresAt.Time, Valid: true},
+	})
+}
+
+// Logout revokes the refresh token and, when the client sent it, the access token too.
 func (s *Service) Logout(ctx context.Context, refreshToken, accessToken, secret string) error {
-	RefreshClaims, err := ValidateToken(ctx, refreshToken, secret, s.repo)
+	refreshClaims, err := ValidateToken(ctx, refreshToken, secret, s.repo)
 	if err != nil {
 		return err
 	}
-
-	revoke_refresh_params := db.RevokeTokenParams{
-		TokenID: RefreshClaims.ID,
-		UserID:  RefreshClaims.UserID,
-		ExpiresAt: pgtype.Timestamptz{
-			Time:  RefreshClaims.ExpiresAt.Time,
-			Valid: true,
-		},
-	}
-	if err := s.repo.RevokeToken(ctx, revoke_refresh_params); err != nil {
+	if err := s.revoke(ctx, refreshClaims); err != nil {
 		return err
 	}
-
-	if accessToken != "" {
-		accessClaims, err := ValidateToken(ctx, accessToken, secret, s.repo)
-		if err == nil {
-			revoke_access_params := db.RevokeTokenParams{
-				TokenID: accessClaims.ID,
-				UserID:  accessClaims.UserID,
-				ExpiresAt: pgtype.Timestamptz{
-					Time:  accessClaims.ExpiresAt.Time,
-					Valid: true,
-				},
-			}
-			s.repo.RevokeToken(ctx, revoke_access_params)
-		}
+	if accessToken == "" {
+		return nil
 	}
+	// an access token that is already invalid has nothing left to revoke
+	accessClaims, err := ValidateToken(ctx, accessToken, secret, s.repo)
+	if IsTokenRefused(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return s.revoke(ctx, accessClaims)
+}
 
-	return nil
+// user loads the account a token names; an account deleted since the token was made is ErrUserNotFound.
+func (s *Service) user(ctx context.Context, id uuid.UUID) (*db.GetUserByIDRow, error) {
+	user, err := s.repo.GetUserByID(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }
 
 func (s *Service) Refresh(ctx context.Context, tokenString, secret string, accessExpireIn time.Duration) (string, error) {
@@ -136,16 +144,10 @@ func (s *Service) Refresh(ctx context.Context, tokenString, secret string, acces
 	if err != nil {
 		return "", err
 	}
-
-	_, err = s.repo.GetUserByID(ctx, claims.UserID)
-	if err != nil {
+	if _, err := s.user(ctx, claims.UserID); err != nil {
 		return "", err
 	}
-	accessToken, err := GenerateToken(claims.UserID, secret, accessExpireIn)
-	if err != nil {
-		return "", err
-	}
-	return accessToken, nil
+	return GenerateToken(claims.UserID, secret, accessExpireIn)
 }
 
 func (s *Service) Me(ctx context.Context, tokenString, secret string) (*db.GetUserByIDRow, error) {
@@ -153,9 +155,11 @@ func (s *Service) Me(ctx context.Context, tokenString, secret string) (*db.GetUs
 	if err != nil {
 		return nil, err
 	}
-	user, err := s.repo.GetUserByID(ctx, claims.UserID)
-	if err != nil {
-		return nil, err
-	}
-	return &user, nil
+	return s.user(ctx, claims.UserID)
+}
+
+// PruneRevokedTokens forgets revoked tokens that have expired by now: an expired token is refused anyway, so its row
+// only takes space. Safe on every replica at once (one DELETE).
+func (s *Service) PruneRevokedTokens(ctx context.Context) error {
+	return s.repo.DeleteExpiredTokens(ctx)
 }

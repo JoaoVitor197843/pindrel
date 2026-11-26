@@ -68,10 +68,11 @@ DELETE FROM files WHERE id = $1 AND user_id = $2 RETURNING sha256;
 -- name: CountFilesWithHash :one
 SELECT count(*) FROM files WHERE sha256 = $1;
 
--- name: MarkFileOrphan :exec
+-- name: MarkFileOrphan :execrows
+-- Only the owner's row: a file of somebody else changes nothing and reads as "not found".
 UPDATE files SET orphan_since = COALESCE(orphan_since, now()) WHERE id = $1 AND user_id = $2;
 
--- name: ClearFileOrphan :exec
+-- name: ClearFileOrphan :execrows
 UPDATE files SET orphan_since = NULL WHERE id = $1 AND user_id = $2;
 
 -- name: OrphanFilesDue :many

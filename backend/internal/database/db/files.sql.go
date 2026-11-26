@@ -44,7 +44,7 @@ func (q *Queries) ClaimUploadForFinish(ctx context.Context, arg ClaimUploadForFi
 	return i, err
 }
 
-const clearFileOrphan = `-- name: ClearFileOrphan :exec
+const clearFileOrphan = `-- name: ClearFileOrphan :execrows
 UPDATE files SET orphan_since = NULL WHERE id = $1 AND user_id = $2
 `
 
@@ -53,9 +53,12 @@ type ClearFileOrphanParams struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-func (q *Queries) ClearFileOrphan(ctx context.Context, arg ClearFileOrphanParams) error {
-	_, err := q.db.Exec(ctx, clearFileOrphan, arg.ID, arg.UserID)
-	return err
+func (q *Queries) ClearFileOrphan(ctx context.Context, arg ClearFileOrphanParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearFileOrphan, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const countFilesWithHash = `-- name: CountFilesWithHash :one
@@ -381,7 +384,7 @@ func (q *Queries) MarkChunkReceived(ctx context.Context, arg MarkChunkReceivedPa
 	return received, err
 }
 
-const markFileOrphan = `-- name: MarkFileOrphan :exec
+const markFileOrphan = `-- name: MarkFileOrphan :execrows
 UPDATE files SET orphan_since = COALESCE(orphan_since, now()) WHERE id = $1 AND user_id = $2
 `
 
@@ -390,9 +393,13 @@ type MarkFileOrphanParams struct {
 	UserID uuid.UUID `json:"user_id"`
 }
 
-func (q *Queries) MarkFileOrphan(ctx context.Context, arg MarkFileOrphanParams) error {
-	_, err := q.db.Exec(ctx, markFileOrphan, arg.ID, arg.UserID)
-	return err
+// Only the owner's row: a file of somebody else changes nothing and reads as "not found".
+func (q *Queries) MarkFileOrphan(ctx context.Context, arg MarkFileOrphanParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markFileOrphan, arg.ID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const orphanFilesDue = `-- name: OrphanFilesDue :many

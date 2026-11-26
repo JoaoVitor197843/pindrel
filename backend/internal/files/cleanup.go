@@ -96,10 +96,11 @@ func (s *Service) removeOrphan(ctx context.Context, id uuid.UUID, sum []byte) er
 	if err := s.q.WithTx(tx).DeleteFileByID(ctx, id); err != nil {
 		return err
 	}
-	if err := s.dropBlobIfUnused(ctx, tx, sum); err != nil {
+	rel, err := s.releaseIfUnused(ctx, tx, sum)
+	if err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	return commitReleasing(ctx, tx, rel)
 }
 
 // sweepBlobs removes bytes on disk that no file points at (the owner was deleted along with their rows, or a crash came
@@ -114,16 +115,19 @@ func (s *Service) sweepBlobs(ctx context.Context, st *CleanupStats) error {
 		if err != nil {
 			return err
 		}
-		err = s.dropBlobIfUnused(ctx, tx, sum)
+		rel, err := s.releaseIfUnused(ctx, tx, sum)
 		if err == nil {
-			err = tx.Commit(ctx)
+			err = commitReleasing(ctx, tx, rel)
 		} else {
 			_ = tx.Rollback(ctx)
 		}
 		if err != nil {
 			return err
 		}
-		st.StrayBlobs++
+		// only the bytes that really went away: a content still in use is walked past every day
+		if rel != nil {
+			st.StrayBlobs++
+		}
 	}
 	return nil
 }

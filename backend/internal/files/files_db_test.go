@@ -645,11 +645,95 @@ func TestDB_CleanupSweepsBytesThatNoFileUsesAfterTheOwnerIsGone(t *testing.T) {
 	// the sweep looks again only once a day, so a new service stands for the next day
 	_ = filepathChtimes(e.dir+"/blobs", time.Now().Add(-3*time.Hour))
 	e2 := files.NewService(e.pool, e.q, e.store, e.cfg)
-	if _, err := e2.Cleanup(context.Background()); err != nil {
+	st, err := e2.Cleanup(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 	if e.blobs() != 0 {
 		t.Error("the unused bytes stayed")
+	}
+	if st.StrayBlobs != 1 {
+		t.Errorf("StrayBlobs = %d, want 1", st.StrayBlobs)
+	}
+}
+
+// The daily sweep walks every old blob; only the ones that really went away count (it used to report every file on the
+// disk as removed, every day).
+func TestDB_CleanupCountsOnlyTheBytesItRemoved(t *testing.T) {
+	e := newEnv(t, nil)
+	u := e.user()
+	f := e.upload(u, content(t, "png", 4000), "fica.png")
+	_ = filepathChtimes(e.dir+"/blobs", time.Now().Add(-3*time.Hour))
+	st, err := e.svc.Cleanup(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.StrayBlobs != 0 || e.blobs() != 1 {
+		t.Errorf("a file in use: StrayBlobs = %d, %d blobs left", st.StrayBlobs, e.blobs())
+	}
+	if got := fetch(e, http.MethodGet, e.link(u, f.Id)); got.Code != http.StatusOK {
+		t.Errorf("the file in use cannot be read: %d", got.Code)
+	}
+}
+
+// Someone else's file and a file that does not exist answer the same on the orphan routes, and nothing changes: before,
+// any existing id answered 204, which told who probes that the file exists.
+func TestDB_OrphanRoutesDoNotRevealOrTouchSomeoneElsesFile(t *testing.T) {
+	e := newEnv(t, func(c *files.Config) { c.OrphanGrace = time.Nanosecond })
+	owner, other := e.user(), e.user()
+	f := e.upload(owner, content(t, "png", 1000), "meu.png")
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		theirs := e.do(other, method, "/files/"+f.Id+"/orphan", nil)
+		missing := e.do(other, method, "/files/"+uuid.NewString()+"/orphan", nil)
+		if theirs.Code != http.StatusNotFound || errCode(theirs) != "file_not_found" {
+			t.Errorf("%s on someone else's file: %d %q", method, theirs.Code, errCode(theirs))
+		}
+		if theirs.Code != missing.Code || theirs.Body.String() != missing.Body.String() {
+			t.Errorf("%s: someone else's file (%d) and a missing one (%d) answer differently", method, theirs.Code, missing.Code)
+		}
+	}
+	e.do(other, http.MethodPut, "/files/"+f.Id+"/orphan", nil)
+	if st, err := e.svc.Cleanup(context.Background()); err != nil || st.Orphans != 0 {
+		t.Fatalf("someone else marked the file as unused and the clean-up removed it: %+v %v", st, err)
+	}
+	if rec := e.do(owner, http.MethodPut, "/files/"+f.Id+"/orphan", nil); rec.Code != http.StatusNoContent {
+		t.Errorf("the owner: %d", rec.Code)
+	}
+}
+
+// Files made in the same millisecond (a person dropping a folder of pictures) are all listed: a cursor in milliseconds
+// skipped the ones after the last of a page inside the same millisecond.
+func TestDB_ListDoesNotSkipFilesMadeInTheSameMillisecond(t *testing.T) {
+	e := newEnv(t, nil)
+	u := e.user()
+	for i := 0; i < 60; i++ {
+		e.upload(u, []byte(fmt.Sprintf("foto %d", i)), fmt.Sprintf("f%d.txt", i))
+	}
+	// every file in the same millisecond, a microsecond apart
+	if _, err := e.pool.Exec(context.Background(), `UPDATE files SET created_at = '2026-01-01 12:00:00.123'::timestamptz
+		+ make_interval(secs => (SELECT count(*) FROM files f2 WHERE f2.user_id = files.user_id AND f2.id < files.id) / 1000000.0)
+		WHERE user_id = $1`, u); err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	url := "/files/"
+	for pages := 0; pages < 5; pages++ {
+		rec := e.do(u, http.MethodGet, url, nil)
+		var list dto.ListFilesResponse
+		_ = proto.Unmarshal(rec.Body.Bytes(), &list)
+		for _, f := range list.Files {
+			if seen[f.Id] {
+				t.Fatalf("%s listed twice", f.Name)
+			}
+			seen[f.Id] = true
+		}
+		if list.NextCursor == "" {
+			break
+		}
+		url = "/files/?cursor=" + list.NextCursor
+	}
+	if len(seen) != 60 {
+		t.Fatalf("%d of 60 files listed", len(seen))
 	}
 }
 
@@ -711,14 +795,15 @@ func TestDB_ListPagesNewestFirst(t *testing.T) {
 		if list.NextCursor == "" {
 			break
 		}
-		parts := strings.SplitN(list.NextCursor, ".", 2)
-		url = "/files/?after=" + parts[0] + "&after_id=" + parts[1]
+		url = "/files/?cursor=" + list.NextCursor
 	}
 	if len(seen) != 53 || seen[0] != "f52.txt" || seen[52] != "f0.txt" {
 		t.Fatalf("%d files listed, first %q last %q", len(seen), first(seen), last(seen))
 	}
-	if rec := e.do(u, http.MethodGet, "/files/?after=abc&after_id=x", nil); rec.Code != http.StatusBadRequest {
-		t.Errorf("bad cursor: %d", rec.Code)
+	for _, bad := range []string{"abc", "1.x", ".", "1." + uuid.NewString() + "x", "%00", strings.Repeat("9", 400) + "." + uuid.NewString()} {
+		if rec := e.do(u, http.MethodGet, "/files/?cursor="+bad, nil); rec.Code != http.StatusBadRequest {
+			t.Errorf("bad cursor %.20q: %d", bad, rec.Code)
+		}
 	}
 	// a person sees only their own
 	if rec := e.do(e.user(), http.MethodGet, "/files/", nil); rec.Code != http.StatusOK {

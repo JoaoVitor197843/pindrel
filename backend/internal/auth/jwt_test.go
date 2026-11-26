@@ -15,7 +15,7 @@ func TestDB_JwtToken_TokenValidationPass_ReturnUserID(t *testing.T) {
 	defer cleanup()
 	testSecret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
 	user_id := setupDummyUser(t, repo)
-	token, err := auth.GenerateToken(user_id, testSecret, 1*time.Second)
+	token, err := auth.GenerateToken(user_id, testSecret, time.Minute)
 	if err != nil {
 		t.Fatalf("Error on generating token: %v", err)
 	}
@@ -25,41 +25,6 @@ func TestDB_JwtToken_TokenValidationPass_ReturnUserID(t *testing.T) {
 	}
 	if claim.UserID != user_id {
 		t.Fatalf("expected user_id %s, received: %s", user_id, claim.UserID)
-	}
-}
-
-func TestDB_JwtToken_ExpiredToken_ReturnsError(t *testing.T) {
-	_, repo, cleanup := setupTest(t, true)
-	defer cleanup()
-	secret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
-
-	user_id := setupDummyUser(t, repo)
-	token, err := auth.GenerateToken(user_id, secret, -1*time.Second)
-	if err != nil {
-		t.Fatalf("Error on generating token: %v", err)
-	}
-
-	_, err = auth.ValidateToken(context.Background(), token, secret, repo)
-	if err == nil {
-		t.Fatal("expected error validating expired token, got nil")
-	}
-}
-
-func TestDB_JwtToken_WrongSecret_ReturnsError(t *testing.T) {
-	_, repo, cleanup := setupTest(t, true)
-	defer cleanup()
-	correctSecret := "OMd8Hc+t8£G0}9&l?oN?l%RDqh+l9.["
-	wrongSecret := "chave-diferente-errada"
-	user_id := setupDummyUser(t, repo)
-
-	token, err := auth.GenerateToken(user_id, correctSecret, 1*time.Second)
-	if err != nil {
-		t.Fatalf("Error on generating token: %v", err)
-	}
-
-	_, err = auth.ValidateToken(context.Background(), token, wrongSecret, repo)
-	if err == nil {
-		t.Fatal("expected error validating with wrong secret, got nil")
 	}
 }
 

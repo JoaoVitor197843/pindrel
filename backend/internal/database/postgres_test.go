@@ -25,3 +25,21 @@ func TestDB_PostgresConnection(t *testing.T) {
 	}
 	defer pool.Close()
 }
+
+// One attempt against a port where nothing listens fails at once, with the address in the error (what --check-db shows
+// to the person installing).
+func TestConnect_UnreachableFailsFastWithOneAttempt(t *testing.T) {
+	cfg := config.DatabaseConfig{Host: "127.0.0.1", Port: 1, User: "x", Password: "x", DBName: "x", SSLMode: config.SSLDisable, MaxConns: 1}
+	start := time.Now()
+	if _, err := database.Connect(context.Background(), cfg, 1); err == nil {
+		t.Fatal("connected to a port where nothing listens")
+	}
+	if took := time.Since(start); took > 4*time.Second {
+		t.Errorf("one attempt took %v: it waited for retries", took)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := database.Connect(ctx, cfg, 5); err == nil {
+		t.Fatal("a cancelled context still connected")
+	}
+}

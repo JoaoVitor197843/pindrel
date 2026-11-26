@@ -16,6 +16,9 @@ import (
 	"pindrel/internal/auth"
 	"pindrel/internal/database/db"
 	"pindrel/internal/validator"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func median(d []time.Duration) time.Duration {
@@ -169,8 +172,7 @@ func TestDB_Handler_Register_ConcurrentSameEmail_Returns409(t *testing.T) {
 			created++
 			var resp dto.RegisterResponse
 			decodeBody(t, rec, &resp)
-			id := resp.GetUser().GetId()
-			t.Cleanup(func() { deleteUserByEmail(t, repo, email, id) })
+			t.Cleanup(func() { deleteUserByEmail(t, repo, email) })
 		case http.StatusConflict:
 			requireError(t, rec, http.StatusConflict, "email_already_exists")
 		default:
@@ -182,7 +184,7 @@ func TestDB_Handler_Register_ConcurrentSameEmail_Returns409(t *testing.T) {
 	}
 }
 
-func deleteUserByEmail(t *testing.T, repo *db.Queries, email, _ string) {
+func deleteUserByEmail(t *testing.T, repo *db.Queries, email string) {
 	t.Helper()
 	if u, err := repo.GetUserByEmail(context.Background(), email); err == nil {
 		_ = repo.DeleteUser(context.Background(), u.ID)
@@ -228,8 +230,7 @@ func TestDB_Handler_Logout_InvalidatesAccessAndRefresh(t *testing.T) {
 	}
 }
 
-// A refresh token does not work as an access token, and vice versa, and does not become a new session after logout.
-// (Today both are the same kind of token; this test documents what is guaranteed: revocation holds).
+// Logging out of one device revokes that device's tokens only: another session of the same account keeps working.
 func TestDB_Handler_Login_TwoSessionsAreIndependent(t *testing.T) {
 	h, repo, cleanup := setupTest(t, true)
 	defer cleanup()
@@ -346,5 +347,73 @@ func TestDB_Handler_Login_SameAnswerForUnknownEmailAndWrongPassword(t *testing.T
 	}
 	if a, b := do(u.Email), do(uniqueEmail("fantasma")); string(a) != string(b) {
 		t.Errorf("corpos diferentes revelam se a conta existe: %q vs %q", a, b)
+	}
+}
+
+// An account deleted while one of its devices is still signed in: the next renewal and /auth/me answer 401 (the session is
+// over for good), not 500.
+func TestDB_Handler_DeletedAccountEndsTheSession(t *testing.T) {
+	h, repo, cleanup := setupTest(t, true)
+	defer cleanup()
+	u := registerUser(t, h, repo, "apagada")
+	access, refresh := loginUser(t, h, u)
+	if err := repo.DeleteUser(context.Background(), u.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	req := rawRequest(http.MethodPost, "/auth/refresh/", nil)
+	req.AddCookie(refresh)
+	rec := httptest.NewRecorder()
+	h.Refresh(rec, req)
+	requireError(t, rec, http.StatusUnauthorized, "invalid_refresh_token")
+
+	req = rawRequest(http.MethodGet, "/auth/me/", nil)
+	req.Header.Set("Authorization", "Bearer "+access)
+	rec = httptest.NewRecorder()
+	h.Me(rec, req)
+	requireError(t, rec, http.StatusUnauthorized, "unauthorized")
+}
+
+// Revoked tokens are forgotten once they would have expired anyway (nothing removed them before: the table only grew);
+// the ones still valid stay revoked.
+func TestDB_Service_PruneRevokedTokensKeepsTheLiveOnes(t *testing.T) {
+	_, repo, cleanup := setupTest(t, true)
+	defer cleanup()
+	ctx := context.Background()
+	svc := auth.NewService(repo, true)
+	user := setupDummyUser(t, repo)
+
+	revoke := func(id string, exp time.Time) {
+		t.Helper()
+		if err := repo.RevokeToken(ctx, db.RevokeTokenParams{TokenID: id, UserID: user, ExpiresAt: pgtype.Timestamptz{Time: exp, Valid: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old, live := "old-"+uuid.NewString(), "live-"+uuid.NewString()
+	revoke(old, time.Now().Add(-time.Hour))
+	revoke(live, time.Now().Add(time.Hour))
+
+	if err := svc.PruneRevokedTokens(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.PruneRevokedTokens(ctx); err != nil {
+		t.Fatalf("a second run (another replica): %v", err)
+	}
+	pool := setupPool(t)
+	stillThere := func(id string) bool {
+		var n int
+		if err := pool.QueryRow(ctx, "SELECT count(*) FROM revoked_tokens WHERE token_id = $1", id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if stillThere(old) {
+		t.Error("an expired revoked token was kept")
+	}
+	if !stillThere(live) {
+		t.Error("a revoked token that has not expired was forgotten: it would work again")
+	}
+	if revoked, err := repo.IsTokenRevoked(ctx, live); err != nil || !revoked {
+		t.Errorf("live token: revoked=%v err=%v", revoked, err)
 	}
 }
