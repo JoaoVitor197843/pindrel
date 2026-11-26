@@ -8,6 +8,15 @@ import 'server_list_state.dart';
 import 'server_option.dart';
 import 'server_trust.dart';
 
+/// Why the network search is stopped.
+enum SearchPause {
+  /// The app is in the background.
+  background,
+
+  /// No screen shows the list (the login was left for the notes): searching would only cost CPU, battery and sockets.
+  unwatched,
+}
+
 /// Joins server discovery with the user's choice and delivers the
 /// result as a [Stream] of [ServerListState], which the screen consumes with
 /// `StreamBuilder`.
@@ -42,20 +51,50 @@ class ServerListController {
   List<ServerOption> _discovered = const [];
 
   /// What the device remembers, with a limit: secure storage that never answers must not keep the list from showing.
+  /// What answers after it still counts (`_takeLate`): the durable store falls back to its file only after its own
+  /// limit (4 s), so on a Linux session with a silent keyring the paired servers arrive after this one.
   static const loadTimeout = Duration(seconds: 3);
 
   Future<void> _load() async {
+    // both at once, so the wait is one limit and not two; a store that fails counts as remembering nothing (handled
+    // here, at once: an error nobody listens to yet would surface as unhandled)
+    final trust = _trust?.load().catchError((Object _) {});
+    final paired = _paired?.all().then<List<PairedServer>>((all) => all, onError: (Object _) => const <PairedServer>[]);
+    var late = false;
     try {
-      await _trust?.load().timeout(loadTimeout);
-    } catch (_) {
-      // nothing remembered
+      await trust?.timeout(loadTimeout);
+    } on TimeoutException {
+      late = true;
     }
     try {
-      final all = await _paired?.all().timeout(loadTimeout) ?? const <PairedServer>[];
+      final all = await paired?.timeout(loadTimeout) ?? const <PairedServer>[];
       _manual = [for (final p in all) ServerOption.fromPaired(p)];
-    } catch (_) {
+    } on TimeoutException {
       _manual = const [];
+      late = true;
     }
+    if (late) _takeLate(trust, paired);
+  }
+
+  void _takeLate(Future<void>? trust, Future<List<PairedServer>>? paired) {
+    Future.wait<void>([
+      ?trust,
+      if (paired != null)
+        paired.then((all) {
+          final loaded = [for (final p in all) ServerOption.fromPaired(p)];
+          // a pairing completed meanwhile stays
+          _manual = [
+            ...loaded,
+            for (final m in _manual)
+              if (!loaded.any((l) => l.id == m.id)) m,
+          ];
+        }),
+    ]).then((_) {
+      if (_disposed) return;
+      _discovered = [for (final d in _discovered) d.withTrusted(_isTrusted(d.trustName, d.serverId))];
+      _rebuild();
+      _publish();
+    });
   }
 
   /// Done once what was remembered has been read: nothing is decided before.
@@ -67,7 +106,7 @@ class ServerListController {
   /// The server picked on its own at start goes through the same test.
   final ServerProbe? probe;
 
-  bool _paused = false;
+  final Set<SearchPause> _pausedBy = {};
   ServerOption? _connecting;
   bool _loaded = false;
   late final StreamSubscription<List<DiscoveredServer>> _subscription;
@@ -161,11 +200,32 @@ class ServerListController {
     return d;
   }
 
+  /// An announced server this device paired with is reached the paired way: over HTTPS, at the address paired, with its
+  /// pinned CA. The announcement carries the plain HTTP address, and it used to replace the paired entry, so the login
+  /// went in clear and the pinned CA was never used.
+  ServerOption _asPaired(ServerOption d) {
+    for (final m in _manual) {
+      final sameServer = m.serverId.isEmpty || d.serverId.isEmpty || m.serverId == d.serverId;
+      if (m.id == d.id && sameServer && m.baseUri?.scheme == 'https') {
+        return ServerOption(
+          id: d.id,
+          name: m.name,
+          trustName: m.trustName,
+          address: m.address,
+          baseUri: m.baseUri,
+          serverId: d.serverId.isNotEmpty ? d.serverId : m.serverId,
+          trusted: true,
+        );
+      }
+    }
+    // an announced server the person has named keeps the name they gave it
+    return _withGivenName(d);
+  }
+
   /// The list the screen shows: what the network announces, then the paired servers it does not.
   void _rebuild() {
     _available = [
-      // an announced server the person has named keeps the name they gave it
-      for (final d in _discovered) _withGivenName(d),
+      for (final d in _discovered) _asPaired(d),
       for (final m in _manual)
         if (!_discovered.any((d) => d.id == m.id || d.address == m.address))
           m,
@@ -243,26 +303,35 @@ class ServerListController {
     final selected = _selected;
     if (selected != null) {
       final index = _available.indexOf(selected);
-      // with the newest address, if it changed
-      if (index >= 0) _selected = _available[index];
+      // with the newest address, if it changed; but a choice reached over HTTPS never falls back to plain HTTP
+      if (index >= 0 && !(selected.baseUri?.scheme == 'https' && _available[index].baseUri?.scheme != 'https')) {
+        _selected = _available[index];
+      }
     }
     _publish();
   }
 
   /// The app went to the background: the search stops (it costs RAM and battery) and
   /// the choice is kept.
-  void pause() {
-    if (_paused || _disposed) return;
-    _paused = true;
+  void pause() => pauseFor(SearchPause.background);
+
+  /// The app is back: the search starts again, unless something else still holds it.
+  void resume() => resumeFor(SearchPause.background);
+
+  /// Stops the search for [reason]. It runs again only when every reason is gone: an app that comes back from the
+  /// background must not restart a search no screen shows.
+  void pauseFor(SearchPause reason) {
+    if (_disposed || !_pausedBy.add(reason) || _pausedBy.length > 1) return;
     _subscription.pause();
   }
 
-  /// The app is back: the search starts again.
-  void resume() {
-    if (!_paused || _disposed) return;
-    _paused = false;
+  void resumeFor(SearchPause reason) {
+    if (_disposed || !_pausedBy.remove(reason) || _pausedBy.isNotEmpty) return;
     _subscription.resume();
   }
+
+  /// Whether the network is being searched now.
+  bool get searching => _pausedBy.isEmpty && !_disposed;
 
   void _onError(Object error, StackTrace stack) {
     _loaded = true;

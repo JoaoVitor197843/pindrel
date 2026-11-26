@@ -6,7 +6,6 @@ import '../../../../core/network/discovery/server_discovery.dart';
 import '../../../../core/network/pairing.dart';
 import '../../../../core/network/server_probe.dart';
 import '../../../../core/network/server_security.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../data/durable_store.dart';
@@ -28,7 +27,7 @@ final serverProbeProvider = Provider<ServerProbe>((ref) => httpServerProbe);
 /// keyring that is locked). Tests swap it for a memory store.
 final keyValueStoreProvider = Provider<KeyValueStore>(
   (ref) => DurableKeyValueStore(
-    const SecureKeyValueStore(FlutterSecureStorage(), true),
+    const SecureKeyValueStore(appSecureStorage, true),
     FileKeyValueStore(getApplicationSupportDirectory),
   ),
 );
@@ -62,6 +61,10 @@ final serverListControllerProvider = Provider<ServerListController>((ref) {
   );
   final lifecycle = _SearchLifecycle(controller);
   WidgetsFlutterBinding.ensureInitialized().addObserver(lifecycle);
+  // the list is only searched while a screen shows it: after the login (the notes, offline or signed in) nothing does,
+  // and a multicast sweep every few seconds for the whole session cost CPU and battery
+  ref.onCancel(() => controller.pauseFor(SearchPause.unwatched));
+  ref.onResume(() => controller.resumeFor(SearchPause.unwatched));
   ref.onDispose(() {
     WidgetsBinding.instance.removeObserver(lifecycle);
     controller.dispose();

@@ -11,6 +11,7 @@ import 'package:mobile/features/notes/data/device_data.dart';
 import 'package:mobile/features/notes/data/notes_db.dart';
 import 'package:mobile/features/notes/data/workspace.dart';
 import 'package:mobile/features/notes/presentation/pages/dashboard_page.dart';
+import 'package:mobile/features/notes/presentation/pages/notes_gate.dart';
 import 'package:mobile/features/notes/presentation/providers/notes_provider.dart';
 import 'package:mobile/features/notes/presentation/widgets/settings_dialog.dart';
 import 'package:mobile/features/notes/presentation/widgets/ui.dart';
@@ -108,6 +109,37 @@ void main() {
     expect(files.any((f) => f.existsSync()), isFalse);
     expect(cleared, 1);
     expect(find.text('Continuar offline neste dispositivo'), findsOneWidget, reason: 'back at the login');
+  });
+
+  testWidgets('a partir das notas do aparelho, o banco é fechado antes de os arquivos serem apagados', (tester) async {
+    // NotesGate watches the device's workspace: invalidating it there reopened notes.db at once, and on Windows an open
+    // file cannot be deleted, so the notes stayed behind under "Não foi possível apagar tudo"
+    tester.view.physicalSize = const Size(1500, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final dbs = <NotesDb>[];
+    bool? openWhileErasing;
+    final device = DeviceData(directory: () async => dir, clearSecure: () async => openWhileErasing = dbs.any((d) => d.isOpen));
+    await tester.pumpWidget(app(
+      const NotesGate(),
+      overrides: [
+        keyValueStoreProvider.overrideWithValue(MemoryKeyValueStore()),
+        deviceDataProvider.overrideWithValue(device),
+        workspaceProvider.overrideWith((ref) {
+          final db = NotesDb.inMemory();
+          dbs.add(db);
+          return trackedWorkspace(ref, Workspace(db));
+        }),
+      ],
+    ));
+    await tester.pumpAndSettle();
+    await openSection(tester);
+    await tester.tap(find.byKey(const Key('erase-device')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('erase-confirm')));
+    await work(tester);
+    expect(openWhileErasing, isFalse, reason: 'a notes database was open while its files were deleted');
+    expect(find.text('Continuar offline neste dispositivo'), findsOneWidget);
   });
 
   testWidgets('quando um arquivo não pode ser apagado o erro aparece e dá para voltar', (tester) async {

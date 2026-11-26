@@ -126,6 +126,18 @@ void main() {
       expect(await store.read('x'), 'novo', reason: 'the keyring wins over a stale file');
     });
 
+    test('quando o cofre volta a funcionar, a cópia em texto do arquivo some (a nota da sessão leva o cookie)', () async {
+      // the keyring failed once, so the session note with its refresh cookie went to the file; later the keyring works
+      // and "Sair da conta" writes an empty note there, but the cookie stayed in clear in the file until the device was erased
+      await DurableKeyValueStore(_Broken(), file).write('sessao', 'cookie=segredo');
+      expect(await file.read('sessao'), 'cookie=segredo');
+      final primary = MemoryKeyValueStore();
+      await DurableKeyValueStore(primary, file).write('sessao', '');
+      expect(primary.data['sessao'], '');
+      expect(await file.read('sessao'), isNull);
+      expect(File(p.join(dir.path, 'pindrel-store.json')).readAsStringSync(), isNot(contains('segredo')));
+    });
+
     test('nem o cofre nem o arquivo funcionam: nada é lembrado, mas nada quebra', () async {
       final store = DurableKeyValueStore(_Broken(), FileKeyValueStore(() async => throw const FileSystemException('sem permissão')));
       await store.write('a', '1');

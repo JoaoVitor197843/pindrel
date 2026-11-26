@@ -698,6 +698,42 @@ void main() {
       expect(controller.current.available.single.trusted, isTrue);
     });
 
+    test('um servidor pareado e anunciado é alcançado por HTTPS, no menu e depois de novos anúncios', () async {
+      // the announced entry (plain HTTP) used to replace the paired one: the login went in clear, without the pinned CA
+      build(initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      await flush();
+      await controller.completePairing(ServerOption.fromPaired(paired('10.0.0.1:8443', id: 'aaa')));
+      expect(controller.current.available.single.baseUri?.scheme, 'https');
+      discovery.emit([server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      expect(controller.current.available.single.baseUri, Uri.parse('https://10.0.0.1:8443'));
+      expect(controller.current.selected?.baseUri?.scheme, 'https');
+    });
+
+    test('ao abrir o app, o servidor pareado anunciado já aparece por HTTPS', () async {
+      final store = MemoryPairedStore();
+      await store.save(paired('10.0.0.1:8443', name: 'Casa', id: 'aaa'));
+      build(store: store, initial: [server('Casa', addresses: ['10.0.0.1'], id: 'aaa')]);
+      await flush();
+      await flush();
+      final casa = controller.current.available.single;
+      expect(casa.baseUri, Uri.parse('https://10.0.0.1:8443'));
+      expect(casa.trusted, isTrue);
+      await controller.select(casa);
+      expect(controller.current.selected?.baseUri?.scheme, 'https');
+    });
+
+    test('outro servidor com o mesmo nome (outro id) não herda o pareamento', () async {
+      final store = MemoryPairedStore();
+      await store.save(paired('10.0.0.1:8443', name: 'Casa', id: 'aaa'));
+      build(store: store, initial: [server('Casa', addresses: ['10.0.0.9'], id: 'zzz')]);
+      await flush();
+      await flush();
+      final announced = controller.current.available.firstWhere((s) => s.serverId == 'zzz');
+      expect(announced.baseUri?.scheme, 'http');
+    });
+
     test('concluir o pareamento de um nome que mudou de id fecha a pergunta pendente', () async {
       final trust = ServerTrust(MemoryKeyValueStore());
       await trust.remember('Casa', 'velho');
@@ -867,6 +903,23 @@ void main() {
       expect(controller.current.available, hasLength(3));
     });
 
+    testWidgets('o que o aparelho lembra e chega depois do limite ainda aparece (chaveiro mudo, arquivo responde)', (tester) async {
+      // the durable store answers from its file only after its own 4 s; the list used to throw that answer away and the
+      // paired server that the network does not announce never appeared
+      final slow = _LatePairedStore(const Duration(seconds: 5), [paired('192.168.1.50:8443', name: 'Sítio', id: 'sss')]);
+      discovery = FakeDiscovery(sampleServers);
+      controller = ServerListController(discovery: discovery, paired: slow);
+      addTearDown(controller.dispose);
+      await tester.pump(ServerListController.loadTimeout + const Duration(milliseconds: 10));
+      await tester.pump();
+      expect(controller.current.available.map((s) => s.name), isNot(contains('Sítio')));
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      final sitio = controller.current.available.where((s) => s.name == 'Sítio');
+      expect(sitio, hasLength(1));
+      expect(sitio.single.trusted, isTrue);
+    });
+
     test('concluir o pareamento duas vezes seguidas, ou com a tela já fechada, não quebra', () async {
       build(initial: [server('Casa', addresses: ['10.0.0.1'])]);
       await flush();
@@ -974,6 +1027,25 @@ class _SlowStore implements KeyValueStore {
 }
 
 /// A device whose secure storage never answers.
+/// A store that answers, but only after [delay] (the keyring timed out and the file answered).
+class _LatePairedStore implements PairedStore {
+  _LatePairedStore(this.delay, this.items);
+  final Duration delay;
+  final List<PairedServer> items;
+
+  @override
+  Future<List<PairedServer>> all() => Future.delayed(delay, () => items);
+
+  @override
+  Future<PairedServer?> find(String hostPort) async => null;
+
+  @override
+  Future<void> save(PairedServer server) async {}
+
+  @override
+  Future<void> forget(String hostPort) async {}
+}
+
 class _HangingStore implements PairedStore {
   @override
   Future<List<PairedServer>> all() => Completer<List<PairedServer>>().future;
