@@ -210,9 +210,12 @@ jobs:
       - name: Testar a pasta portátil (banco, servidor, cadastro)
         shell: pwsh
         run: |
-          # a space and an accent in the path on purpose: user folders have both
-          $data = Join-Path $env:RUNNER_TEMP 'dados do João'
-          $script = (Resolve-Path stage/pindrel-server.ps1).Path
+          # the zip's layout (dados\ next to public\: WEB_DIR is ..\public from the data folder), in a path with a space and
+          # an accent on purpose: user folders have both
+          $folder = Join-Path $env:RUNNER_TEMP 'pasta do João'
+          Copy-Item (Resolve-Path stage).Path $folder -Recurse
+          $data = Join-Path $folder 'dados'
+          $script = Join-Path $folder 'pindrel-server.ps1'
           function Run([string]$Action) {
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script -Action $Action -Data $data -Quiet
             if ($LASTEXITCODE -ne 0) {
@@ -239,8 +242,7 @@ jobs:
             Run stop
           }
           Start-Sleep -Seconds 2
-          $stage = (Resolve-Path stage).Path
-          $left = Get-Process postgres, pindrel-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$stage*" }
+          $left = Get-Process postgres, pindrel-server -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$folder*" }
           if ($left) { throw "still running after stop: $($left.Path -join ', ')" }
 
       - name: Empacotar
