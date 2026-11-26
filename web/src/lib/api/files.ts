@@ -93,15 +93,22 @@ const MAX_REPLY = 1 << 20
 export interface ApiOptions {
   /** The session's access token, or null when nobody is signed in. */
   token: () => string | null
+  /**
+   * Asks the session for a new access token after a 401 (it ran out: a long upload, or a tab whose timers the browser
+   * slowed down); true when there is one. Requests that fail together share one renewal (the session's own).
+   */
+  renew?: () => Promise<boolean>
   fetch?: typeof fetch
 }
 
 export class FilesApi {
   readonly #token: () => string | null
+  readonly #renew: (() => Promise<boolean>) | undefined
   readonly #fetch: typeof fetch
 
-  constructor({ token, fetch: f }: ApiOptions) {
+  constructor({ token, renew, fetch: f }: ApiOptions) {
     this.#token = token
+    this.#renew = renew
     this.#fetch = f ?? ((...args) => globalThis.fetch(...args))
   }
 
@@ -109,7 +116,7 @@ export class FilesApi {
     return !!this.#token()
   }
 
-  async #call(method: string, path: string, init: { body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal; auth?: boolean } = {}): Promise<Response> {
+  async #call(method: string, path: string, init: { body?: BodyInit; headers?: Record<string, string>; signal?: AbortSignal; auth?: boolean } = {}, renewed = false): Promise<Response> {
     const headers: Record<string, string> = { Accept: 'application/x-protobuf', ...init.headers }
     if (init.auth !== false) {
       const token = this.#token()
@@ -124,6 +131,13 @@ export class FilesApi {
       throw new FileApiError(0, 'network', e instanceof Error ? e.message : 'sem conexão')
     }
     if (res.ok) return res
+    // the token ran out: one renewal and the same request again (the body is a slice or bytes, so it can be sent twice)
+    if (res.status === 401 && init.auth !== false && !renewed && this.#renew) {
+      void res.body?.cancel().catch(() => {})
+      if (await this.#renew().catch(() => false)) return this.#call(method, path, init, true)
+      if (init.signal?.aborted) throw new DOMException('Cancelado', 'AbortError')
+      throw new FileApiError(401, 'unauthorized', `${method} ${path}: 401 unauthorized`)
+    }
     let code = 'http_error'
     try {
       const text = new Uint8Array(await res.arrayBuffer())

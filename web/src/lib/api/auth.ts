@@ -105,8 +105,14 @@ export class AuthApi {
 
   async register(email: string, username: string, password: string, signal?: AbortSignal): Promise<Account> {
     const body = RegisterInput.encode({ email, username, password }).finish()
-    const reply = RegisterResponse.decode(await this.#call('POST', '/auth/register/', { body, signal }))
-    if (!reply.user?.id) throw new AuthApiError(201, 'bad_reply')
+    const bytes = await this.#call('POST', '/auth/register/', { body, signal })
+    let reply: RegisterResponse | undefined
+    try {
+      reply = RegisterResponse.decode(bytes)
+    } catch {
+      reply = undefined
+    }
+    if (!reply?.user?.id) throw new AuthApiError(201, 'bad_reply')
     return { id: reply.user.id, email: reply.user.email, username: reply.user.username }
   }
 

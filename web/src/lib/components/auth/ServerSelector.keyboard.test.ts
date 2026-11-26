@@ -101,7 +101,8 @@ describe('seletor de servidor só com o teclado', () => {
     manual.health = { 'https://a.test:8443': 'connected' }
     render(ServerSelector)
     await fireEvent.click(trigger())
-    expect(screen.getByRole('img', { name: 'Conexão segura' })).toBeTruthy()
+    const added = screen.getByTestId('added-server')
+    expect(added.querySelector('[data-testid="security"]')?.textContent).toContain('HTTPS · confiável')
     manual.list = []
   })
 })

@@ -46,6 +46,26 @@ describe('Auth', () => {
     expect(JSON.stringify(Object.keys(sessionStorage ?? {}))).not.toContain('tok.en')
   })
 
+  it('the file service can ask for a new token after a 401: it gets one, shared with any renewal already running', async () => {
+    const api = fakeApi()
+    const auth = make(api)
+    expect(await session.renew!()).toBe(false) // nobody signed in: nothing to renew
+    await auth.login('a@b.co', 'senha-forte', true)
+    const [a, b] = await Promise.all([session.renew!(), session.renew!()])
+    expect([a, b]).toEqual([true, true])
+    expect(api.refresh).toHaveBeenCalledTimes(1)
+    expect(session.token).toBe('tok.en.2')
+  })
+
+  it('a renewal the server refuses signs out and tells the file service no', async () => {
+    const api = fakeApi({ refresh: vi.fn(async () => Promise.reject(new AuthApiError(401, 'unauthorized'))) })
+    const auth = make(api)
+    await auth.login('a@b.co', 'senha-forte', true)
+    expect(await session.renew!()).toBe(false)
+    expect(auth.status).toBe('out')
+    expect(session.token).toBeNull()
+  })
+
   it('"manter conectado" off asks for a session-only cookie', async () => {
     const api = fakeApi()
     await make(api).login('a@b.co', 'senha-forte', false)

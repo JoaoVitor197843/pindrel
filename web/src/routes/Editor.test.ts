@@ -1661,12 +1661,6 @@ describe('Editor — blocos novos', () => {
     await click(screen.getByRole('button', { name: /Opções de Bloco de código/ }))
     expect(screen.queryByRole('menuitem', { name: 'Citação' })).toBeNull()
   })
-
-  it('o bloco seguro não ganha a barra de formatação', async () => {
-    ws.unlockVault('1234')
-    open()
-    expect(document.querySelector('[data-block-id] textarea[aria-label="Texto do bloco seguro"]')).toBeNull()
-  })
 })
 
 describe('Editor — barra de formatação', () => {
@@ -1722,10 +1716,21 @@ describe('Editor — barra de formatação', () => {
     expect(bar()).toBeNull()
   })
 
-  it('o bloco seguro não ganha a barra de formatação', async () => {
+  it('o bloco seguro, aberto, é um campo simples: sem editor rico, sem marcas e sem a barra ao selecionar', async () => {
     ws.unlockVault('1234')
     open()
-    expect(document.querySelector('[data-block-id] textarea[aria-label="Texto do bloco seguro"]')).toBeNull()
+    await click(screen.getByRole('button', { name: 'Ver bloco seguro' }))
+    const field = screen.getByLabelText('Texto do bloco seguro') as HTMLTextAreaElement
+    expect(field.tagName).toBe('TEXTAREA')
+    expect(field.hasAttribute('data-fmt')).toBe(false)
+    expect(field.closest('[data-rich]')).toBeNull()
+    field.focus()
+    field.setSelectionRange(0, 4)
+    document.dispatchEvent(new Event('selectionchange'))
+    await tick()
+    expect(bar()).toBeNull()
+    await keys(field, 'b', { ctrlKey: true })
+    expect(field.value).not.toContain('**')
   })
 
   it('a barra traz negrito, itálico, sublinhado, riscado, marca-texto, código e link', async () => {
@@ -2290,13 +2295,6 @@ describe('Editor — só o que está perto da tela vira campo de texto', () => {
     expect(para().textContent).toBe('​')
   })
 
-  it('o bloco seguro nunca vira texto, perto ou longe', () => {
-    ws.unlockVault('1234')
-    open()
-    const secure = document.querySelector('[data-block-id] textarea[aria-label="Texto do bloco seguro"], [data-block-id] [aria-label="Texto do bloco seguro"]')
-    expect(secure === null || secure.tagName === 'TEXTAREA').toBe(true)
-  })
-
   it('o texto de um bloco distante continua sendo texto de verdade: nada de HTML, e a marcação aparece', () => {
     ws.contentOf('p0')
     ;(ws.page('p0')!.content!.find((b) => b.type === 'paragraph') as { text: string }).text = '<img src=x onerror=alert(1)> e **forte**'
@@ -2382,15 +2380,6 @@ describe('Editor — painéis que crescem com a tela, setas no meio, sublinhado'
     expect(screen.getByTestId('dock').style.zoom).toBe('1.7')
   })
 
-
-
-
-
-  it('o sublinhado não aparece em campo de bloco seguro', () => {
-    ws.unlockVault('1234')
-    open()
-    expect(document.querySelector('[aria-label="Texto do bloco seguro"][data-fmt]')).toBeNull()
-  })
 
   it('nenhum menu ganhou sublinhado de passar o mouse (isso era outra coisa)', () => {
     const css = readFileSync('src/app.css', 'utf8')

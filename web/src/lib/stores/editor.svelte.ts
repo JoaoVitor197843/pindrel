@@ -163,14 +163,15 @@ export class PageEditor {
     this.#cancelUpload(id)
   }
 
-  /** Whether any block of any open page still points at this file. */
-  #inUse(fileId: string): boolean {
-    return this.ws.pages.some((page) => page.content && fileIdsOf(page.content).includes(fileId))
-  }
-
-  /** Tells the server which files nothing uses any more (it deletes them after a grace period). */
+  /**
+   * Tells the server which files nothing uses any more (it deletes them after a grace period). Every page counts, the ones
+   * whose body is only on disk too: a copy of a page shares its files with the original.
+   */
   #release(ids: string[]) {
-    for (const id of ids) if (!this.#inUse(id)) this.files.orphan(id, true)
+    if (!ids.length) return
+    void this.ws.filesInUse(ids).then((used) => {
+      for (const id of ids) if (!used.has(id)) this.files.orphan(id, true)
+    })
   }
 
   #cancelUpload(blockId: string) {

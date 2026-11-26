@@ -3,9 +3,11 @@
 // few dozen characters.
 import { FilesApi, uploadFile, sourceOf, FileApiError, type FileInfo } from '../api/files'
 
-/** Where the access token comes from. Nobody is signed in yet in the prototype, so files stay off until a session sets it. */
+/** Where the access token comes from: `Auth` sets it while somebody is signed in. Without it files stay off. */
 export const session = {
   token: null as string | null,
+  /** Asks `Auth` for a new access token (set by `Auth`, which imports this file); false when there is none to be had. */
+  renew: null as (() => Promise<boolean>) | null,
 }
 
 export type UploadStatus = 'queued' | 'sending' | 'done' | 'failed' | 'cancelled'
@@ -53,8 +55,8 @@ export const describeError = (e: unknown): string => (e instanceof FileApiError 
 
 export class FilesService implements FilesPort {
   readonly api: FilesApi
-  /** Every upload of this page since it opened: the editor shows the live ones. */
-  uploads = $state<Upload[]>([])
+  /** The uploads that are queued or being sent (a finished one leaves at once: the page may stay open for days). */
+  #live = new Map<string, Upload>()
   #queue: { upload: Upload; run: () => Promise<void> }[] = []
   #running = 0
   #aborts = new Map<string, AbortController>()
@@ -63,7 +65,7 @@ export class FilesService implements FilesPort {
   #n = 0
 
   constructor(api?: FilesApi) {
-    this.api = api ?? new FilesApi({ token: () => session.token })
+    this.api = api ?? new FilesApi({ token: () => session.token, renew: () => session.renew?.() ?? Promise.resolve(false) })
   }
 
   get available() {
@@ -72,7 +74,7 @@ export class FilesService implements FilesPort {
 
   start(file: File, onDone: (info: FileInfo) => void, opts: { name?: string; encrypted?: boolean } = {}): Upload {
     const upload = $state<Upload>({ key: `u${++this.#n}`, name: opts.name ?? file.name, status: 'queued', sent: 0, total: file.size, error: '' })
-    this.uploads.push(upload)
+    this.#live.set(upload.key, upload)
     const abort = new AbortController()
     this.#aborts.set(upload.key, abort)
     const run = async () => {
@@ -97,6 +99,7 @@ export class FilesService implements FilesPort {
         }
       } finally {
         this.#aborts.delete(upload.key)
+        this.#live.delete(upload.key)
       }
     }
     this.#queue.push({ upload, run })
@@ -108,7 +111,6 @@ export class FilesService implements FilesPort {
     while (this.#running < MAX_AT_ONCE) {
       const next = this.#queue.shift()
       if (!next) return
-      if (next.upload.status === 'cancelled') continue
       this.#running++
       void next.run().finally(() => {
         this.#running--
@@ -118,15 +120,22 @@ export class FilesService implements FilesPort {
   }
 
   cancel(key: string) {
-    const upload = this.uploads.find((u) => u.key === key)
-    if (!upload || upload.status === 'done' || upload.status === 'failed') return
+    const upload = this.#live.get(key)
+    if (!upload) return
     upload.status = 'cancelled'
     this.#aborts.get(key)?.abort()
+    // one still in the queue never runs, so its own clean-up never comes
+    const queued = this.#queue.findIndex((q) => q.upload === upload)
+    if (queued >= 0) {
+      this.#queue.splice(queued, 1)
+      this.#aborts.delete(key)
+      this.#live.delete(key)
+    }
   }
 
-  /** Forgets the uploads that are over, so the list does not grow for as long as the page stays open. */
-  tidy() {
-    this.uploads = this.uploads.filter((u) => u.status === 'queued' || u.status === 'sending')
+  /** How many uploads are queued or being sent. */
+  get active(): number {
+    return this.#live.size
   }
 
   async url(fileId: string, fresh = false): Promise<string> {

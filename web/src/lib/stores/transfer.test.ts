@@ -50,16 +50,143 @@ describe('exportar', () => {
 })
 
 describe('importar', () => {
+  /** The blocks without their ids, which are new on every import. */
+  const shape = (text: string, name = 'x.md') =>
+    parseImported(name, text).blocks.map(({ id: _, ...b }) => ('items' in b ? { ...b, items: b.items.map(({ id: __, ...i }) => i) } : b))
+
   it('o primeiro título do markdown vira o título; sem ele, o nome do arquivo', () => {
-    expect(parseImported('x.md', '# Receita\n\nmisture tudo')).toEqual({ title: 'Receita', excerpt: 'misture tudo' })
-    expect(parseImported('minha nota.txt', 'só texto\r\nem duas linhas')).toEqual({ title: 'minha nota', excerpt: 'só texto em duas linhas' })
+    expect(parseImported('x.md', '# Receita\n\nmisture tudo').title).toBe('Receita')
+    expect(shape('# Receita\n\nmisture tudo')).toEqual([{ type: 'paragraph', text: 'misture tudo' }])
+    expect(parseImported('minha nota.txt', 'só texto\r\nem duas linhas').title).toBe('minha nota')
+    expect(shape('só texto\r\nem duas linhas', 'minha nota.txt')).toEqual([{ type: 'paragraph', text: 'só texto em duas linhas' }])
     expect(parseImported('.md', '').title).toBe('Sem título')
+    expect(parseImported('.md', '').blocks).toEqual([])
   })
 
-  it('título e resumo têm limite, mesmo com arquivo enorme', () => {
-    const r = parseImported('x.md', `# ${'t'.repeat(500)}\n${'a '.repeat(5000)}`)
+  it('o texto inteiro vira blocos, não só um resumo: nada se perde ao abrir a página', () => {
+    const long = 'palavra '.repeat(400).trim()
+    const md = [
+      '# Viagem',
+      '',
+      'Primeiro parágrafo com **negrito**',
+      'que continua aqui.',
+      '',
+      '## Lista',
+      '- pão',
+      '  - integral',
+      '1. um',
+      '2. dois',
+      '',
+      '- [x] mala',
+      '- [ ] passaporte',
+      '',
+      '> citação',
+      '> em duas linhas',
+      '---',
+      '```python',
+      'print("oi")',
+      '```',
+      '#### fundo',
+      long,
+    ].join('\n')
+    expect(shape(md)).toEqual([
+      { type: 'paragraph', text: 'Primeiro parágrafo com **negrito** que continua aqui.' },
+      { type: 'heading', text: 'Lista' },
+      { type: 'bullet', text: 'pão', indent: 0 },
+      { type: 'bullet', text: 'integral', indent: 1 },
+      { type: 'numbered', text: 'um', indent: 0 },
+      { type: 'numbered', text: 'dois', indent: 0 },
+      { type: 'checklist', items: [{ text: 'mala', done: true }, { text: 'passaporte', done: false }] },
+      { type: 'quote', text: 'citação\nem duas linhas' },
+      { type: 'divider' },
+      { type: 'code', lang: 'python', text: 'print("oi")' },
+      { type: 'heading', text: 'fundo', level: 3 },
+      { type: 'paragraph', text: long },
+    ])
+  })
+
+  it('o que a exportação escreve volta igual pela importação', () => {
+    const w = sampleWorkspace()
+    const page = w.page('p0')!
+    const back = parseImported('p.md', pageToMarkdown(page, w.tags))
+    expect(back.title).toBe(page.title)
+    const kinds = back.blocks.map((b) => b.type)
+    for (const k of ['heading', 'checklist', 'code', 'paragraph']) expect(kinds).toContain(k)
+  })
+
+  it('ida e volta pelo Markdown mantém níveis das listas, sublinhado, destaque e avisos', () => {
+    const w = sampleWorkspace()
+    const p = w.newPage('Ida e volta')
+    p.content = [
+      { id: 'a', type: 'paragraph', text: 'um __sublinhado__ e um ==destaque== e `__código__`' },
+      { id: 'b', type: 'heading', text: 'Título com ==cor==' },
+      { id: 'c', type: 'numbered', text: 'um', indent: 0 },
+      { id: 'd', type: 'numbered', text: 'dois', indent: 1 },
+      { id: 'e', type: 'numbered', text: 'três', indent: 2 },
+      { id: 'f', type: 'numbered', text: 'quatro', indent: 3 },
+      { id: 'g', type: 'bullet', text: '__item__', indent: 3 },
+      { id: 'h', type: 'callout', text: 'cuidado\ncom ==isto==', tone: 'warning' },
+      { id: 'i', type: 'callout', text: 'nota simples' },
+      { id: 'j', type: 'quote', text: 'só uma citação' },
+    ]
+    const back = parseImported('p.md', pageToMarkdown(p, w.tags)).blocks.map(({ id: _, ...b }) => b)
+    expect(back).toEqual(p.content.map(({ id: _, ...b }) => b))
+  })
+
+  it('ida e volta pelo Markdown mantém os blocos que abrem e fecham: alternância, título com alternância e spoiler', () => {
+    const w = sampleWorkspace()
+    const p = w.newPage('Blocos que abrem')
+    p.content = [
+      { id: 'a', type: 'toggle', text: 'Ver <mais> & "aspas" com **negrito**', body: 'linha um com __sublinhado__\n\nlinha depois do branco\n```\ncódigo\n```' },
+      { id: 'b', type: 'heading', text: 'Seção ==fechada==', level: 3, toggle: true, body: 'dentro' },
+      { id: 'c', type: 'heading', text: 'Outra', toggle: true, body: '' },
+      { id: 'd', type: 'paragraph', text: 'no meio' },
+      { id: 'e', type: 'spoiler', text: 'o fim do filme\n\né ==surpresa==' },
+      { id: 'f', type: 'toggle', text: 'vazio', body: '' },
+      { id: 'g', type: 'toggle', text: 'spoiler', body: 'uma alternância com esse nome continua alternância' },
+    ]
+    const back = parseImported('p.md', pageToMarkdown(p, w.tags)).blocks.map(({ id: _, ...b }) => b)
+    expect(back).toEqual(p.content.map(({ id: _, ...b }) => b))
+  })
+
+  it('Markdown de fora: <details> com o resumo na linha de baixo, sem resumo, ou que nunca fecha', () => {
+    expect(shape('<details>\n<summary>Mais</summary>\n\ntexto\n</details>\ndepois')).toEqual([
+      { type: 'toggle', text: 'Mais', body: 'texto' },
+      { type: 'paragraph', text: 'depois' },
+    ])
+    expect(shape('<details open>\ncorpo\n</details>')).toEqual([{ type: 'toggle', text: '', body: 'corpo' }])
+    // only the class says spoiler: a summary that just reads "spoiler" is a toggle with that title
+    expect(shape('<details><summary>spoiler</summary>\n\nx\n\n</details>')).toEqual([{ type: 'toggle', text: 'spoiler', body: 'x' }])
+    expect(shape('<details open class="aviso spoiler">\n<summary>Final</summary>\n\nx\n</details>')).toEqual([{ type: 'spoiler', text: 'x' }])
+    expect(shape('<details><summary>x</summary>\n\nsem fim\n# não é título')).toEqual([{ type: 'toggle', text: 'x', body: 'sem fim\n# não é título' }])
+    expect(shape('<details><summary><h1>Grande</h1></summary>\n\nc\n\n</details>')).toEqual([{ type: 'heading', text: 'Grande', level: 1, toggle: true, body: 'c' }])
+    expect(() => parseImported('x.md', '<details>\n<details>\n<summary></summary>\n</details>\n</details>')).not.toThrow()
+  })
+
+  it('Markdown de fora: lista numerada com quatro espaços, aviso do GitHub com IMPORTANT e tags soltas', () => {
+    expect(shape('1. a\n    1. b\n        1. c')).toEqual([
+      { type: 'numbered', text: 'a', indent: 0 },
+      { type: 'numbered', text: 'b', indent: 1 },
+      { type: 'numbered', text: 'c', indent: 2 },
+    ])
+    expect(shape('> [!IMPORTANT]\n> leia')).toEqual([{ type: 'callout', text: 'leia' }])
+    // a quote that only mentions the syntax in the middle stays a quote
+    expect(shape('> antes\n> [!NOTE]')).toEqual([{ type: 'quote', text: 'antes\n[!NOTE]' }])
+    // tags that are not closed, or that hold a line break, are left alone
+    expect(shape('<u>aberto e <mark>x')).toEqual([{ type: 'paragraph', text: '<u>aberto e <mark>x' }])
+  })
+
+  it('título e blocos têm limite, mesmo com arquivo enorme ou estranho', () => {
+    const r = parseImported('x.md', `# ${'t'.repeat(500)}\n${'a '.repeat(30_000)}`)
     expect(r.title).toHaveLength(120)
-    expect(r.excerpt.length).toBeLessThanOrEqual(240)
+    expect(r.blocks.every((b) => !('text' in b) || b.text.length <= 20_000)).toBe(true)
+    const many = parseImported('x.md', Array.from({ length: 2000 }, (_, i) => `linha ${i}\n`).join('\n'))
+    expect(many.blocks).toHaveLength(500)
+    const tasks = parseImported('x.md', Array.from({ length: 300 }, (_, i) => `- [ ] t${i}`).join('\n'))
+    expect(tasks.blocks.every((b) => b.type === 'checklist' && b.items.length <= 100)).toBe(true)
+    // a fence that never closes takes the rest of the file as code, and lines of only symbols are no trouble
+    expect(shape('```\nsem fim\n# não é título')).toEqual([{ type: 'code', lang: 'texto', text: 'sem fim\n# não é título' }])
+    expect(() => parseImported('x.md', '>\n-\n1.\n***\n# \n[]()\n\u0000')).not.toThrow()
   })
 
   it('só lê .md/.txt pequenos, no máximo 20 arquivos; o resto é contado como ignorado', async () => {
@@ -94,7 +221,7 @@ describe('exportar uma página', () => {
     expect(md).toContain('- [x] Fechar conciliação dos lançamentos de março')
     expect(md).toContain('- [ ] Rodar o export do relatório do conselho')
     expect(md).toContain('```python\n# rotina noturna')
-    expect(md).toContain('<details><summary>spoiler</summary>')
+    expect(md).toContain('<details class="spoiler"><summary>spoiler</summary>')
     expect(md).toContain('| Frente | Responsável | Prazo |\n| --- | --- | --- |\n| Conciliação | Marina | 24 mar |')
   })
 

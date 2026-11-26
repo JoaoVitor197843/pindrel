@@ -84,6 +84,11 @@ describe('anúncios', () => {
     expect(toOption({ name: 'X', host: 'pi', id: '', addresses: ['127.0.0.1'], port: 80, tlsPort: 0 })?.address).toBe('pi.local:80')
   })
 
+  it('toOption leva a porta HTTPS anunciada; fora de 1024-65535 é como se não houvesse', () => {
+    expect(toOption({ ...found('Casa', '10.0.0.5', 8095), tlsPort: 8443 })?.tlsPort).toBe(8443)
+    for (const tlsPort of [0, 443, 1023, 65536, -1]) expect(toOption({ ...found('Casa', '10.0.0.5', 8095), tlsPort })?.tlsPort, String(tlsPort)).toBeUndefined()
+  })
+
   it.each([
     ['sem nome', { name: '', host: 'h', id: '', addresses: ['10.0.0.1'], port: 80, tlsPort: 0 }],
     ['nome enorme', { name: 'N'.repeat(65), host: 'h', id: '', addresses: ['10.0.0.1'], port: 80, tlsPort: 0 }],

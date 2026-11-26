@@ -17,7 +17,6 @@ export type BlockType = 'paragraph' | 'heading' | 'quote' | 'callout' | 'toggle'
 
 /** Section titles come in three sizes; an old heading without a level is the middle one. */
 export type HeadingLevel = 1 | 2 | 3
-export const HEADING_LEVELS: readonly HeadingLevel[] = [1, 2, 3]
 export const levelOf = (b: { level?: HeadingLevel }): HeadingLevel => b.level ?? 2
 
 /** How a callout looks and what it says: a note, good news, a warning, a danger. */
@@ -200,7 +199,6 @@ export function moveItem<T>(list: T[], from: number, at: number): boolean {
   return true
 }
 
-/** Blocks that are just a piece of text, and so can be turned into one another without losing anything. */
 /** Blocks that hold an address and a title: a link card, and the three kinds of media that stay on their own server. */
 export type UrlBlockType = 'bookmark' | 'video' | 'audio' | 'pdf'
 export const URL_TYPES: readonly UrlBlockType[] = ['bookmark', 'video', 'audio', 'pdf']
@@ -237,6 +235,7 @@ export function fileIdsOf(blocks: readonly Block[]): string[] {
   return [...out]
 }
 
+/** Blocks that are just a piece of text, and so can be turned into one another without losing anything. */
 export const TEXT_TYPES = ['paragraph', 'heading', 'quote', 'callout', 'bullet', 'numbered'] as const
 export type TextType = (typeof TEXT_TYPES)[number]
 export const isTextType = (t: string): t is TextType => (TEXT_TYPES as readonly string[]).includes(t)

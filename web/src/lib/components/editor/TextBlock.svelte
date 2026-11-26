@@ -27,10 +27,10 @@
 
   let { ed, block, variant = 'paragraph', format = true, onenter, label, onsplit, onremove, onslash }: Props = $props()
 
-  // A block whose text has marks (**bold**, *italic*, __underline__, ~~strike~~, ==highlight==, `code`, [link](url)) is drawn formatted while nobody edits it and
-  // becomes the plain field on focus, where the marks show. Blocks without marks (nearly all) are fields all the time.
+  // A text block is drawn text (its marks, **bold**, `code`, [link](url)..., formatted) until it is focused; then the
+  // rich-text editor takes its place, or a plain field where the marks show when the editor could not load. Secrets are
+  // always plain fields: nothing of theirs goes through the editor or the formatting bar.
   let editing = $state(false)
-  // A text block is text until focused, and then the rich-text editor takes its place (no field at rest). Secrets stay plain fields.
   let caret = $state<'start' | 'end'>('end')
   let field: HTMLTextAreaElement | undefined = $state()
   // Far from the screen a block is drawn as text too: a field costs about ten times the memory of a <div>. Secrets stay fields.

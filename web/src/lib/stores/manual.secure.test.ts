@@ -56,6 +56,18 @@ describe('adicionar um servidor que tem lado seguro', () => {
     const r = await m.add('casa.lan:8080', '')
     expect(r).toMatchObject({ ok: true, server: { url: 'http://casa.lan:8080', connectUrl: 'http://casa.lan:8080/server/connect/' } })
     expect(new ManualServers().list[0].connectUrl).toBe('http://casa.lan:8080/server/connect/') // survives a reload
+    // and the port of the secure side, so the list can notice when this browser starts trusting it
+    expect(new ManualServers().list[0].tlsPort).toBe(8443)
+  })
+
+  it('uma porta segura salva estragada (editada à mão no navegador) descarta a entrada inteira', () => {
+    for (const tlsPort of [0, 70000, 1.5, '8443', null]) {
+      localStorage.setItem(
+        'pindrel:manual-servers',
+        JSON.stringify([{ id: 'http://casa.lan:8080', name: 'Casa', trustName: 'Casa', serverId: 'a', url: 'http://casa.lan:8080', address: 'casa.lan:8080', tlsPort }]),
+      )
+      expect(new ManualServers().list, String(tlsPort)).toEqual([])
+    }
   })
 
   it('se o lado seguro responde como OUTRO servidor, não é trocado', async () => {

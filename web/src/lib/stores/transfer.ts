@@ -1,10 +1,9 @@
-import { TONES, blockText, levelOf, numbering, outline, toneOf, type Block } from './blocks'
-import { escapeHtml, inlineHtml, markdownMarks } from './inline'
+import { LANGUAGES, MAX_BLOCKS, MAX_INDENT, MAX_ITEMS, MAX_TEXT, TONES, blockText, levelOf, newId, numbering, outline, toneOf, type Block, type CalloutTone, type HeadingLevel } from './blocks'
+import { escapeHtml, inlineHtml, markdownMarks, readMarkdownMarks } from './inline'
 import type { NotePage, Tag } from './workspace.svelte'
 
 const MAX_IMPORT_FILES = 20
 const MAX_IMPORT_BYTES = 1_000_000
-const EXCERPT = 240
 
 export interface ExportOptions {
   /** Secure blocks are left out unless the person asked for them (and may see them). */
@@ -84,7 +83,8 @@ function mdBlock(b: Block, opt: ExportOptions, ctx: Ctx): string {
       return `${f}${b.lang === 'texto' ? '' : b.lang}\n${b.text}\n${f}`
     }
     case 'spoiler':
-      return `<details><summary>spoiler</summary>\n\n${b.text}\n\n</details>`
+      // the class tells it from a toggle titled "spoiler" when the file is imported again
+      return `<details class="spoiler"><summary>spoiler</summary>\n\n${b.text}\n\n</details>`
     case 'secure':
       return opt.includeSecure ? b.text : '> [bloco seguro omitido]'
     case 'table': {
@@ -305,21 +305,178 @@ export function toMarkdown(pages: NotePage[], tags: Tag[]): string {
 
 export interface Imported {
   title: string
-  excerpt: string
+  blocks: Block[]
 }
 
-/** A text/markdown file becomes a page: the first heading (or the file name) is the title, the text the excerpt. */
+const FENCE = /^(`{3,}|~{3,})\s*([\w+-]*)/
+const DETAILS = /^\s*<details(\s[^>]*)?>\s*(.*)$/i
+const SUMMARY = /^\s*<summary>(.*?)<\/summary>\s*(.*)$/i
+const DETAILS_END = /^(.*?)<\/details>\s*$/i
+
+const unescapeHtml = (s: string) =>
+  s.replace(/&(amp|lt|gt|quot|#39);/g, (_, e: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" })[e]!)
+
+/** Drops the blank lines the export puts around a `<details>` body, keeping the ones inside it. */
+const trimBlankLines = (lines: string[]) => {
+  let from = 0
+  let to = lines.length
+  while (from < to && !lines[from].trim()) from++
+  while (to > from && !lines[to - 1].trim()) to--
+  return lines.slice(from, to)
+}
+
+/**
+ * A `<details>` block that starts at `lines[at]`: the export's toggle, toggle heading (`<summary><hN>`) and spoiler (`class="spoiler"`), or one
+ * written by hand (summary on the next line, or none). The body runs to `</details>`, or to the end when it never closes.
+ */
+function readDetails(lines: string[], at: number, attrs: string, first: string): { block: Block; next: number } {
+  const spoiler = /\bclass\s*=\s*["'][^"']*\bspoiler\b/i.test(attrs)
+  let i = at
+  let rest = first
+  if (!rest && SUMMARY.test(lines[i + 1] ?? '')) rest = lines[++i]
+  const summary = SUMMARY.exec(rest)
+  // tags are read before unescaping, so a title that only shows `<h1>` as text stays a toggle
+  const raw = summary ? summary[1].trim() : ''
+  const heading = /^<h([1-6])>(.*)<\/h\1>$/i.exec(raw)
+  const title = unescapeHtml(heading ? heading[2] : raw).trim()
+  const body: string[] = []
+  const start = summary ? summary[2] : rest
+  let end = DETAILS_END.exec(start)
+  if (end) body.push(end[1])
+  else {
+    if (start) body.push(start)
+    for (i++; i < lines.length; i++) {
+      end = DETAILS_END.exec(lines[i])
+      if (end) {
+        body.push(end[1])
+        break
+      }
+      body.push(lines[i])
+    }
+  }
+  const text = trimBlankLines(body).join('\n').slice(0, MAX_TEXT)
+  const block: Block = spoiler
+    ? { id: newId(), type: 'spoiler', text }
+    : heading
+      ? { id: newId(), type: 'heading', text: title.slice(0, MAX_TEXT), toggle: true, body: readMarkdownMarks(text), ...(Number(heading[1]) === 2 ? {} : { level: Math.min(Number(heading[1]), 3) as HeadingLevel }) }
+      : { id: newId(), type: 'toggle', text: title.slice(0, MAX_TEXT), body: readMarkdownMarks(text) }
+  return { block, next: i }
+}
+
+/** GitHub's alert types back to a tone; IMPORTANT has no tone of its own here. */
+const ALERT_TONE: Record<string, CalloutTone | undefined> = { NOTE: 'info', IMPORTANT: 'info', TIP: 'success', WARNING: 'warning', CAUTION: 'danger' }
+
+/**
+ * Spaces per level of a list, as the export writes them: a numbered item's children start under its text, three columns
+ * in, so markdown renderers nest them; a bullet's start two in. A tab counts as one level.
+ */
+const listDepth = (lead: string, numbered: boolean) => {
+  const tabs = lead.split('\t').length - 1
+  const spaces = lead.length - tabs
+  return Math.min(tabs + Math.floor(spaces / (numbered ? 3 : 2)), MAX_INDENT)
+}
+
+/**
+ * The blocks of an imported text: the Markdown the export writes (its `<u>`/`<mark>` and `> [!NOTE]` alerts included), and
+ * the same shortcuts the editor knows (`#` titles, `-`/`*`/`1.` lists, `- [ ]` checklists, `>` quotes, `---`, code fences).
+ * Other inline marks are kept as they are, since the page stores them with the same symbols. Everything else is
+ * paragraphs, one per run of lines.
+ */
+function readBlocks(lines: string[]): Block[] {
+  const out: Block[] = []
+  const clip = (t: string) => t.slice(0, MAX_TEXT)
+  const marks = (t: string) => clip(readMarkdownMarks(t))
+  let para: string[] = []
+  let quote: string[] = []
+  const flush = () => {
+    if (para.length) out.push({ id: newId(), type: 'paragraph', text: marks(para.join(' ')) })
+    if (quote.length) {
+      const alert = /^\[!(\w+)\]\s*$/.exec(quote[0])
+      const tone = alert && ALERT_TONE[alert[1].toUpperCase()]
+      if (tone) {
+        const text = marks(quote.slice(1).join('\n'))
+        out.push({ id: newId(), type: 'callout', text, ...(tone === 'info' ? {} : { tone }) })
+      } else out.push({ id: newId(), type: 'quote', text: marks(quote.join('\n')) })
+    }
+    para = []
+    quote = []
+  }
+  for (let i = 0; i < lines.length && out.length < MAX_BLOCKS; i++) {
+    const line = lines[i]
+    const fence = FENCE.exec(line)
+    if (fence) {
+      flush()
+      const code: string[] = []
+      for (i++; i < lines.length && !lines[i].startsWith(fence[1]); i++) code.push(lines[i])
+      const lang = (LANGUAGES as readonly string[]).includes(fence[2].toLowerCase()) ? fence[2].toLowerCase() : 'texto'
+      out.push({ id: newId(), type: 'code', lang, text: clip(code.join('\n')) })
+      continue
+    }
+    const details = DETAILS.exec(line)
+    if (details) {
+      flush()
+      const read = readDetails(lines, i, details[1] ?? '', details[2])
+      out.push(read.block)
+      i = read.next
+      continue
+    }
+    if (!line.trim()) {
+      flush()
+      continue
+    }
+    const q = /^\s*>\s?(.*)$/.exec(line)
+    if (q) {
+      if (para.length) flush()
+      quote.push(q[1])
+      continue
+    }
+    if (quote.length) flush()
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line)
+    const task = /^\s*[-*+]\s+\[([ xX])\]\s?(.*)$/.exec(line)
+    const item = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/.exec(line)
+    if (heading) {
+      flush()
+      const level = Math.min(heading[1].length, 3) as HeadingLevel
+      out.push({ id: newId(), type: 'heading', text: marks(heading[2].trim()), ...(level === 2 ? {} : { level }) })
+    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flush()
+      out.push({ id: newId(), type: 'divider' })
+    } else if (task) {
+      flush()
+      const last = out.at(-1)
+      const entry = { id: newId('i'), text: clip(task[2]), done: task[1] !== ' ' }
+      if (last?.type === 'checklist' && last.items.length < MAX_ITEMS) last.items.push(entry)
+      else out.push({ id: newId(), type: 'checklist', items: [entry] })
+    } else if (item) {
+      flush()
+      const numbered = /\d/.test(item[2])
+      out.push({ id: newId(), type: numbered ? 'numbered' : 'bullet', text: marks(item[3]), indent: listDepth(item[1], numbered) })
+    } else para.push(line.trim())
+  }
+  flush()
+  return out.slice(0, MAX_BLOCKS)
+}
+
+/** A text/markdown file becomes a page: the first heading (or the file name) is the title, the rest its blocks. */
 export function parseImported(fileName: string, text: string): Imported {
   const lines = text.replace(/\r\n?/g, '\n').split('\n')
-  const heading = lines.find((l) => /^#{1,6}\s+\S/.test(l))
+  // the first heading that is not inside a code fence or the body of a <details>
+  let at = -1
+  let fence = ''
+  let details = false
+  for (let i = 0; i < lines.length && at < 0; i++) {
+    const f = FENCE.exec(lines[i])
+    const d = DETAILS.exec(lines[i])
+    if (fence) fence = lines[i].startsWith(fence) ? '' : fence
+    else if (details) details = !DETAILS_END.test(lines[i])
+    else if (f) fence = f[1]
+    else if (d) details = !DETAILS_END.test(d[2])
+    else if (/^#{1,6}\s+\S/.test(lines[i])) at = i
+  }
   const fallback = fileName.replace(/\.[^.]+$/, '').trim() || 'Sem título'
-  const title = (heading ? heading.replace(/^#{1,6}\s+/, '').trim() : fallback).slice(0, 120)
-  const body = lines
-    .filter((l) => l !== heading)
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return { title, excerpt: body.slice(0, EXCERPT) }
+  const title = (at >= 0 ? lines[at].replace(/^#{1,6}\s+/, '').trim() : fallback).slice(0, 120)
+  if (at >= 0) lines.splice(at, 1)
+  return { title, blocks: readBlocks(lines) }
 }
 
 export interface ImportResult {

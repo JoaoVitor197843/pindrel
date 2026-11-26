@@ -71,6 +71,14 @@
     input.value = ''
   }
 
+  // the box says "drag files here": without these the browser would open a dropped file in place of the app
+  let over = $state(false)
+  function dropped(e: DragEvent) {
+    e.preventDefault()
+    over = false
+    onimport([...(e.dataTransfer?.files ?? [])])
+  }
+
   const field = 'h-11 w-full rounded-field border border-field-line bg-bg px-3 text-sm'
 </script>
 
@@ -176,10 +184,7 @@
               <label class="flex flex-col gap-2 text-sm">Username<input class={field} value={userName.split(' ')[0].toLowerCase()} onchange={() => (dirty = true)} /></label>
               <label class="flex flex-col gap-2 text-sm">E-mail<input class={field} type="email" value={email} onchange={() => (dirty = true)} /></label>
               <div class="flex items-center justify-between gap-4">
-                <div>
-                  <p class="text-sm">Senha</p>
-                  <p class="text-xs text-muted">alterada há 4 meses</p>
-                </div>
+                <p class="text-sm">Senha</p>
                 <button type="button" class="h-10 rounded-field border border-field-line px-3 text-sm hover:bg-line/40">Trocar senha</button>
               </div>
             </div>
@@ -208,7 +213,15 @@
               </div>
               <div>
                 <p class="mb-2 text-sm">Importar</p>
-                <label class="flex cursor-pointer flex-col items-center gap-2 rounded-field border border-dashed border-field-line p-6 text-center hover:bg-line/30 focus-within:outline-2">
+                <label
+                  class="flex cursor-pointer flex-col items-center gap-2 rounded-field border border-dashed p-6 text-center hover:bg-line/30 focus-within:outline-2 {over ? 'border-accent-line bg-line/30' : 'border-field-line'}"
+                  ondragover={(e) => {
+                    e.preventDefault()
+                    over = true
+                  }}
+                  ondragleave={() => (over = false)}
+                  ondrop={dropped}
+                >
                   <Icon name="upload" size={22} />
                   <span class="text-sm">Arraste arquivos aqui ou clique para escolher</span>
                   <span class="font-mono text-xs text-muted">.md · .txt</span>

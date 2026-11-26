@@ -366,25 +366,25 @@ describe('Workspace — arquivos de páginas apagadas de vez', () => {
     return { w, gone }
   }
 
-  it('apagar a página de vez solta os arquivos que só ela usava', () => {
+  it('apagar a página de vez solta os arquivos que só ela usava', async () => {
     const { w, gone } = setup()
     w.contentOf('p5')
     w.page('p5')!.content = [file('a'), file('b'), { id: 'img', type: 'image', name: 'x', src: null, fileId: 'c' }]
-    w.deleteForever('p5')
+    await w.deleteForever('p5')
     expect(gone).toEqual([['a', 'b', 'c']])
   })
 
-  it('um arquivo que outra página ainda usa fica', () => {
+  it('um arquivo que outra página ainda usa fica', async () => {
     const { w, gone } = setup()
     w.contentOf('p5')
     w.contentOf('p0')
     w.page('p5')!.content = [file('a'), file('b')]
     w.page('p0')!.content!.push(file('b', 'outro'))
-    w.deleteForever('p5')
+    await w.deleteForever('p5')
     expect(gone).toEqual([['a']])
   })
 
-  it('esvaziar a lixeira solta os arquivos de todas as páginas que saem', () => {
+  it('esvaziar a lixeira solta os arquivos de todas as páginas que saem', async () => {
     const { w, gone } = setup()
     w.contentOf('p5')
     w.contentOf('p0')
@@ -392,31 +392,41 @@ describe('Workspace — arquivos de páginas apagadas de vez', () => {
     w.page('p0')!.content!.push(file('b'))
     w.trash('p5')
     w.trash('p0')
-    w.emptyTrash()
+    await w.emptyTrash()
     expect(gone).toHaveLength(1)
     expect(gone[0].sort()).toEqual(['a', 'b'])
   })
 
-  it('páginas sem arquivos, ou ainda nunca abertas, não chamam ninguém', () => {
+  it('páginas sem arquivos, ou ainda nunca abertas, não chamam ninguém', async () => {
     const { w, gone } = setup()
-    w.deleteForever('p5')
+    await w.deleteForever('p5')
     w.trash('p0')
-    w.emptyTrash()
+    await w.emptyTrash()
     expect(gone).toEqual([])
   })
 
-  it('a página que outra pessoa compartilhou comigo não leva os arquivos dela embora', () => {
+  it('a página que outra pessoa compartilhou comigo não leva os arquivos dela embora', async () => {
     const { w, gone } = setup()
     const shared = w.pages.find((p) => p.sharedBy)!
     w.contentOf(shared.id)
     shared.content = [file('alheio')]
-    w.deleteForever(shared.id)
+    await w.deleteForever(shared.id)
     expect(gone).toEqual([])
   })
 
-  it('apagar uma página que não existe não faz nada', () => {
+  it('com a lixeira desligada, excluir também solta os arquivos (antes ficavam para sempre no servidor)', async () => {
     const { w, gone } = setup()
-    w.deleteForever('nada')
+    w.saveSettings({ useTrash: false, retention: 30 })
+    w.contentOf('p5')
+    w.page('p5')!.content = [file('a')]
+    await w.trash('p5')
+    expect(w.page('p5')).toBeUndefined()
+    expect(gone).toEqual([['a']])
+  })
+
+  it('apagar uma página que não existe não faz nada', async () => {
+    const { w, gone } = setup()
+    await w.deleteForever('nada')
     expect(gone).toEqual([])
     expect(w.pages.length).toBeGreaterThan(0)
   })

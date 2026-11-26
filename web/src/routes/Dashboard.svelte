@@ -129,7 +129,7 @@
   async function importFiles(files: File[]) {
     if (!files.length) return
     const { pages, skipped } = await readImports(files)
-    for (const p of pages) ws.newPage(p.title).excerpt = p.excerpt
+    for (const p of pages) ws.importPage(p.title, p.blocks)
     toast.show(
       pages.length
         ? `${pages.length} ${pages.length === 1 ? 'página importada' : 'páginas importadas'}${skipped ? `, ${skipped} ignorada${skipped === 1 ? '' : 's'}` : ''}`
@@ -159,7 +159,8 @@
     tags: ws.tags,
     tagCounts: ws.tagCounts,
     tagFilter: ws.tagFilter,
-    syncLabel: 'sync · há 2 min',
+    // nothing syncs yet: the notes of both modes live in this browser's own database
+    syncLabel: 'salvo neste navegador',
     local: ws.local,
     onview: view,
     onnew: create,

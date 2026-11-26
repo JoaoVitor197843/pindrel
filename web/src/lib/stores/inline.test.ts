@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inlineHtml, makeLink, markdownMarks, renderMarks, safeUrl, toggleMark } from './inline'
+import { inlineHtml, makeLink, markdownMarks, readMarkdownMarks, renderMarks, safeUrl, toggleMark } from './inline'
 import { escapeHtml } from './transfer'
 
 describe('toggleMark', () => {
@@ -248,5 +248,13 @@ describe('marca-texto ==x==', () => {
 
   it('o markdown exportado usa <mark>, menos no código', () => {
     expect(markdownMarks('a ==b== e `==c==`')).toBe('a <mark>b</mark> e `==c==`')
+  })
+})
+
+describe('readMarkdownMarks', () => {
+  it('desfaz o que markdownMarks escreve, sem tocar no código nem em tags soltas', () => {
+    for (const t of ['a __b__ e ==c== e `__d__` e `<u>e</u>`', '**__x__**', '==um== ==dois==', 'nada', '<u>sem fim', '<mark>a\nb</mark>', '<u></u>'])
+      expect(readMarkdownMarks(markdownMarks(t)), t).toBe(t)
+    expect(readMarkdownMarks('`<u>a</u>` <u>b</u>')).toBe('`<u>a</u>` __b__')
   })
 })
